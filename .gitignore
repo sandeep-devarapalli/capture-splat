@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+*.egg-info/
+build/
+dist/
+
+# Capture and generated 3D outputs
+captures/
+runs/
+outputs/
+external/
+*.ply
+*.las
+*.laz
+*.npy
+*.npz
+*.bin
+*.pt
+*.ckpt
+*.zip
+
+# Xcode
+DerivedData/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcarchive
+*.ipa
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

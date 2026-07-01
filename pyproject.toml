@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "capture-splat"
+version = "0.1.0"
+description = "iPhone capture to 3D Gaussian Splatting with COLMAP and Vulkan/VkSplat"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Sandeep Devarapalli" }]
+keywords = ["iphone", "3dgs", "gaussian-splatting", "vulkan", "vksplat", "colmap"]
+dependencies = [
+  "numpy>=1.24",
+  "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+vision = ["opencv-python>=4.8"]
+
+[project.scripts]
+capture-splat = "capture_splat.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["python"]

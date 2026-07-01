@@ -1,0 +1,4 @@
+Capture Splat
+Copyright 2026 Sandeep Devarapalli
+
+Capture Splat provides an iPhone capture app and host-side tooling for generating 3D Gaussian Splatting packages with external tools such as COLMAP and VkSplat.

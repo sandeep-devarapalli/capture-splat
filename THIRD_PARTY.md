@@ -1,0 +1,13 @@
+# Third-Party Notices
+
+Capture Splat does not vendor training backends in this repository. Setup scripts download or use external tools in the user's environment.
+
+| Component | Role | License | Source |
+| --- | --- | --- | --- |
+| VkSplat | Vulkan 3DGS training backend | Apache-2.0 | https://github.com/harry7557558/vksplat |
+| COLMAP | SfM and camera-pose refinement | BSD | https://github.com/colmap/colmap |
+| Nerfstudio | Optional dataset/tooling compatibility reference | Apache-2.0 | https://github.com/nerfstudio-project/nerfstudio |
+| NumPy | Numeric processing | BSD-style | https://numpy.org |
+| Pillow | Image metadata and fixture support | HPND | https://python-pillow.org |
+
+Generated captures, datasets, trained PLY files, and third-party clones should stay outside git unless a future release explicitly adds small fixtures with clear licenses.
