@@ -41,10 +41,23 @@ CAPTURE=/path/to/exported/capture_splat_session
 capture-splat doctor --vksplat-root external/vksplat
 capture-splat ingest --capture "$CAPTURE" --out runs/my_scan
 capture-splat colmap-export --capture "$CAPTURE" --out runs/my_scan/colmap_package
-capture-splat train-vksplat   --package runs/my_scan/colmap_package   --out runs/my_scan/vksplat   --vksplat-root external/vksplat   --steps 30000
+capture-splat train-vksplat-ladder   --package runs/my_scan/colmap_package   --out runs/my_scan/vksplat_ladder   --vksplat-root external/vksplat
 ```
 
-The trainer writes a `splat.ply` under `runs/my_scan/vksplat/*/splat.ply`.
+The ladder runs controlled `3000 -> 7000 -> 15000 -> 30000` rungs and writes
+`capture_splat_vksplat_ladder_summary.json`. Single-step training is still
+available with `capture-splat train-vksplat --steps 30000`, but a finite `.ply`
+is only validated finite output, not a visual-quality claim.
+
+If you have raw rendered canvases from a viewer or app, compare them against the
+source images instead of full UI screenshots:
+
+```bash
+capture-splat qa-render-source \
+  --source-dir runs/my_scan/colmap_package/images \
+  --render-dir runs/my_scan/render_canvases/step_0030000 \
+  --out runs/my_scan/render_qa/step_0030000
+```
 
 ## Linux, Windows, And Cloud GPUs
 

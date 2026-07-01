@@ -32,3 +32,33 @@ Short runs are smoke tests. Quality should be judged with controlled ladders,
 for example `3000 -> 7000 -> 15000 -> 30000`, using the same package and the
 same selected proof frames. If a package regresses at a shorter rung, do not
 spend a longer run on it without changing the input package or capture quality.
+
+Run the reusable ladder command after COLMAP package creation:
+
+```bash
+capture-splat train-vksplat-ladder \
+  --package runs/scan/colmap_package \
+  --out runs/scan/vksplat_ladder \
+  --vksplat-root external/vksplat
+```
+
+Each rung records the trainer command, step count, output `.ply`, finite PLY
+status, splat count, radius/scale summary when present, attached render/source
+QA if supplied, and a `promote`, `hold`, or `reject` decision. A rung with only
+finite output is held until render/source QA or other quality evidence supports
+promotion.
+
+## Raw-Canvas Render QA
+
+Use raw render canvases for image metrics. Do not compare full app or viewer
+screenshots because source panes, labels, and UI chrome can dominate the score.
+
+```bash
+capture-splat qa-render-source \
+  --source-dir runs/scan/colmap_package/images \
+  --render-dir runs/scan/render_canvases/step_0030000 \
+  --out runs/scan/render_qa/step_0030000
+```
+
+The report includes per-frame PSNR, SSIM, MAE, normalized correlation,
+edge-density, and sharpness proxies, plus weak-frame and tail-frame lists.

@@ -12,3 +12,15 @@ The host tools should report these as quality blockers rather than hiding them b
 - Raw render canvases should be used for source/render metrics; full UI screenshots are useful evidence, but they are not clean metric inputs.
 - Radius clamps are safety guardrails for viewer stability, not proof of better reconstruction.
 - Frame-level tails matter. A good mean PSNR can still hide failed frames that make the splat feel soft or smeared.
+
+## Command Decisions
+
+`capture-splat train-vksplat-ladder` reports `promote`, `hold`, or `reject` per
+rung. Treat `hold` as useful evidence that is not sufficient for a quality
+claim. `promote` means the configured proxies improved or stayed within
+thresholds for the supplied evidence; it still does not prove metric geometry,
+collision geometry, or general scene correctness.
+
+`capture-splat qa-render-source` should be run on raw render canvases matched to
+source frames. Full screenshots remain useful visual records, but they are not
+clean metric inputs.
