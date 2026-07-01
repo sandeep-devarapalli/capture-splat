@@ -1,5 +1,12 @@
 # Roadmap
 
+## Current Carry-Forward Focus
+
+- Preserve VkSplat/Vulkan as the default baseline while keeping OpenSplat/MPS as a comparison backend.
+- Turn field validation learnings into reproducible CLI reports: finite PLY, radius/outlier checks, raw-canvas source matching, and per-frame quality summaries.
+- Do not promote longer training runs unless the same input package passes alignment and per-frame quality gates.
+- Improve iPhone capture guidance so accepted frames are driven by overlap, parallax, blur, exposure, tracking, and coverage contribution.
+
 ## Capture Splat App
 
 - v0.1: Video 3DGS capture, export folder, basic blur/exposure/motion feedback.

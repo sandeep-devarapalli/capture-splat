@@ -20,6 +20,8 @@ iPhone capture folder -> COLMAP/VkSplat package -> trained splat.ply
 
 It is not a guarantee that every scan becomes high quality. Good splats still depend on sharp frames, strong overlap, enough parallax, stable exposure, COLMAP registration, and finite trainer output.
 
+For the current carry-forward lessons from the iPhone-to-VkSplat validation ladder, see `docs/field_validation_learnings.md`.
+
 ## Quickstart: Mac + iPhone
 
 ```bash
