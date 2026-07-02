@@ -70,6 +70,8 @@ def run_capture_quality_report(
         "clipped_shadow_fraction",
         "feature_grid_coverage",
         "parallax_meters",
+        "angular_velocity_deg_s",
+        "translation_speed_m_s",
         "colmap_overlap_score",
         "valid_depth_ratio",
         "feature_point_count",

@@ -29,6 +29,8 @@ struct CaptureFrameQuality: Encodable {
     let clippedShadowFraction: Double
     let featureGridCoverage: Double
     let parallaxMeters: Double
+    let angularVelocityDegPerSec: Double
+    let translationSpeedMetersPerSec: Double
     let colmapOverlapScore: Double
     let validDepthRatio: Double
     let featurePointCount: Int
@@ -42,6 +44,8 @@ struct CaptureFrameQuality: Encodable {
         case clippedShadowFraction = "clipped_shadow_fraction"
         case featureGridCoverage = "feature_grid_coverage"
         case parallaxMeters = "parallax_meters"
+        case angularVelocityDegPerSec = "angular_velocity_deg_s"
+        case translationSpeedMetersPerSec = "translation_speed_m_s"
         case colmapOverlapScore = "colmap_overlap_score"
         case validDepthRatio = "valid_depth_ratio"
         case featurePointCount = "feature_point_count"
