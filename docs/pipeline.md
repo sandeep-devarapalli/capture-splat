@@ -52,6 +52,8 @@ promotion.
 
 Use raw render canvases for image metrics. Do not compare full app or viewer
 screenshots because source panes, labels, and UI chrome can dominate the score.
+See `docs/viewer_compatibility.md` for the raw-canvas export contract and
+explicit pairs JSON format.
 
 ```bash
 capture-splat qa-render-source \
