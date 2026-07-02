@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .app_output_compare import compare_app_outputs
 from .capture_quality_report import run_capture_quality_report
 from .colmap_export import export_colmap_text
 from .ingest import ingest_capture
@@ -29,6 +30,11 @@ def main() -> None:
     p_capture_quality.add_argument("--min-mean-parallax-meters", type=float, default=0.05)
     p_capture_quality.add_argument("--min-mean-overlap-score", type=float, default=0.45)
     p_capture_quality.add_argument("--min-mean-depth-ratio", type=float, default=0.35)
+    p_compare = sub.add_parser("compare-app-output", help="Compare observable outputs from iPhone 3DGS apps")
+    p_compare.add_argument("--capture-splat", type=Path)
+    p_compare.add_argument("--splatking", type=Path)
+    p_compare.add_argument("--kiri", type=Path)
+    p_compare.add_argument("--out", type=Path, required=True)
     p_train = sub.add_parser("train-vksplat", help="Run VkSplat on a COLMAP package")
     p_train.add_argument("--package", type=Path, required=True)
     p_train.add_argument("--out", type=Path, required=True)
@@ -75,6 +81,13 @@ def main() -> None:
             min_mean_parallax_meters=args.min_mean_parallax_meters,
             min_mean_overlap_score=args.min_mean_overlap_score,
             min_mean_depth_ratio=args.min_mean_depth_ratio,
+        )
+    elif args.command == "compare-app-output":
+        payload = compare_app_outputs(
+            args.out,
+            capture_splat=args.capture_splat,
+            splatking=args.splatking,
+            kiri=args.kiri,
         )
     elif args.command == "train-vksplat":
         payload = run_vksplat(args.package, args.out, args.vksplat_root, steps=args.steps, dry_run=args.dry_run)

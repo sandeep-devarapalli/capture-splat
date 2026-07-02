@@ -66,6 +66,7 @@ The iPhone app must be built with Apple tooling, but once you have an exported c
 - Linux: see `docs/linux_setup.md`.
 - Windows: see `docs/windows_setup.md`.
 - Cloud NVIDIA: see `docs/cloud_gpu_setup.md` and `docker/Dockerfile.linux-nvidia`.
+- App comparisons: see `docs/app_comparison.md`.
 
 ## Capture Tips
 
