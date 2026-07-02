@@ -68,6 +68,7 @@ def run_capture_quality_report(
         "exposure_delta",
         "clipped_highlight_fraction",
         "clipped_shadow_fraction",
+        "feature_grid_coverage",
         "parallax_meters",
         "colmap_overlap_score",
         "valid_depth_ratio",

@@ -14,6 +14,7 @@ def make_quality_capture(
     blur: float = 0.02,
     parallax: float = 0.12,
     include_clipped_exposure: bool = True,
+    include_feature_grid_coverage: bool = True,
 ) -> Path:
     image_dir = root / "rgb"
     metadata_dir = root / "metadata"
@@ -39,6 +40,8 @@ def make_quality_capture(
         if include_clipped_exposure:
             capture_quality["clipped_highlight_fraction"] = 0.03
             capture_quality["clipped_shadow_fraction"] = 0.01
+        if include_feature_grid_coverage:
+            capture_quality["feature_grid_coverage"] = 0.5
         frames.append({
             "rgb": f"rgb/{name}",
             "timestamp": float(index),
@@ -73,6 +76,7 @@ def test_capture_quality_report_promotes_usable_capture(tmp_path: Path) -> None:
     assert summary["frame_selection"]["selected_frames"] == 24
     assert summary["metrics"]["clipped_highlight_fraction"]["mean"] == pytest.approx(0.03)
     assert summary["metrics"]["clipped_shadow_fraction"]["mean"] == pytest.approx(0.01)
+    assert summary["metrics"]["feature_grid_coverage"]["mean"] == pytest.approx(0.5)
     assert loaded["metadata"]["haptic_accepted_count"] == 24
 
 
@@ -103,3 +107,12 @@ def test_capture_quality_report_tolerates_missing_clipped_exposure_metrics(tmp_p
     assert summary["decision"] == "promote"
     assert summary["metrics"]["clipped_highlight_fraction"]["mean"] is None
     assert summary["metrics"]["clipped_shadow_fraction"]["mean"] is None
+
+
+def test_capture_quality_report_tolerates_missing_feature_grid_coverage(tmp_path: Path) -> None:
+    capture = make_quality_capture(tmp_path / "capture", accepted=24, rejected=0, include_feature_grid_coverage=False)
+
+    summary = run_capture_quality_report(capture, tmp_path / "out")
+
+    assert summary["decision"] == "promote"
+    assert summary["metrics"]["feature_grid_coverage"]["mean"] is None

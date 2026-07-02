@@ -29,6 +29,7 @@ private struct KeyframeDecision {
     let exposureDelta: Double
     let clippedHighlightFraction: Double
     let clippedShadowFraction: Double
+    let featureGridCoverage: Double
     let parallaxMeters: Double
     let pathLengthMeters: Double
     let distanceFromStartMeters: Double?
@@ -56,6 +57,7 @@ private struct KeyframeDecision {
         self.exposureDelta = frameQuality?.exposureDelta ?? 0
         self.clippedHighlightFraction = frameQuality?.clippedHighlightFraction ?? 0
         self.clippedShadowFraction = frameQuality?.clippedShadowFraction ?? 0
+        self.featureGridCoverage = frameQuality?.featureGridCoverage ?? 0
         self.parallaxMeters = frameQuality?.parallaxMeters ?? 0
         self.pathLengthMeters = frameQuality?.pathLengthMeters ?? 0
         self.distanceFromStartMeters = frameQuality?.distanceFromStartMeters
@@ -72,6 +74,7 @@ private struct FrameQualityEstimate {
     let exposureDelta: Double
     let clippedHighlightFraction: Double
     let clippedShadowFraction: Double
+    let featureGridCoverage: Double
     let parallaxMeters: Double
     let pathLengthMeters: Double
     let distanceFromStartMeters: Double?
@@ -203,6 +206,7 @@ final class CaptureController: NSObject, ObservableObject {
     private let maxExposureJump = 0.28
     private let maxClippedHighlightFraction = 0.25
     private let maxClippedShadowFraction = 0.30
+    private let minFeatureGridCoverage = 0.25
     private let minObjectParallaxMeters = 0.08
     private let minRoomParallaxMeters = 0.12
     private let minVideoParallaxMeters = 0.05
@@ -788,6 +792,12 @@ final class CaptureController: NSObject, ObservableObject {
             backgroundWarning = "The last candidate had weak detail or motion blur."
             guidanceArrowSystemImage = "camera.metering.center.weighted"
             guidanceText = "Hold steadier on textured surfaces before moving again."
+        } else if lastKeyframeDecision.contains("weak_feature_distribution") {
+            readinessState = "Hold"
+            nextAction = "Find textured edges"
+            backgroundWarning = "COLMAP needs features spread across the view, not one small patch."
+            guidanceArrowSystemImage = "square.grid.3x3"
+            guidanceText = "Aim at corners, shelves, posters, table edges, or textured objects before moving."
         } else if lastKeyframeDecision.contains("exposure") {
             readinessState = "Hold"
             nextAction = "Stabilize exposure"
@@ -1091,6 +1101,11 @@ final class CaptureController: NSObject, ObservableObject {
             colmapCoachAction = "Hold steady for haptic"
             colmapCoachDetail = "Let one sharp frame land before moving again."
             colmapCoachScore = 0.35
+        } else if lastKeyframeDecision.contains("weak_feature_distribution") {
+            colmapCoachStatus = "Weak feature spread"
+            colmapCoachAction = "Aim at more texture"
+            colmapCoachDetail = "Include corners, shelves, posters, table edges, or textured objects across the frame."
+            colmapCoachScore = 0.35
         } else if lastKeyframeDecision.contains("exposure") {
             colmapCoachStatus = "Exposure jump"
             colmapCoachAction = "Avoid bright/dark swings"
@@ -1135,6 +1150,8 @@ final class CaptureController: NSObject, ObservableObject {
             roomQualityText = "Side-step along the perimeter"
         } else if lastKeyframeDecision.contains("low_blur_score") {
             roomQualityText = "Hold steadier on textured surfaces"
+        } else if lastKeyframeDecision.contains("weak_feature_distribution") {
+            roomQualityText = "Aim at spread-out texture"
         } else if lastKeyframeDecision.contains("exposure") {
             roomQualityText = "Keep brightness stable"
         } else if roomLoopClosed {
@@ -1363,6 +1380,7 @@ final class CaptureController: NSObject, ObservableObject {
                 "max_exposure_jump": maxExposureJump,
                 "max_clipped_highlight_fraction": maxClippedHighlightFraction,
                 "max_clipped_shadow_fraction": maxClippedShadowFraction,
+                "min_feature_grid_coverage": minFeatureGridCoverage,
                 "min_room_parallax_meters": minRoomParallaxMeters,
                 "min_object_parallax_meters": minObjectParallaxMeters,
                 "min_video_parallax_meters": minVideoParallaxMeters,
@@ -1596,6 +1614,15 @@ final class CaptureController: NSObject, ObservableObject {
                 frameQuality: frameQuality
             )
         }
+        guard frameQuality.featureGridCoverage >= minFeatureGridCoverage else {
+            return KeyframeDecision(
+                shouldCapture: false,
+                reason: "weak_feature_distribution",
+                score: frameQuality.featureGridCoverage,
+                sectorIndex: sectorIndex,
+                frameQuality: frameQuality
+            )
+        }
         guard scheduledFrameCount > 0 else {
             return KeyframeDecision(
                 shouldCapture: true,
@@ -1807,6 +1834,7 @@ final class CaptureController: NSObject, ObservableObject {
             "exposure_delta": decision.exposureDelta,
             "clipped_highlight_fraction": decision.clippedHighlightFraction,
             "clipped_shadow_fraction": decision.clippedShadowFraction,
+            "feature_grid_coverage": decision.featureGridCoverage,
             "parallax_meters": decision.parallaxMeters,
             "colmap_overlap_score": decision.colmapOverlapScore,
             "room_fragment_risk": decision.roomFragmentRisk,
@@ -1872,6 +1900,9 @@ final class CaptureController: NSObject, ObservableObject {
         case "low_blur_score":
             captureBlockerStatus = "Motion blur"
             captureBlockerDetail = "Hold steady on textured detail until you feel a haptic."
+        case "weak_feature_distribution":
+            captureBlockerStatus = "Weak feature spread"
+            captureBlockerDetail = "Aim at textured edges, corners, shelves, or objects; blank areas need nearby detail."
         case "clipped_exposure":
             captureBlockerStatus = "Clipped exposure"
             captureBlockerDetail = "Angle away from bright windows or dark corners; clipped areas have no texture."
@@ -1919,6 +1950,7 @@ final class CaptureController: NSObject, ObservableObject {
             "exposure_delta": decision.exposureDelta,
             "clipped_highlight_fraction": decision.clippedHighlightFraction,
             "clipped_shadow_fraction": decision.clippedShadowFraction,
+            "feature_grid_coverage": decision.featureGridCoverage,
             "parallax_meters": decision.parallaxMeters,
             "colmap_overlap_score": decision.colmapOverlapScore,
             "room_fragment_risk": decision.roomFragmentRisk,
@@ -2240,6 +2272,7 @@ final class CaptureController: NSObject, ObservableObject {
             exposureDelta: exposureDelta,
             clippedHighlightFraction: imageQuality.clippedHighlightFraction,
             clippedShadowFraction: imageQuality.clippedShadowFraction,
+            featureGridCoverage: imageQuality.featureGridCoverage,
             parallaxMeters: parallax,
             pathLengthMeters: projectedPath,
             distanceFromStartMeters: distanceFromStart,
@@ -2249,7 +2282,13 @@ final class CaptureController: NSObject, ObservableObject {
 
     private func estimateImageQuality(
         from pixelBuffer: CVPixelBuffer
-    ) -> (blurScore: Double, exposureMean: Double, clippedHighlightFraction: Double, clippedShadowFraction: Double) {
+    ) -> (
+        blurScore: Double,
+        exposureMean: Double,
+        clippedHighlightFraction: Double,
+        clippedShadowFraction: Double,
+        featureGridCoverage: Double
+    ) {
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
 
@@ -2272,17 +2311,20 @@ final class CaptureController: NSObject, ObservableObject {
               height > 2,
               bytesPerRow > 0,
               let baseAddress else {
-            return (0, 0.5, 0, 0)
+            return (0, 0.5, 0, 0, 0)
         }
 
         let base = baseAddress.assumingMemoryBound(to: UInt8.self)
         let stepX = max(width / 32, 8)
         let stepY = max(height / 32, 8)
+        let gridColumns = 4
+        let gridRows = 4
         var sampleCount = 0
         var exposureSum = 0.0
         var edgeSum = 0.0
         var clippedHighlightCount = 0
         var clippedShadowCount = 0
+        var featureGridCells = Array(repeating: false, count: gridColumns * gridRows)
 
         for y in stride(from: stepY, to: max(height - 1, stepY + 1), by: stepY) {
             for x in stride(from: stepX, to: max(width - 1, stepX + 1), by: stepX) {
@@ -2291,8 +2333,14 @@ final class CaptureController: NSObject, ObservableObject {
                 let normalizedValue = value / 255.0
                 let right = Double(base[y * bytesPerRow + min(x + 1, width - 1)])
                 let down = Double(base[min(y + 1, height - 1) * bytesPerRow + x])
+                let edgeSignal = (abs(value - right) + abs(value - down)) / 510.0
                 exposureSum += normalizedValue
-                edgeSum += (abs(value - right) + abs(value - down)) / 510.0
+                edgeSum += edgeSignal
+                if edgeSignal >= 0.025 {
+                    let cellX = min((x * gridColumns) / max(width, 1), gridColumns - 1)
+                    let cellY = min((y * gridRows) / max(height, 1), gridRows - 1)
+                    featureGridCells[cellY * gridColumns + cellX] = true
+                }
                 if normalizedValue > 0.98 {
                     clippedHighlightCount += 1
                 }
@@ -2303,13 +2351,15 @@ final class CaptureController: NSObject, ObservableObject {
             }
         }
 
-        guard sampleCount > 0 else { return (0, 0.5, 0, 0) }
+        guard sampleCount > 0 else { return (0, 0.5, 0, 0, 0) }
         let samples = Double(sampleCount)
+        let coveredCells = featureGridCells.filter { $0 }.count
         return (
             edgeSum / samples,
             exposureSum / samples,
             Double(clippedHighlightCount) / samples,
-            Double(clippedShadowCount) / samples
+            Double(clippedShadowCount) / samples,
+            Double(coveredCells) / Double(featureGridCells.count)
         )
     }
 
@@ -2568,6 +2618,7 @@ extension CaptureController: ARSessionDelegate {
                         exposureDelta: keyframeDecision.exposureDelta,
                         clippedHighlightFraction: keyframeDecision.clippedHighlightFraction,
                         clippedShadowFraction: keyframeDecision.clippedShadowFraction,
+                        featureGridCoverage: keyframeDecision.featureGridCoverage,
                         parallaxMeters: keyframeDecision.parallaxMeters,
                         colmapOverlapScore: keyframeDecision.colmapOverlapScore,
                         validDepthRatio: candidateDepthValidRatio,

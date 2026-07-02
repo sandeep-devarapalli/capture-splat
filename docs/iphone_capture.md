@@ -20,6 +20,11 @@ clipped-shadow fraction using the `clipped_exposure` skip reason. Accepted
 frames record both fractions in `capture_quality`; treat them as capture-guidance
 quality proxies, not image-quality or reconstruction-quality proof.
 
+Candidates can also be held with `weak_feature_distribution` when image-detail
+samples are too clustered. Accepted frames record `feature_grid_coverage` as a
+lightweight pre-COLMAP proxy for whether useful texture is spread across the
+view.
+
 Before COLMAP or VkSplat, run:
 
 ```bash
