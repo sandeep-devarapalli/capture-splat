@@ -28,6 +28,8 @@ def make_quality_capture(root: Path, accepted: int, rejected: int = 0, blur: flo
                 "exposure_mean": 0.5,
                 "exposure_delta": 0.02,
                 "parallax_meters": parallax,
+                "angular_velocity_deg_s": 12.0,
+                "translation_speed_m_s": 0.3,
                 "colmap_overlap_score": 0.8,
                 "valid_depth_ratio": 0.7,
                 "feature_point_count": 120,
@@ -60,6 +62,23 @@ def test_capture_quality_report_promotes_usable_capture(tmp_path: Path) -> None:
     assert summary["decision"] == "promote"
     assert summary["frame_selection"]["selected_frames"] == 24
     assert loaded["metadata"]["haptic_accepted_count"] == 24
+    assert summary["metrics"]["angular_velocity_deg_s"]["mean"] == 12.0
+    assert summary["metrics"]["translation_speed_m_s"]["max"] == 0.3
+
+
+def test_capture_quality_report_tolerates_missing_motion_metrics(tmp_path: Path) -> None:
+    capture = make_quality_capture(tmp_path / "capture", accepted=24)
+    manifest = load_json_strict(capture / "capture.json")
+    for frame in manifest["frames"]:
+        frame["capture_quality"].pop("angular_velocity_deg_s")
+        frame["capture_quality"].pop("translation_speed_m_s")
+    write_json_strict(capture / "capture.json", manifest)
+
+    summary = run_capture_quality_report(capture, tmp_path / "out")
+
+    assert summary["decision"] == "promote"
+    assert summary["metrics"]["angular_velocity_deg_s"]["mean"] is None
+    assert summary["metrics"]["translation_speed_m_s"]["mean"] is None
 
 
 def test_capture_quality_report_holds_weak_capture(tmp_path: Path) -> None:

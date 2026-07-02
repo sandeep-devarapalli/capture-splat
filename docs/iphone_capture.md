@@ -8,12 +8,17 @@ Use **Video 3DGS** mode for training input. The app records images, timing, came
 
 The app accepts smart keyframes instead of exporting every AR frame. A haptic
 marks an accepted frame. Accepted frames are chosen from blur/detail,
-exposure stability, ARKit tracking, LiDAR depth coverage, parallax, overlap, and
-feature-point support.
+exposure stability, camera motion rate, ARKit tracking, LiDAR depth coverage,
+parallax, overlap, and feature-point support.
 
-Each saved frame includes `capture_quality` metadata in `capture.json`. The host
-`ingest` and `colmap-export` commands prefer frames marked accepted and reject a
-capture if quality metadata marks every frame rejected.
+Candidates captured while the camera rotates or translates too fast are held
+with the `fast_motion` skip reason. This is a motion-blur quality proxy from
+ARKit pose deltas, not an image-quality proof. Each saved frame includes
+`capture_quality` metadata in `capture.json`, including motion-rate telemetry
+(`angular_velocity_deg_s`, `translation_speed_m_s`) so host reports can
+separate low-texture holds from fast-motion holds. The host `ingest` and
+`colmap-export` commands prefer frames marked accepted and reject a capture if
+quality metadata marks every frame rejected.
 
 Before COLMAP or VkSplat, run:
 

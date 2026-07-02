@@ -28,6 +28,8 @@ private struct KeyframeDecision {
     let exposureMean: Double
     let exposureDelta: Double
     let parallaxMeters: Double
+    let angularVelocityDegPerSec: Double
+    let translationSpeedMetersPerSec: Double
     let pathLengthMeters: Double
     let distanceFromStartMeters: Double?
     let loopClosureCandidate: Bool
@@ -53,6 +55,8 @@ private struct KeyframeDecision {
         self.exposureMean = frameQuality?.exposureMean ?? 0
         self.exposureDelta = frameQuality?.exposureDelta ?? 0
         self.parallaxMeters = frameQuality?.parallaxMeters ?? 0
+        self.angularVelocityDegPerSec = frameQuality?.angularVelocityDegPerSec ?? 0
+        self.translationSpeedMetersPerSec = frameQuality?.translationSpeedMetersPerSec ?? 0
         self.pathLengthMeters = frameQuality?.pathLengthMeters ?? 0
         self.distanceFromStartMeters = frameQuality?.distanceFromStartMeters
         self.loopClosureCandidate = frameQuality?.loopClosureCandidate ?? false
@@ -67,6 +71,8 @@ private struct FrameQualityEstimate {
     let exposureMean: Double
     let exposureDelta: Double
     let parallaxMeters: Double
+    let angularVelocityDegPerSec: Double
+    let translationSpeedMetersPerSec: Double
     let pathLengthMeters: Double
     let distanceFromStartMeters: Double?
     let loopClosureCandidate: Bool
@@ -192,6 +198,8 @@ final class CaptureController: NSObject, ObservableObject {
     private var keyframeEventsWereTruncated = false
     private var keyframeSkipReasonCounts: [String: Int] = [:]
     private let minBlurScore = 0.006
+    private let maxAngularVelocityDegPerSec = 40.0
+    private let maxTranslationSpeedMetersPerSec = 0.8
     private let minExposureMean = 0.08
     private let maxExposureMean = 0.92
     private let maxExposureJump = 0.28
@@ -203,6 +211,10 @@ final class CaptureController: NSObject, ObservableObject {
     private let minRoomOverlapScore = 0.45
     private let minRoomFeatureCount = 80
     private var lastAcceptedExposureMean: Double?
+    private var lastMotionSampleTransform: simd_float4x4?
+    private var lastMotionSampleTimestamp: TimeInterval?
+    private var smoothedAngularVelocityDegPerSec = 0.0
+    private var smoothedTranslationSpeedMetersPerSec = 0.0
     private var latestFeaturePointCount = 0
     private var roomStartPosition: SIMD3<Float>?
     private var roomLastAcceptedPosition: SIMD3<Float>?
@@ -774,6 +786,12 @@ final class CaptureController: NSObject, ObservableObject {
             backgroundWarning = "Room training needs translation and overlap, not only rotation."
             guidanceArrowSystemImage = "arrow.left.and.right.circle"
             guidanceText = "Move sideways along the perimeter before the next accepted keyframe."
+        } else if lastKeyframeDecision.contains("fast_motion") {
+            readinessState = "Hold"
+            nextAction = "Slow your movement"
+            backgroundWarning = "The camera was moving too fast for a sharp keyframe."
+            guidanceArrowSystemImage = "tortoise.circle"
+            guidanceText = "Slow down; smooth, slow motion keeps frames sharp."
         } else if lastKeyframeDecision.contains("low_blur_score") {
             readinessState = "Hold"
             nextAction = "Slow down and hold steady"
@@ -1078,6 +1096,11 @@ final class CaptureController: NSObject, ObservableObject {
             colmapCoachAction = "Side-step 20-40 cm"
             colmapCoachDetail = "Keep the same wall visible while moving sideways; do not only rotate."
             colmapCoachScore = 0.4
+        } else if lastKeyframeDecision.contains("fast_motion") {
+            colmapCoachStatus = "Fast motion"
+            colmapCoachAction = "Slow down"
+            colmapCoachDetail = "Move and pan slowly so sharp overlapping frames can land."
+            colmapCoachScore = 0.35
         } else if lastKeyframeDecision.contains("low_blur_score") {
             colmapCoachStatus = "Motion blur"
             colmapCoachAction = "Hold steady for haptic"
@@ -1125,6 +1148,8 @@ final class CaptureController: NSObject, ObservableObject {
             roomQualityText = "Reconnect with previous view"
         } else if lastKeyframeDecision.contains("needs_translation_not_pan") {
             roomQualityText = "Side-step along the perimeter"
+        } else if lastKeyframeDecision.contains("fast_motion") {
+            roomQualityText = "Slow down for sharp frames"
         } else if lastKeyframeDecision.contains("low_blur_score") {
             roomQualityText = "Hold steadier on textured surfaces"
         } else if lastKeyframeDecision.contains("exposure") {
@@ -1350,6 +1375,8 @@ final class CaptureController: NSObject, ObservableObject {
             "skip_reason_counts": keyframeSkipReasonCounts,
             "thresholds": [
                 "min_blur_score": minBlurScore,
+                "max_angular_velocity_deg_s": maxAngularVelocityDegPerSec,
+                "max_translation_speed_m_s": maxTranslationSpeedMetersPerSec,
                 "min_exposure_mean": minExposureMean,
                 "max_exposure_mean": maxExposureMean,
                 "max_exposure_jump": maxExposureJump,
@@ -1544,6 +1571,16 @@ final class CaptureController: NSObject, ObservableObject {
                 shouldCapture: false,
                 reason: "low_depth_coverage",
                 score: depthValidRatio,
+                sectorIndex: sectorIndex,
+                frameQuality: frameQuality
+            )
+        }
+        guard frameQuality.angularVelocityDegPerSec <= maxAngularVelocityDegPerSec,
+              frameQuality.translationSpeedMetersPerSec <= maxTranslationSpeedMetersPerSec else {
+            return KeyframeDecision(
+                shouldCapture: false,
+                reason: "fast_motion",
+                score: max(0, 1.0 - frameQuality.angularVelocityDegPerSec / (maxAngularVelocityDegPerSec * 2)),
                 sectorIndex: sectorIndex,
                 frameQuality: frameQuality
             )
@@ -1785,6 +1822,8 @@ final class CaptureController: NSObject, ObservableObject {
             "exposure_mean": decision.exposureMean,
             "exposure_delta": decision.exposureDelta,
             "parallax_meters": decision.parallaxMeters,
+            "angular_velocity_deg_s": decision.angularVelocityDegPerSec,
+            "translation_speed_m_s": decision.translationSpeedMetersPerSec,
             "colmap_overlap_score": decision.colmapOverlapScore,
             "room_fragment_risk": decision.roomFragmentRisk,
             "room_reconnect_hold": roomReconnectHold,
@@ -1798,10 +1837,11 @@ final class CaptureController: NSObject, ObservableObject {
         keyframeScore = decision.score
         lastKeyframeDecision = accepted ? "Accepted: \(decision.reason)" : "Skipped: \(decision.reason)"
         captureQualityText = String(
-            format: "blur %.3f | exp %.2f | move %.2fm",
+            format: "blur %.3f | exp %.2f | move %.2fm | rot %.0f deg/s",
             decision.blurScore,
             decision.exposureMean,
-            decision.parallaxMeters
+            decision.parallaxMeters,
+            decision.angularVelocityDegPerSec
         )
         recordRoomQualityEvent(accepted: accepted, decision: decision, timestamp: timestamp, depthValidRatio: depthValidRatio)
         if !accepted {
@@ -1846,6 +1886,9 @@ final class CaptureController: NSObject, ObservableObject {
         case "needs_translation_not_pan":
             captureBlockerStatus = "Needs translation"
             captureBlockerDetail = "Do not only rotate. Side-step while keeping the same subject or wall in view."
+        case "fast_motion":
+            captureBlockerStatus = "Fast motion"
+            captureBlockerDetail = "Slow down; let one sharp frame land before moving on."
         case "low_blur_score":
             captureBlockerStatus = "Motion blur"
             captureBlockerDetail = "Hold steady on textured detail until you feel a haptic."
@@ -1892,6 +1935,8 @@ final class CaptureController: NSObject, ObservableObject {
             "exposure_mean": decision.exposureMean,
             "exposure_delta": decision.exposureDelta,
             "parallax_meters": decision.parallaxMeters,
+            "angular_velocity_deg_s": decision.angularVelocityDegPerSec,
+            "translation_speed_m_s": decision.translationSpeedMetersPerSec,
             "colmap_overlap_score": decision.colmapOverlapScore,
             "room_fragment_risk": decision.roomFragmentRisk,
             "room_reconnect_hold": roomReconnectHold,
@@ -2195,6 +2240,40 @@ final class CaptureController: NSObject, ObservableObject {
         return points
     }
 
+    private func updateMotionRate(from frame: ARFrame) {
+        defer {
+            lastMotionSampleTransform = frame.camera.transform
+            lastMotionSampleTimestamp = frame.timestamp
+        }
+        guard let previousTransform = lastMotionSampleTransform,
+              let previousTimestamp = lastMotionSampleTimestamp else { return }
+        let dt = frame.timestamp - previousTimestamp
+        guard dt > 0.001, dt <= 0.5 else { return }
+        let delta = simd_quatf(rotationMatrix(frame.camera.transform)) * simd_quatf(rotationMatrix(previousTransform)).inverse
+        var angleRadians = Double(delta.angle)
+        guard angleRadians.isFinite else { return }
+        if angleRadians > .pi {
+            angleRadians = 2 * .pi - angleRadians
+        }
+        let angularVelocity = angleRadians * 180.0 / .pi / dt
+        let translationSpeed = Double(simd_distance(
+            cameraPosition(frame.camera.transform),
+            cameraPosition(previousTransform)
+        )) / dt
+        guard angularVelocity.isFinite, translationSpeed.isFinite else { return }
+        let alpha = 0.3
+        smoothedAngularVelocityDegPerSec += alpha * (angularVelocity - smoothedAngularVelocityDegPerSec)
+        smoothedTranslationSpeedMetersPerSec += alpha * (translationSpeed - smoothedTranslationSpeedMetersPerSec)
+    }
+
+    private func rotationMatrix(_ transform: simd_float4x4) -> simd_float3x3 {
+        simd_float3x3(
+            SIMD3<Float>(transform.columns.0.x, transform.columns.0.y, transform.columns.0.z),
+            SIMD3<Float>(transform.columns.1.x, transform.columns.1.y, transform.columns.1.z),
+            SIMD3<Float>(transform.columns.2.x, transform.columns.2.y, transform.columns.2.z)
+        )
+    }
+
     private func estimateFrameQuality(from frame: ARFrame) -> FrameQualityEstimate {
         let imageQuality = estimateImageQuality(from: frame.capturedImage)
         let position = cameraPosition(frame.camera.transform)
@@ -2211,6 +2290,8 @@ final class CaptureController: NSObject, ObservableObject {
             exposureMean: imageQuality.exposureMean,
             exposureDelta: exposureDelta,
             parallaxMeters: parallax,
+            angularVelocityDegPerSec: smoothedAngularVelocityDegPerSec,
+            translationSpeedMetersPerSec: smoothedTranslationSpeedMetersPerSec,
             pathLengthMeters: projectedPath,
             distanceFromStartMeters: distanceFromStart,
             loopClosureCandidate: loopCandidate
@@ -2394,6 +2475,7 @@ extension CaptureController: ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         trackingStatus = trackingStateText(frame.camera.trackingState)
         latestFeaturePointCount = frame.rawFeaturePoints?.points.count ?? 0
+        updateMotionRate(from: frame)
         guard let sceneDepth = frame.sceneDepth else {
             guidancePoints.removeAll()
             if isRecording {
@@ -2520,6 +2602,8 @@ extension CaptureController: ARSessionDelegate {
                         exposureMean: keyframeDecision.exposureMean,
                         exposureDelta: keyframeDecision.exposureDelta,
                         parallaxMeters: keyframeDecision.parallaxMeters,
+                        angularVelocityDegPerSec: keyframeDecision.angularVelocityDegPerSec,
+                        translationSpeedMetersPerSec: keyframeDecision.translationSpeedMetersPerSec,
                         colmapOverlapScore: keyframeDecision.colmapOverlapScore,
                         validDepthRatio: candidateDepthValidRatio,
                         featurePointCount: self.latestFeaturePointCount
