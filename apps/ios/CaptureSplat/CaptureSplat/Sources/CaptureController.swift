@@ -12,6 +12,20 @@ struct ScanGuidancePoint: Identifiable {
     let depthMeters: Double
 }
 
+private struct RGBSampler {
+    let width: Int
+    let height: Int
+    let rgba: [UInt8]
+
+    func colorAt(normalizedX: Double, normalizedY: Double) -> (UInt8, UInt8, UInt8) {
+        let x = min(max(Int((normalizedX * Double(width - 1)).rounded()), 0), width - 1)
+        let y = min(max(Int((normalizedY * Double(height - 1)).rounded()), 0), height - 1)
+        let offset = (y * width + x) * 4
+        guard offset + 2 < rgba.count else { return (120, 220, 255) }
+        return (rgba[offset], rgba[offset + 1], rgba[offset + 2])
+    }
+}
+
 struct ObjectExtentOverlay {
     let normalizedX: Double
     let normalizedY: Double
@@ -170,6 +184,8 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var objectExtentDetail = "Use LiDAR depth near the reticle to propose foreground bounds."
     @Published var objectExtentOverlay: ObjectExtentOverlay?
     @Published var objectExtentSizeText = "--"
+    @Published var pointCloudPreviewPointCount = 0
+    @Published var pointCloudPreviewFile: URL?
 
     private let motion = CMMotionManager()
     private let location = CLLocationManager()
@@ -244,6 +260,8 @@ final class CaptureController: NSObject, ObservableObject {
     private var objectMatteFrameRecords: [[String: Any]] = []
     private var objectMatteFrameRecordsWereTruncated = false
     private var objectMatteSupportCounts: [String: Int] = [:]
+    private var pointCloudPreviewSamples: [[String: Any]] = []
+    private let maxPointCloudPreviewSamples = 6000
     private var latestCameraTransform: simd_float4x4?
     private var latestTargetCandidateWorldPosition: SIMD3<Float>?
     private var latestTargetCandidateDistance: Float?
@@ -465,6 +483,9 @@ final class CaptureController: NSObject, ObservableObject {
             objectMatteFrameRecords.removeAll()
             objectMatteFrameRecordsWereTruncated = false
             objectMatteSupportCounts.removeAll()
+            pointCloudPreviewSamples.removeAll()
+            pointCloudPreviewPointCount = 0
+            pointCloudPreviewFile = directory.appendingPathComponent("pointcloud_preview").appendingPathComponent("preview.json")
             rgbRateSamples.removeAll()
             depthRateSamples.removeAll()
             imuRateSamples.removeAll()
@@ -2664,6 +2685,7 @@ extension CaptureController: ARSessionDelegate {
         writeQueue.async { [weak self] in
             guard let self else { return }
             var writeError: Error?
+            var previewStatus: (count: Int, url: URL?)?
             autoreleasepool {
                 do {
                     try self.writeJPEG(from: rgbBuffer, to: rgbURL)
@@ -2671,6 +2693,17 @@ extension CaptureController: ARSessionDelegate {
                     if let confidenceBuffer {
                         try self.writeConfidence(confidenceBuffer, to: confidenceURL)
                     }
+                    let previewSamples = self.makePointCloudPreviewSamples(
+                        depthMap: depthBuffer,
+                        rgbBuffer: rgbBuffer,
+                        transform: transform,
+                        intrinsics: intrinsics,
+                        frameIndex: index
+                    )
+                    previewStatus = self.appendPointCloudPreviewSamples(
+                        previewSamples,
+                        directory: directory
+                    )
                 } catch {
                     writeError = error
                 }
@@ -2711,6 +2744,10 @@ extension CaptureController: ARSessionDelegate {
                 ))
                 self.rgbFrames += 1
                 self.depthFrames += 1
+                if let previewStatus {
+                    self.pointCloudPreviewPointCount = previewStatus.count
+                    self.pointCloudPreviewFile = previewStatus.url
+                }
                 self.rgbRate = self.recordRateSample(&self.rgbRateSamples, at: timestamp)
                 self.depthRate = self.recordRateSample(&self.depthRateSamples, at: timestamp)
                 self.validDepthRatio = candidateDepthValidRatio
@@ -2796,6 +2833,120 @@ extension CaptureController: ARSessionDelegate {
             throw CocoaError(.fileReadUnknown)
         }
         try NPYWriter.writeUInt8(Array(UnsafeBufferPointer(start: base, count: count)), shape: [height, width], to: url)
+    }
+
+    private func makePointCloudPreviewSamples(
+        depthMap: CVPixelBuffer,
+        rgbBuffer: CVPixelBuffer,
+        transform: simd_float4x4,
+        intrinsics: CameraIntrinsics,
+        frameIndex: Int
+    ) -> [[String: Any]] {
+        CVPixelBufferLockBaseAddress(depthMap, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
+
+        let width = CVPixelBufferGetWidth(depthMap)
+        let height = CVPixelBufferGetHeight(depthMap)
+        guard width > 0,
+              height > 0,
+              intrinsics.flX != 0,
+              intrinsics.flY != 0,
+              let base = CVPixelBufferGetBaseAddress(depthMap)?.assumingMemoryBound(to: Float32.self) else {
+            return []
+        }
+
+        let sampler = makeRGBSampler(from: rgbBuffer)
+        let columns = 12
+        let rows = 9
+        var samples: [[String: Any]] = []
+        samples.reserveCapacity(columns * rows)
+
+        for row in 0..<rows {
+            for column in 0..<columns {
+                let x = min(max((column * width) / columns + width / (columns * 2), 0), width - 1)
+                let y = min(max((row * height) / rows + height / (rows * 2), 0), height - 1)
+                let depth = base[y * width + x]
+                guard depth.isFinite, depth > 0 else { continue }
+
+                let cameraX = (Float(x) - intrinsics.cx) / intrinsics.flX * depth
+                let cameraY = -((Float(y) - intrinsics.cy) / intrinsics.flY * depth)
+                let world = transform * SIMD4<Float>(cameraX, cameraY, -depth, 1)
+                guard world.x.isFinite, world.y.isFinite, world.z.isFinite else { continue }
+
+                let normalizedX = Double(x) / Double(max(width - 1, 1))
+                let normalizedY = Double(y) / Double(max(height - 1, 1))
+                let color = sampler?.colorAt(normalizedX: normalizedX, normalizedY: normalizedY)
+                    ?? fallbackPreviewColor(depth: Double(depth))
+                samples.append([
+                    "x": Double(world.x),
+                    "y": Double(world.y),
+                    "z": Double(world.z),
+                    "r": Int(color.0),
+                    "g": Int(color.1),
+                    "b": Int(color.2),
+                    "frame_index": frameIndex,
+                ])
+            }
+        }
+        return samples
+    }
+
+    private func appendPointCloudPreviewSamples(
+        _ samples: [[String: Any]],
+        directory: URL
+    ) -> (count: Int, url: URL?) {
+        guard !samples.isEmpty else {
+            return (pointCloudPreviewSamples.count, pointCloudPreviewFile)
+        }
+        pointCloudPreviewSamples.append(contentsOf: samples)
+        if pointCloudPreviewSamples.count > maxPointCloudPreviewSamples {
+            pointCloudPreviewSamples.removeFirst(pointCloudPreviewSamples.count - maxPointCloudPreviewSamples)
+        }
+        let url = directory.appendingPathComponent("pointcloud_preview", isDirectory: true).appendingPathComponent("preview.json")
+        writeJSON([
+            "schema": "capture_splat.pointcloud_preview.v0.1",
+            "point_count": pointCloudPreviewSamples.count,
+            "max_point_count": maxPointCloudPreviewSamples,
+            "coordinate_frame": "arkit_world_preview",
+            "color_source": "rgb_sampled_when_available",
+            "capture_guidance_only": true,
+            "points": pointCloudPreviewSamples,
+        ], to: url)
+        return (pointCloudPreviewSamples.count, url)
+    }
+
+    private func makeRGBSampler(from pixelBuffer: CVPixelBuffer) -> RGBSampler? {
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        guard let cgImage = ciContext.createCGImage(image, from: image.extent) else { return nil }
+        let width = cgImage.width
+        let height = cgImage.height
+        guard width > 0, height > 0 else { return nil }
+        var rgba = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let ok = rgba.withUnsafeMutableBytes { pointer -> Bool in
+            guard let context = CGContext(
+                data: pointer.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        return ok ? RGBSampler(width: width, height: height, rgba: rgba) : nil
+    }
+
+    private func fallbackPreviewColor(depth: Double) -> (UInt8, UInt8, UInt8) {
+        if depth < 1.25 {
+            return (80, 220, 180)
+        }
+        if depth < 3.0 {
+            return (80, 190, 255)
+        }
+        return (245, 170, 80)
     }
 
     private func measureValidDepthRatio(_ pixelBuffer: CVPixelBuffer) -> Double {

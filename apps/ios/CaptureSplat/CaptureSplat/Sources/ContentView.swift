@@ -1,4 +1,5 @@
 import Foundation
+import SceneKit
 import SwiftUI
 
 private enum WorkspaceTab: String, CaseIterable, Identifiable {
@@ -43,6 +44,7 @@ private enum ScanViewMode: String, CaseIterable, Identifiable {
 private enum ActiveSheet: String, Identifiable {
     case export
     case camera
+    case review
 
     var id: String { rawValue }
 }
@@ -90,6 +92,8 @@ struct ContentView: View {
                 exportPresetSheet
             case .camera:
                 cameraSettingsSheet
+            case .review:
+                pointCloudReviewSheet
             }
         }
     }
@@ -882,6 +886,16 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    activeSheet = .review
+                } label: {
+                    Label("Open LiDAR Preview", systemImage: "cube.transparent")
+                }
+                .buttonStyle(.bordered)
+                .disabled(capture.pointCloudPreviewPointCount == 0)
+                Text("\(capture.pointCloudPreviewPointCount) preview points")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
             .padding(10)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -922,6 +936,43 @@ struct ContentView: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private var pointCloudReviewSheet: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 10) {
+                if let url = capture.pointCloudPreviewFile, capture.pointCloudPreviewPointCount > 0 {
+                    PointCloudPreviewScene(url: url)
+                        .frame(minHeight: 360)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    Text("\(capture.pointCloudPreviewPointCount) sampled LiDAR points")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(spacing: 10) {
+                        Image(systemName: "cube.transparent")
+                            .font(.largeTitle)
+                        Text("No preview points yet")
+                            .font(.headline)
+                        Text("Record accepted RGB-D keyframes before opening the LiDAR preview.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 360)
+                }
+            }
+            .padding()
+            .navigationTitle("LiDAR Preview")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        activeSheet = nil
+                    }
+                }
+            }
+        }
+        .presentationDetents([.large])
     }
 
     private var cameraSettingsSheet: some View {
@@ -1233,4 +1284,180 @@ private struct CoverageMiniMap: View {
 private struct CoverageMiniMapItem: Identifiable {
     let id: Int
     let score: Double
+}
+
+private struct PointCloudPreviewScene: UIViewRepresentable {
+    let url: URL
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> SCNView {
+        let view = SCNView()
+        view.allowsCameraControl = true
+        view.autoenablesDefaultLighting = true
+        view.backgroundColor = UIColor.black
+        view.scene = makeScene(from: url)
+        context.coordinator.loadedURL = url
+        return view
+    }
+
+    func updateUIView(_ view: SCNView, context: Context) {
+        guard context.coordinator.loadedURL != url else { return }
+        view.scene = makeScene(from: url)
+        context.coordinator.loadedURL = url
+    }
+
+    final class Coordinator {
+        var loadedURL: URL?
+    }
+
+    private func makeScene(from url: URL) -> SCNScene {
+        let scene = SCNScene()
+        let points = loadPreviewPoints(from: url)
+        if !points.positions.isEmpty {
+            scene.rootNode.addChildNode(makePointNode(points: points))
+        }
+        let camera = SCNCamera()
+        camera.zNear = 0.01
+        camera.zFar = 100
+        let cameraNode = SCNNode()
+        cameraNode.camera = camera
+        cameraNode.position = cameraPosition(for: points.bounds)
+        let target = SCNNode()
+        target.position = points.bounds.center
+        scene.rootNode.addChildNode(target)
+        cameraNode.constraints = [SCNLookAtConstraint(target: target)]
+        scene.rootNode.addChildNode(cameraNode)
+        scene.rootNode.addChildNode(makeLightNode())
+        scene.background.contents = UIColor.black
+        return scene
+    }
+
+    private func makePointNode(points: PreviewGeometry) -> SCNNode {
+        let vertexData = points.positions.withUnsafeBufferPointer { Data(buffer: $0) }
+        let colorData = points.colors.withUnsafeBufferPointer { Data(buffer: $0) }
+        let indices = Array(UInt32(0)..<UInt32(points.positions.count / 3))
+        let indexData = indices.withUnsafeBufferPointer { Data(buffer: $0) }
+        let vertexSource = SCNGeometrySource(
+            data: vertexData,
+            semantic: .vertex,
+            vectorCount: points.positions.count / 3,
+            usesFloatComponents: true,
+            componentsPerVector: 3,
+            bytesPerComponent: MemoryLayout<Float>.size,
+            dataOffset: 0,
+            dataStride: MemoryLayout<Float>.size * 3
+        )
+        let colorSource = SCNGeometrySource(
+            data: colorData,
+            semantic: .color,
+            vectorCount: points.colors.count / 4,
+            usesFloatComponents: true,
+            componentsPerVector: 4,
+            bytesPerComponent: MemoryLayout<Float>.size,
+            dataOffset: 0,
+            dataStride: MemoryLayout<Float>.size * 4
+        )
+        let element = SCNGeometryElement(
+            data: indexData,
+            primitiveType: .point,
+            primitiveCount: points.positions.count / 3,
+            bytesPerIndex: MemoryLayout<UInt32>.size
+        )
+        element.pointSize = 5
+        element.minimumPointScreenSpaceRadius = 2
+        element.maximumPointScreenSpaceRadius = 8
+        let geometry = SCNGeometry(sources: [vertexSource, colorSource], elements: [element])
+        let material = SCNMaterial()
+        material.lightingModel = .constant
+        material.diffuse.contents = UIColor.white
+        geometry.materials = [material]
+        return SCNNode(geometry: geometry)
+    }
+
+    private func makeLightNode() -> SCNNode {
+        let light = SCNLight()
+        light.type = .omni
+        light.intensity = 500
+        let node = SCNNode()
+        node.light = light
+        node.position = SCNVector3(0, 2, 2)
+        return node
+    }
+
+    private func cameraPosition(for bounds: PreviewBounds) -> SCNVector3 {
+        let radius = max(bounds.radius, 0.5)
+        return SCNVector3(
+            bounds.center.x,
+            bounds.center.y + radius * 0.45,
+            bounds.center.z + radius * 2.2
+        )
+    }
+
+    private func loadPreviewPoints(from url: URL) -> PreviewGeometry {
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rows = object["points"] as? [[String: Any]] else {
+            return PreviewGeometry.empty
+        }
+        var positions: [Float] = []
+        var colors: [Float] = []
+        var bounds = PreviewBounds.empty
+        for row in rows.prefix(12000) {
+            guard let x = number(row["x"]),
+                  let y = number(row["y"]),
+                  let z = number(row["z"]) else { continue }
+            let r = Float(number(row["r"]) ?? 120) / 255.0
+            let g = Float(number(row["g"]) ?? 220) / 255.0
+            let b = Float(number(row["b"]) ?? 255) / 255.0
+            positions.append(contentsOf: [Float(x), Float(y), Float(z)])
+            colors.append(contentsOf: [r, g, b, 1.0])
+            bounds.include(SCNVector3(Float(x), Float(y), Float(z)))
+        }
+        return PreviewGeometry(positions: positions, colors: colors, bounds: bounds)
+    }
+
+    private func number(_ value: Any?) -> Double? {
+        guard let value = value as? NSNumber else { return nil }
+        let number = value.doubleValue
+        return number.isFinite ? number : nil
+    }
+}
+
+private struct PreviewGeometry {
+    let positions: [Float]
+    let colors: [Float]
+    let bounds: PreviewBounds
+
+    static let empty = PreviewGeometry(positions: [], colors: [], bounds: .empty)
+}
+
+private struct PreviewBounds {
+    var min = SCNVector3(Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude)
+    var max = SCNVector3(-Float.greatestFiniteMagnitude, -Float.greatestFiniteMagnitude, -Float.greatestFiniteMagnitude)
+    var hasPoint = false
+
+    static let empty = PreviewBounds()
+
+    var center: SCNVector3 {
+        guard hasPoint else { return SCNVector3(0, 0, 0) }
+        return SCNVector3((min.x + max.x) * 0.5, (min.y + max.y) * 0.5, (min.z + max.z) * 0.5)
+    }
+
+    var radius: Float {
+        guard hasPoint else { return 1 }
+        let dx = max.x - min.x
+        let dy = max.y - min.y
+        let dz = max.z - min.z
+        let diagonal = sqrt(dx * dx + dy * dy + dz * dz)
+        return Swift.max(diagonal * 0.5, 0.1)
+    }
+
+    mutating func include(_ point: SCNVector3) {
+        hasPoint = true
+        min = SCNVector3(Swift.min(min.x, point.x), Swift.min(min.y, point.y), Swift.min(min.z, point.z))
+        max = SCNVector3(Swift.max(max.x, point.x), Swift.max(max.y, point.y), Swift.max(max.z, point.z))
+    }
 }

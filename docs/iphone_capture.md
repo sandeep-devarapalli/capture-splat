@@ -32,8 +32,10 @@ view.
 
 After capture, the Projects tab shows a lightweight review summary with kept and
 held keyframe counts, current coverage sectors, and the latest blocker detail.
-Use it as capture guidance evidence; full mesh or splat quality still needs host
-validation.
+It also opens a native LiDAR preview backed by
+`pointcloud_preview/preview.json`, a capped set of sampled RGB-colored depth
+points from accepted keyframes. Use it as capture guidance evidence; full mesh
+or splat quality still needs host validation.
 
 Before COLMAP or VkSplat, run:
 
