@@ -27,6 +27,8 @@ private struct KeyframeDecision {
     let blurScore: Double
     let exposureMean: Double
     let exposureDelta: Double
+    let clippedHighlightFraction: Double
+    let clippedShadowFraction: Double
     let parallaxMeters: Double
     let pathLengthMeters: Double
     let distanceFromStartMeters: Double?
@@ -52,6 +54,8 @@ private struct KeyframeDecision {
         self.blurScore = frameQuality?.blurScore ?? 0
         self.exposureMean = frameQuality?.exposureMean ?? 0
         self.exposureDelta = frameQuality?.exposureDelta ?? 0
+        self.clippedHighlightFraction = frameQuality?.clippedHighlightFraction ?? 0
+        self.clippedShadowFraction = frameQuality?.clippedShadowFraction ?? 0
         self.parallaxMeters = frameQuality?.parallaxMeters ?? 0
         self.pathLengthMeters = frameQuality?.pathLengthMeters ?? 0
         self.distanceFromStartMeters = frameQuality?.distanceFromStartMeters
@@ -66,6 +70,8 @@ private struct FrameQualityEstimate {
     let blurScore: Double
     let exposureMean: Double
     let exposureDelta: Double
+    let clippedHighlightFraction: Double
+    let clippedShadowFraction: Double
     let parallaxMeters: Double
     let pathLengthMeters: Double
     let distanceFromStartMeters: Double?
@@ -195,6 +201,8 @@ final class CaptureController: NSObject, ObservableObject {
     private let minExposureMean = 0.08
     private let maxExposureMean = 0.92
     private let maxExposureJump = 0.28
+    private let maxClippedHighlightFraction = 0.25
+    private let maxClippedShadowFraction = 0.30
     private let minObjectParallaxMeters = 0.08
     private let minRoomParallaxMeters = 0.12
     private let minVideoParallaxMeters = 0.05
@@ -1353,6 +1361,8 @@ final class CaptureController: NSObject, ObservableObject {
                 "min_exposure_mean": minExposureMean,
                 "max_exposure_mean": maxExposureMean,
                 "max_exposure_jump": maxExposureJump,
+                "max_clipped_highlight_fraction": maxClippedHighlightFraction,
+                "max_clipped_shadow_fraction": maxClippedShadowFraction,
                 "min_room_parallax_meters": minRoomParallaxMeters,
                 "min_object_parallax_meters": minObjectParallaxMeters,
                 "min_video_parallax_meters": minVideoParallaxMeters,
@@ -1562,6 +1572,17 @@ final class CaptureController: NSObject, ObservableObject {
                 shouldCapture: false,
                 reason: "overexposed_frame",
                 score: 1.0 - frameQuality.exposureMean,
+                sectorIndex: sectorIndex,
+                frameQuality: frameQuality
+            )
+        }
+        let worstClippedFraction = max(frameQuality.clippedHighlightFraction, frameQuality.clippedShadowFraction)
+        guard frameQuality.clippedHighlightFraction <= maxClippedHighlightFraction,
+              frameQuality.clippedShadowFraction <= maxClippedShadowFraction else {
+            return KeyframeDecision(
+                shouldCapture: false,
+                reason: "clipped_exposure",
+                score: max(0, 1.0 - worstClippedFraction),
                 sectorIndex: sectorIndex,
                 frameQuality: frameQuality
             )
@@ -1784,6 +1805,8 @@ final class CaptureController: NSObject, ObservableObject {
             "blur_score": decision.blurScore,
             "exposure_mean": decision.exposureMean,
             "exposure_delta": decision.exposureDelta,
+            "clipped_highlight_fraction": decision.clippedHighlightFraction,
+            "clipped_shadow_fraction": decision.clippedShadowFraction,
             "parallax_meters": decision.parallaxMeters,
             "colmap_overlap_score": decision.colmapOverlapScore,
             "room_fragment_risk": decision.roomFragmentRisk,
@@ -1849,6 +1872,9 @@ final class CaptureController: NSObject, ObservableObject {
         case "low_blur_score":
             captureBlockerStatus = "Motion blur"
             captureBlockerDetail = "Hold steady on textured detail until you feel a haptic."
+        case "clipped_exposure":
+            captureBlockerStatus = "Clipped exposure"
+            captureBlockerDetail = "Angle away from bright windows or dark corners; clipped areas have no texture."
         case "exposure_jump", "underexposed_frame", "overexposed_frame":
             captureBlockerStatus = "Exposure hold"
             captureBlockerDetail = "Avoid sudden bright or dark swings; move slowly across windows and dark corners."
@@ -1891,6 +1917,8 @@ final class CaptureController: NSObject, ObservableObject {
             "blur_score": decision.blurScore,
             "exposure_mean": decision.exposureMean,
             "exposure_delta": decision.exposureDelta,
+            "clipped_highlight_fraction": decision.clippedHighlightFraction,
+            "clipped_shadow_fraction": decision.clippedShadowFraction,
             "parallax_meters": decision.parallaxMeters,
             "colmap_overlap_score": decision.colmapOverlapScore,
             "room_fragment_risk": decision.roomFragmentRisk,
@@ -2210,6 +2238,8 @@ final class CaptureController: NSObject, ObservableObject {
             blurScore: imageQuality.blurScore,
             exposureMean: imageQuality.exposureMean,
             exposureDelta: exposureDelta,
+            clippedHighlightFraction: imageQuality.clippedHighlightFraction,
+            clippedShadowFraction: imageQuality.clippedShadowFraction,
             parallaxMeters: parallax,
             pathLengthMeters: projectedPath,
             distanceFromStartMeters: distanceFromStart,
@@ -2217,7 +2247,9 @@ final class CaptureController: NSObject, ObservableObject {
         )
     }
 
-    private func estimateImageQuality(from pixelBuffer: CVPixelBuffer) -> (blurScore: Double, exposureMean: Double) {
+    private func estimateImageQuality(
+        from pixelBuffer: CVPixelBuffer
+    ) -> (blurScore: Double, exposureMean: Double, clippedHighlightFraction: Double, clippedShadowFraction: Double) {
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
 
@@ -2240,7 +2272,7 @@ final class CaptureController: NSObject, ObservableObject {
               height > 2,
               bytesPerRow > 0,
               let baseAddress else {
-            return (0, 0.5)
+            return (0, 0.5, 0, 0)
         }
 
         let base = baseAddress.assumingMemoryBound(to: UInt8.self)
@@ -2249,21 +2281,36 @@ final class CaptureController: NSObject, ObservableObject {
         var sampleCount = 0
         var exposureSum = 0.0
         var edgeSum = 0.0
+        var clippedHighlightCount = 0
+        var clippedShadowCount = 0
 
         for y in stride(from: stepY, to: max(height - 1, stepY + 1), by: stepY) {
             for x in stride(from: stepX, to: max(width - 1, stepX + 1), by: stepX) {
                 let offset = y * bytesPerRow + x
                 let value = Double(base[offset])
+                let normalizedValue = value / 255.0
                 let right = Double(base[y * bytesPerRow + min(x + 1, width - 1)])
                 let down = Double(base[min(y + 1, height - 1) * bytesPerRow + x])
-                exposureSum += value / 255.0
+                exposureSum += normalizedValue
                 edgeSum += (abs(value - right) + abs(value - down)) / 510.0
+                if normalizedValue > 0.98 {
+                    clippedHighlightCount += 1
+                }
+                if normalizedValue < 0.02 {
+                    clippedShadowCount += 1
+                }
                 sampleCount += 1
             }
         }
 
-        guard sampleCount > 0 else { return (0, 0.5) }
-        return (edgeSum / Double(sampleCount), exposureSum / Double(sampleCount))
+        guard sampleCount > 0 else { return (0, 0.5, 0, 0) }
+        let samples = Double(sampleCount)
+        return (
+            edgeSum / samples,
+            exposureSum / samples,
+            Double(clippedHighlightCount) / samples,
+            Double(clippedShadowCount) / samples
+        )
     }
 
     private func makeObjectExtentProposal(
@@ -2519,6 +2566,8 @@ extension CaptureController: ARSessionDelegate {
                         blurScore: keyframeDecision.blurScore,
                         exposureMean: keyframeDecision.exposureMean,
                         exposureDelta: keyframeDecision.exposureDelta,
+                        clippedHighlightFraction: keyframeDecision.clippedHighlightFraction,
+                        clippedShadowFraction: keyframeDecision.clippedShadowFraction,
                         parallaxMeters: keyframeDecision.parallaxMeters,
                         colmapOverlapScore: keyframeDecision.colmapOverlapScore,
                         validDepthRatio: candidateDepthValidRatio,

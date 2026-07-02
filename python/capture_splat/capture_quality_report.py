@@ -62,7 +62,17 @@ def run_capture_quality_report(
     keyframe_report = _load_optional_json(capture_dir / "metadata" / "keyframe_report.json")
     room_report = _load_optional_json(capture_dir / "metadata" / "room_capture_quality_report.json")
 
-    metric_names = ("blur_score", "exposure_mean", "exposure_delta", "parallax_meters", "colmap_overlap_score", "valid_depth_ratio", "feature_point_count")
+    metric_names = (
+        "blur_score",
+        "exposure_mean",
+        "exposure_delta",
+        "clipped_highlight_fraction",
+        "clipped_shadow_fraction",
+        "parallax_meters",
+        "colmap_overlap_score",
+        "valid_depth_ratio",
+        "feature_point_count",
+    )
     metrics = {name: _metric_stats(accepted_frames, name) for name in metric_names}
     skip_reason_counts = {}
     if keyframe_report is not None:

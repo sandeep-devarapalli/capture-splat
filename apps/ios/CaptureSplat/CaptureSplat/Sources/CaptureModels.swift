@@ -25,6 +25,8 @@ struct CaptureFrameQuality: Encodable {
     let blurScore: Double
     let exposureMean: Double
     let exposureDelta: Double
+    let clippedHighlightFraction: Double
+    let clippedShadowFraction: Double
     let parallaxMeters: Double
     let colmapOverlapScore: Double
     let validDepthRatio: Double
@@ -35,6 +37,8 @@ struct CaptureFrameQuality: Encodable {
         case blurScore = "blur_score"
         case exposureMean = "exposure_mean"
         case exposureDelta = "exposure_delta"
+        case clippedHighlightFraction = "clipped_highlight_fraction"
+        case clippedShadowFraction = "clipped_shadow_fraction"
         case parallaxMeters = "parallax_meters"
         case colmapOverlapScore = "colmap_overlap_score"
         case validDepthRatio = "valid_depth_ratio"

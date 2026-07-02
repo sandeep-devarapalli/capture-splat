@@ -15,6 +15,11 @@ Each saved frame includes `capture_quality` metadata in `capture.json`. The host
 `ingest` and `colmap-export` commands prefer frames marked accepted and reject a
 capture if quality metadata marks every frame rejected.
 
+The capture gate also holds candidates with a large clipped-highlight or
+clipped-shadow fraction using the `clipped_exposure` skip reason. Accepted
+frames record both fractions in `capture_quality`; treat them as capture-guidance
+quality proxies, not image-quality or reconstruction-quality proof.
+
 Before COLMAP or VkSplat, run:
 
 ```bash
