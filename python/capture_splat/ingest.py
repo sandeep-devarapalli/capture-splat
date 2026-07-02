@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .capture_schema import CAPTURE_SCHEMA, iter_frames, load_capture
+from .capture_schema import CAPTURE_SCHEMA, frame_selection_summary, iter_frames, load_capture
 from .json_utils import write_json_strict
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
@@ -37,7 +37,8 @@ def ingest_capture(capture_dir: Path, out_dir: Path, copy_images: bool = True) -
         images_dir.mkdir(parents=True, exist_ok=True)
     frames_payload: list[dict[str, Any]] = []
     first_intrinsics: dict[str, float] | None = None
-    for frame in iter_frames(data):
+    selection = frame_selection_summary(data)
+    for frame in iter_frames(data, accepted_only=True):
         src = (capture_dir / frame.image_path).resolve()
         if not src.exists():
             raise FileNotFoundError(f"frame image missing: {src}")
@@ -47,8 +48,10 @@ def ingest_capture(capture_dir: Path, out_dir: Path, copy_images: bool = True) -
             "file_path": file_path,
             "transform_matrix": frame.transform_matrix,
             "timestamp": frame.timestamp,
+            "source_frame_index": frame.source_index,
         })
-    assert first_intrinsics is not None
+    if first_intrinsics is None:
+        raise ValueError("capture has no accepted frames for training export")
     transforms = {
         "camera_model": "OPENCV",
         "fl_x": first_intrinsics["fl_x"],
@@ -68,6 +71,7 @@ def ingest_capture(capture_dir: Path, out_dir: Path, copy_images: bool = True) -
         "output_dir": str(out_dir),
         "nerfstudio_dataset": str(dataset_dir),
         "frame_count": len(frames_payload),
+        "frame_selection": selection,
         "copied_images": copy_images,
     }
     write_json_strict(out_dir / "capture_splat_ingest_summary.json", summary)

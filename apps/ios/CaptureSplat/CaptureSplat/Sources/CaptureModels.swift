@@ -8,11 +8,37 @@ struct CapturedFrame: Encodable {
     let transformMatrix: [[Float]]
     let intrinsics: CameraIntrinsics
     let trackingState: String
+    let captureQuality: CaptureFrameQuality
 
     enum CodingKeys: String, CodingKey {
         case rgb, depth, confidence, timestamp, intrinsics
         case transformMatrix = "transform_matrix"
         case trackingState = "tracking_state"
+        case captureQuality = "capture_quality"
+    }
+}
+
+struct CaptureFrameQuality: Encodable {
+    let accepted: Bool
+    let reason: String
+    let score: Double
+    let blurScore: Double
+    let exposureMean: Double
+    let exposureDelta: Double
+    let parallaxMeters: Double
+    let colmapOverlapScore: Double
+    let validDepthRatio: Double
+    let featurePointCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case accepted, reason, score
+        case blurScore = "blur_score"
+        case exposureMean = "exposure_mean"
+        case exposureDelta = "exposure_delta"
+        case parallaxMeters = "parallax_meters"
+        case colmapOverlapScore = "colmap_overlap_score"
+        case validDepthRatio = "valid_depth_ratio"
+        case featurePointCount = "feature_point_count"
     }
 }
 

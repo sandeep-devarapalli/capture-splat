@@ -14,10 +14,12 @@ IMAGE_KEYS = ("rgb", "image", "image_path", "file_path")
 @dataclass(frozen=True)
 class CaptureFrame:
     index: int
+    source_index: int
     image_path: str
     transform_matrix: list[list[float]]
     intrinsics: dict[str, float]
     timestamp: float | None
+    accepted: bool | None
 
 
 def load_capture(capture_dir: Path) -> dict[str, Any]:
@@ -67,14 +69,49 @@ def _matrix(frame: dict[str, Any]) -> list[list[float]]:
     return rows
 
 
-def iter_frames(capture: dict[str, Any]) -> Iterable[CaptureFrame]:
-    for index, frame in enumerate(capture["frames"], start=1):
+def _accepted(frame: dict[str, Any]) -> bool | None:
+    value = frame.get("accepted")
+    if isinstance(value, bool):
+        return value
+    quality = frame.get("capture_quality") or frame.get("quality")
+    if isinstance(quality, dict):
+        quality_value = quality.get("accepted")
+        if isinstance(quality_value, bool):
+            return quality_value
+    return None
+
+
+def iter_frames(capture: dict[str, Any], accepted_only: bool = False) -> Iterable[CaptureFrame]:
+    emitted_index = 0
+    for source_index, frame in enumerate(capture["frames"], start=1):
         if not isinstance(frame, dict):
-            raise ValueError(f"frame {index} is not an object")
+            raise ValueError(f"frame {source_index} is not an object")
+        accepted = _accepted(frame)
+        if accepted_only and accepted is False:
+            continue
+        emitted_index += 1
         yield CaptureFrame(
-            index=index,
+            index=emitted_index,
+            source_index=source_index,
             image_path=_image_path(frame),
             transform_matrix=_matrix(frame),
             intrinsics=_intrinsics(capture, frame),
             timestamp=float(frame["timestamp"]) if frame.get("timestamp") is not None else None,
+            accepted=accepted,
         )
+
+
+def frame_selection_summary(capture: dict[str, Any]) -> dict[str, Any]:
+    total = len(capture["frames"])
+    accepted_flags = []
+    for frame in capture["frames"]:
+        accepted_flags.append(_accepted(frame) if isinstance(frame, dict) else None)
+    rejected = sum(1 for accepted in accepted_flags if accepted is False)
+    accepted = total - rejected
+    return {
+        "selection": "accepted_keyframes",
+        "total_manifest_frames": total,
+        "selected_frames": accepted,
+        "excluded_rejected_frames": rejected,
+        "quality_metadata_present": any(value is not None for value in accepted_flags),
+    }

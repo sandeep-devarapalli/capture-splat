@@ -23,3 +23,7 @@ metadata/
 ```
 
 Use Video 3DGS mode for trainer input. The app records sharp RGB-D keyframes with camera metadata and quality reports; the host pipeline handles COLMAP and VkSplat training.
+
+Saved frames include `capture_quality` metadata. The host pipeline uses accepted
+keyframes for ingest and COLMAP export, so rejected candidates remain diagnostic
+evidence rather than trainer input.

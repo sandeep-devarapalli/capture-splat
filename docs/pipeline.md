@@ -19,12 +19,13 @@ A run should not be called high quality just because it produced `splat.ply`.
 Use these gates in order:
 
 1. Strict capture/package JSON parse with non-finite values rejected.
-2. COLMAP registration summary: registered images, sparse points, observations, and weak-frame track counts.
-3. VkSplat finite-output check: `splat.ply` exists, parses, and has `0` non-finite float values.
-4. Radius/outlier check before and after any clamp.
-5. Viewer/app proof for selected source frames.
-6. Raw render canvas versus source-frame quality metrics.
-7. Explicit promote/hold/reject decision.
+2. Capture-time keyframe selection: use accepted frames and keep rejected candidates as diagnostics.
+3. COLMAP registration summary: registered images, sparse points, observations, and weak-frame track counts.
+4. VkSplat finite-output check: `splat.ply` exists, parses, and has `0` non-finite float values.
+5. Radius/outlier check before and after any clamp.
+6. Viewer/app proof for selected source frames.
+7. Raw render canvas versus source-frame quality metrics.
+8. Explicit promote/hold/reject decision.
 
 ## Training Ladder
 

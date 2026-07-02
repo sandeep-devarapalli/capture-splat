@@ -2511,7 +2511,19 @@ extension CaptureController: ARSessionDelegate {
                     timestamp: timestamp,
                     transformMatrix: transform.rows,
                     intrinsics: intrinsics,
-                    trackingState: trackingState
+                    trackingState: trackingState,
+                    captureQuality: CaptureFrameQuality(
+                        accepted: true,
+                        reason: keyframeDecision.reason,
+                        score: keyframeDecision.score,
+                        blurScore: keyframeDecision.blurScore,
+                        exposureMean: keyframeDecision.exposureMean,
+                        exposureDelta: keyframeDecision.exposureDelta,
+                        parallaxMeters: keyframeDecision.parallaxMeters,
+                        colmapOverlapScore: keyframeDecision.colmapOverlapScore,
+                        validDepthRatio: candidateDepthValidRatio,
+                        featurePointCount: self.latestFeaturePointCount
+                    )
                 ))
                 self.rgbFrames += 1
                 self.depthFrames += 1

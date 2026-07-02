@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from .capture_schema import iter_frames, load_capture
+from .capture_schema import frame_selection_summary, iter_frames, load_capture
 from .json_utils import write_json_strict
 
 
@@ -36,11 +36,12 @@ def export_colmap_text(capture_dir: Path, out_dir: Path, copy_images: bool = Tru
     sparse_dir = out_dir / "sparse" / "0"
     image_dir.mkdir(parents=True, exist_ok=True)
     sparse_dir.mkdir(parents=True, exist_ok=True)
+    selection = frame_selection_summary(data)
     camera_ids: dict[tuple[float, float, float, float, int, int], int] = {}
     camera_lines: list[str] = ["# Camera list with one line of data per camera:", "# CAMERA_ID, MODEL, WIDTH, HEIGHT, PARAMS[]"]
     image_lines: list[str] = ["# Image list with two lines of data per image:", "# IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, NAME", "# POINTS2D[] as (X, Y, POINT3D_ID)"]
     image_count = 0
-    for frame in iter_frames(data):
+    for frame in iter_frames(data, accepted_only=True):
         intr = frame.intrinsics
         key = (intr["fl_x"], intr["fl_y"], intr["cx"], intr["cy"], int(intr["w"]), int(intr["h"]))
         if key not in camera_ids:
@@ -62,6 +63,8 @@ def export_colmap_text(capture_dir: Path, out_dir: Path, copy_images: bool = Tru
         image_lines.append(f"{frame.index} {qw:.12g} {qx:.12g} {qy:.12g} {qz:.12g} {tx:.12g} {ty:.12g} {tz:.12g} {camera_id} {name}")
         image_lines.append("")
         image_count += 1
+    if image_count == 0:
+        raise ValueError("capture has no accepted frames for COLMAP export")
     (sparse_dir / "cameras.txt").write_text("\n".join(camera_lines) + "\n", encoding="utf-8")
     (sparse_dir / "images.txt").write_text("\n".join(image_lines) + "\n", encoding="utf-8")
     (sparse_dir / "points3D.txt").write_text("# Empty seed cloud. Run COLMAP mapper/point_triangulator to add observations.\n", encoding="utf-8")
@@ -73,6 +76,7 @@ def export_colmap_text(capture_dir: Path, out_dir: Path, copy_images: bool = Tru
         "camera_count": len(camera_ids),
         "sparse_dir": str(sparse_dir),
         "copied_images": copy_images,
+        "frame_selection": selection,
     }
     write_json_strict(out_dir / "capture_splat_colmap_summary.json", summary)
     return summary
