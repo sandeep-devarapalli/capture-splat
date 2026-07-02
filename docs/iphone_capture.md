@@ -15,6 +15,18 @@ Each saved frame includes `capture_quality` metadata in `capture.json`. The host
 `ingest` and `colmap-export` commands prefer frames marked accepted and reject a
 capture if quality metadata marks every frame rejected.
 
+Before COLMAP or VkSplat, run:
+
+```bash
+capture-splat capture-quality-report \
+  --capture /path/to/capture \
+  --out runs/scan/capture_quality
+```
+
+Use the report as a pre-training gate. `promote` means the capture is reasonable
+to try with COLMAP; `hold` means inspect weak signals first; `reject` means
+recapture before training.
+
 For rooms, move in small connected side steps around the perimeter. Keep the
 previous wall, corner, table edge, shelf, or textured object in view while adding
 translation. Avoid fast pans, exposure jumps, blank walls, glass, and stopping

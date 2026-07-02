@@ -4,6 +4,7 @@
 iPhone Video 3DGS capture
   -> capture.json + images + metadata
   -> strict host validation
+  -> capture-quality-report gate
   -> Nerfstudio-style transforms.json
   -> COLMAP text package
   -> COLMAP refinement or triangulation as needed
@@ -20,12 +21,21 @@ Use these gates in order:
 
 1. Strict capture/package JSON parse with non-finite values rejected.
 2. Capture-time keyframe selection: use accepted frames and keep rejected candidates as diagnostics.
-3. COLMAP registration summary: registered images, sparse points, observations, and weak-frame track counts.
-4. VkSplat finite-output check: `splat.ply` exists, parses, and has `0` non-finite float values.
-5. Radius/outlier check before and after any clamp.
-6. Viewer/app proof for selected source frames.
-7. Raw render canvas versus source-frame quality metrics.
-8. Explicit promote/hold/reject decision.
+3. Capture quality report: accepted count, blur, parallax, overlap, depth, and skip reasons.
+4. COLMAP registration summary: registered images, sparse points, observations, and weak-frame track counts.
+5. VkSplat finite-output check: `splat.ply` exists, parses, and has `0` non-finite float values.
+6. Radius/outlier check before and after any clamp.
+7. Viewer/app proof for selected source frames.
+8. Raw render canvas versus source-frame quality metrics.
+9. Explicit promote/hold/reject decision.
+
+Run the pre-COLMAP gate before exporting packages:
+
+```bash
+capture-splat capture-quality-report \
+  --capture /path/to/capture \
+  --out runs/scan/capture_quality
+```
 
 ## Training Ladder
 

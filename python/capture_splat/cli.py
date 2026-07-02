@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .capture_quality_report import run_capture_quality_report
 from .colmap_export import export_colmap_text
 from .ingest import ingest_capture
 from .render_source_qa import run_render_source_qa
@@ -20,6 +21,14 @@ def main() -> None:
     p_colmap = sub.add_parser("colmap-export", help="Write COLMAP text package")
     p_colmap.add_argument("--capture", type=Path, required=True)
     p_colmap.add_argument("--out", type=Path, required=True)
+    p_capture_quality = sub.add_parser("capture-quality-report", help="Summarize capture-time quality before training")
+    p_capture_quality.add_argument("--capture", type=Path, required=True)
+    p_capture_quality.add_argument("--out", type=Path, required=True)
+    p_capture_quality.add_argument("--min-accepted-frames", type=int, default=24)
+    p_capture_quality.add_argument("--min-mean-blur-score", type=float, default=0.006)
+    p_capture_quality.add_argument("--min-mean-parallax-meters", type=float, default=0.05)
+    p_capture_quality.add_argument("--min-mean-overlap-score", type=float, default=0.45)
+    p_capture_quality.add_argument("--min-mean-depth-ratio", type=float, default=0.35)
     p_train = sub.add_parser("train-vksplat", help="Run VkSplat on a COLMAP package")
     p_train.add_argument("--package", type=Path, required=True)
     p_train.add_argument("--out", type=Path, required=True)
@@ -57,6 +66,16 @@ def main() -> None:
         payload = ingest_capture(args.capture, args.out)
     elif args.command == "colmap-export":
         payload = export_colmap_text(args.capture, args.out)
+    elif args.command == "capture-quality-report":
+        payload = run_capture_quality_report(
+            args.capture,
+            args.out,
+            min_accepted_frames=args.min_accepted_frames,
+            min_mean_blur_score=args.min_mean_blur_score,
+            min_mean_parallax_meters=args.min_mean_parallax_meters,
+            min_mean_overlap_score=args.min_mean_overlap_score,
+            min_mean_depth_ratio=args.min_mean_depth_ratio,
+        )
     elif args.command == "train-vksplat":
         payload = run_vksplat(args.package, args.out, args.vksplat_root, steps=args.steps, dry_run=args.dry_run)
     elif args.command == "qa-render-source":
