@@ -860,6 +860,31 @@ struct ContentView: View {
                     .padding(.vertical, 4)
                     .background(.thinMaterial, in: Capsule())
             }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Review", systemImage: "point.3.connected.trianglepath.dotted")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    Spacer()
+                    Text("\(capture.acceptedKeyframes) kept | \(capture.skippedKeyframes) held")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                CoverageMiniMap(
+                    scores: capture.coverageSectors,
+                    currentIndex: capture.currentCoverageSector,
+                    targetIndex: capture.targetCoverageSector
+                )
+                    .frame(height: 36)
+                Text("\(capture.captureBlockerStatus): \(capture.captureBlockerDetail)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(10)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .padding(14)
         .frame(maxWidth: 560)

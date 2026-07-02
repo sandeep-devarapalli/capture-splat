@@ -9,6 +9,7 @@ from .capture_quality_report import run_capture_quality_report
 from .colmap_export import export_colmap_text
 from .ingest import ingest_capture
 from .render_source_qa import run_render_source_qa
+from .transforms_import import import_transforms_package
 from .vksplat_ladder import parse_steps, run_vksplat_ladder
 from .vksplat_runner import doctor, run_vksplat
 
@@ -19,6 +20,11 @@ def main() -> None:
     p_ingest = sub.add_parser("ingest", help="Normalize capture export")
     p_ingest.add_argument("--capture", type=Path, required=True)
     p_ingest.add_argument("--out", type=Path, required=True)
+    p_import = sub.add_parser("import-transforms", help="Convert Nerfstudio/Record3D-style transforms exports into a Capture Splat package")
+    p_import.add_argument("--input", type=Path, required=True)
+    p_import.add_argument("--out", type=Path, required=True)
+    p_import.add_argument("--no-copy-files", action="store_true")
+    p_import.add_argument("--require-depth", action="store_true")
     p_colmap = sub.add_parser("colmap-export", help="Write COLMAP text package")
     p_colmap.add_argument("--capture", type=Path, required=True)
     p_colmap.add_argument("--out", type=Path, required=True)
@@ -70,6 +76,13 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "ingest":
         payload = ingest_capture(args.capture, args.out)
+    elif args.command == "import-transforms":
+        payload = import_transforms_package(
+            args.input,
+            args.out,
+            copy_files=not args.no_copy_files,
+            require_depth=args.require_depth,
+        )
     elif args.command == "colmap-export":
         payload = export_colmap_text(args.capture, args.out)
     elif args.command == "capture-quality-report":

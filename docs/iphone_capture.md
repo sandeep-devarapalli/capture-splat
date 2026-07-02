@@ -30,6 +30,11 @@ samples are too clustered. Accepted frames record `feature_grid_coverage` as a
 lightweight pre-COLMAP proxy for whether useful texture is spread across the
 view.
 
+After capture, the Projects tab shows a lightweight review summary with kept and
+held keyframe counts, current coverage sectors, and the latest blocker detail.
+Use it as capture guidance evidence; full mesh or splat quality still needs host
+validation.
+
 Before COLMAP or VkSplat, run:
 
 ```bash

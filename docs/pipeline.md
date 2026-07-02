@@ -12,6 +12,18 @@ iPhone Video 3DGS capture
   -> standard splat.ply
 ```
 
+External Record3D, Roomly-style, or Nerfstudio-style captures can enter at the
+`capture.json` stage when they expose RGB frames and `transforms.json`:
+
+```bash
+capture-splat import-transforms \
+  --input /path/to/transforms_export \
+  --out runs/imported_capture
+```
+
+Depth files such as `.exr` or `.npy` are preserved when frame paths are present.
+This is a format conversion, not a reconstruction-quality claim.
+
 COLMAP registration and trainer health are quality gates. A successful file export is not the same as a high-quality reconstruction.
 
 ## Evidence Gates

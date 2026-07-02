@@ -34,6 +34,18 @@ The command writes `capture_splat_app_output_comparison.json`. It reports file
 counts, image counts, metadata files, observable 3D artifacts, finite PLY stats
 when parseable, and whether existing render/source QA summaries are present.
 
+If another app exports RGB frames with `transforms.json`, convert that export
+into a Capture Splat package before running the usual host checks:
+
+```bash
+capture-splat import-transforms \
+  --input runs/comparison/roomly_export \
+  --out runs/comparison/roomly_capture
+```
+
+The importer preserves referenced depth files such as `.exr` or `.npy` when
+available. It does not infer proprietary capture logic from the app.
+
 ## Interpretation
 
 Use the report to decide what to inspect next:

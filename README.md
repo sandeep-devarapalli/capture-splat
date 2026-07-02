@@ -44,6 +44,16 @@ capture-splat colmap-export --capture "$CAPTURE" --out runs/my_scan/colmap_packa
 capture-splat train-vksplat-ladder   --package runs/my_scan/colmap_package   --out runs/my_scan/vksplat_ladder   --vksplat-root external/vksplat
 ```
 
+For Record3D, Roomly-style, or Nerfstudio-style exports that already provide
+`transforms.json`, RGB frames, and optional depth frames, first convert them into
+a Capture Splat package:
+
+```bash
+capture-splat import-transforms \
+  --input /path/to/transforms_export \
+  --out runs/imported_capture
+```
+
 The ladder runs controlled `3000 -> 7000 -> 15000 -> 30000` rungs and writes
 `capture_splat_vksplat_ladder_summary.json`. Single-step training is still
 available with `capture-splat train-vksplat --steps 30000`, but a finite `.ply`
