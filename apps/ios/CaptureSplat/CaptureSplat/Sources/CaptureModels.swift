@@ -83,6 +83,8 @@ struct CaptureManifest: Encodable {
     let roomCaptureQualityFile = "metadata/room_capture_quality_report.json"
     let captureProfileFile = "metadata/capture_profile_report.json"
     let pointCloudPreviewFile = "pointcloud_preview/preview.json"
+    let roomPlanFile: String?
+    let roomPlanReportFile: String?
     let frames: [CapturedFrame]
     let authority: Authority
 
@@ -97,6 +99,8 @@ struct CaptureManifest: Encodable {
         case roomCaptureQualityFile = "room_capture_quality_file"
         case captureProfileFile = "capture_profile_file"
         case pointCloudPreviewFile = "pointcloud_preview_file"
+        case roomPlanFile = "room_plan_file"
+        case roomPlanReportFile = "room_plan_report_file"
     }
 }
 

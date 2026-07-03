@@ -24,3 +24,8 @@ collision geometry, or general scene correctness.
 `capture-splat qa-render-source` should be run on raw render canvases matched to
 source frames. Full screenshots remain useful visual records, but they are not
 clean metric inputs.
+
+RoomPlan exports from the iPhone app are room-layout guidance. A RoomPlan USDZ
+or area estimate can help the operator cover walls, openings, floors, and large
+objects, but it does not replace source/render QA, COLMAP registration evidence,
+finite PLY checks, or viewer inspection.

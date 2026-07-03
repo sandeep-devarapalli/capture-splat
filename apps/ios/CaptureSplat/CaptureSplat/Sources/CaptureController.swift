@@ -3,6 +3,7 @@ import CoreImage
 import CoreLocation
 import CoreMotion
 import Foundation
+import RoomPlan
 import UIKit
 
 struct ScanGuidancePoint: Identifiable {
@@ -186,6 +187,11 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var objectExtentSizeText = "--"
     @Published var pointCloudPreviewPointCount = 0
     @Published var pointCloudPreviewFile: URL?
+    @Published var roomPlanStatus = "Room plan waiting"
+    @Published var roomPlanDetail = "Use Room Plan to inspect walls and layout before Mac validation."
+    @Published var roomPlanSummaryText = "No RoomPlan export"
+    @Published var roomPlanFile: URL?
+    @Published var roomPlanReportFile: URL?
 
     private let motion = CMMotionManager()
     private let location = CLLocationManager()
@@ -486,6 +492,8 @@ final class CaptureController: NSObject, ObservableObject {
             pointCloudPreviewSamples.removeAll()
             pointCloudPreviewPointCount = 0
             pointCloudPreviewFile = directory.appendingPathComponent("pointcloud_preview").appendingPathComponent("preview.json")
+            roomPlanFile = nil
+            roomPlanReportFile = nil
             rgbRateSamples.removeAll()
             depthRateSamples.removeAll()
             imuRateSamples.removeAll()
@@ -562,6 +570,8 @@ final class CaptureController: NSObject, ObservableObject {
                 units: "meters"
             ),
             intrinsics: intrinsics,
+            roomPlanFile: roomPlanFile == nil ? nil : "room_plan/room.usdz",
+            roomPlanReportFile: roomPlanReportFile == nil ? nil : "room_plan/room_plan_report.json",
             frames: frames,
             authority: Authority()
         )
@@ -583,7 +593,7 @@ final class CaptureController: NSObject, ObservableObject {
     }
 
     private func makeExportFolders(in directory: URL) throws {
-        for folder in ["rgb", "depth", "confidence", "pointcloud_preview", "metadata"] {
+        for folder in ["rgb", "depth", "confidence", "pointcloud_preview", "room_plan", "metadata"] {
             try FileManager.default.createDirectory(
                 at: directory.appendingPathComponent(folder, isDirectory: true),
                 withIntermediateDirectories: true
@@ -675,6 +685,131 @@ final class CaptureController: NSObject, ObservableObject {
         if JSONSerialization.isValidJSONObject(object),
            let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    @available(iOS 16.0, *)
+    func updateRoomPlanPreview(room: CapturedRoom) {
+        let summary = roomPlanSummary(room)
+        roomPlanStatus = summary.status
+        roomPlanDetail = summary.detail
+        roomPlanSummaryText = summary.shortText
+    }
+
+    @available(iOS 16.0, *)
+    func noteRoomPlanInstruction(_ instruction: RoomCaptureSession.Instruction) {
+        roomPlanStatus = "RoomPlan guidance"
+        roomPlanDetail = roomPlanInstructionText(instruction)
+    }
+
+    @available(iOS 16.0, *)
+    func noteRoomPlanFailure(_ message: String) {
+        roomPlanStatus = "RoomPlan held"
+        roomPlanDetail = message
+    }
+
+    @available(iOS 16.0, *)
+    func exportRoomPlan(room: CapturedRoom) {
+        do {
+            let directory = try prepareRoomPlanDirectory()
+            let roomPlanDirectory = directory.appendingPathComponent("room_plan", isDirectory: true)
+            let usdzURL = roomPlanDirectory.appendingPathComponent("room.usdz")
+            let reportURL = roomPlanDirectory.appendingPathComponent("room_plan_report.json")
+            try room.export(to: usdzURL, exportOptions: .mesh)
+            let report = roomPlanReport(room: room)
+            writeJSON(report, to: reportURL)
+            roomPlanFile = usdzURL
+            roomPlanReportFile = reportURL
+            if !frames.isEmpty {
+                _ = try? writeCaptureManifest()
+            }
+            let summary = roomPlanSummary(room)
+            roomPlanStatus = "RoomPlan exported"
+            roomPlanDetail = summary.detail
+            roomPlanSummaryText = summary.shortText
+        } catch {
+            roomPlanStatus = "RoomPlan export failed"
+            roomPlanDetail = error.localizedDescription
+        }
+    }
+
+    private func prepareRoomPlanDirectory() throws -> URL {
+        let directory: URL
+        if let currentSessionDirectory {
+            directory = currentSessionDirectory
+        } else {
+            directory = try makeSessionDirectory()
+            currentSessionDirectory = directory
+        }
+        try makeExportFolders(in: directory)
+        return directory
+    }
+
+    @available(iOS 16.0, *)
+    private func roomPlanSummary(_ room: CapturedRoom) -> (status: String, detail: String, shortText: String) {
+        let area = roomPlanAreaEstimate(room)
+        let areaText = area.map { String(format: "%.1f m2", $0) } ?? "area pending"
+        let short = "\(room.walls.count) walls | \(room.objects.count) objects | \(areaText)"
+        return (
+            status: "RoomPlan guidance",
+            detail: "\(short). Layout is capture guidance, not 3DGS quality proof.",
+            shortText: short
+        )
+    }
+
+    @available(iOS 16.0, *)
+    private func roomPlanReport(room: CapturedRoom) -> [String: Any] {
+        var report: [String: Any] = [
+            "schema": "capture_splat.room_plan_report.v0.1",
+            "room_plan_file": "room_plan/room.usdz",
+            "walls": room.walls.count,
+            "doors": room.doors.count,
+            "windows": room.windows.count,
+            "openings": room.openings.count,
+            "objects": room.objects.count,
+            "authority": [
+                "capture_guidance_only": true,
+                "metric_authority": false,
+                "collision_geometry": false,
+                "quality_proof": false,
+            ],
+        ]
+        report["area_estimate_square_meters"] = roomPlanAreaEstimate(room) ?? NSNull()
+        if #available(iOS 17.0, *) {
+            report["floors"] = room.floors.count
+            report["sections"] = room.sections.count
+            report["story"] = room.story
+            report["version"] = room.version
+        }
+        return report
+    }
+
+    @available(iOS 16.0, *)
+    private func roomPlanAreaEstimate(_ room: CapturedRoom) -> Double? {
+        guard #available(iOS 17.0, *) else { return nil }
+        let area = room.floors.reduce(0.0) { partial, floor in
+            partial + Double(abs(floor.dimensions.x * floor.dimensions.y))
+        }
+        return area > 0 ? area : nil
+    }
+
+    @available(iOS 16.0, *)
+    private func roomPlanInstructionText(_ instruction: RoomCaptureSession.Instruction) -> String {
+        switch instruction {
+        case .moveCloseToWall:
+            return "Move closer to walls so RoomPlan can refine boundaries."
+        case .moveAwayFromWall:
+            return "Step back to keep more room structure in view."
+        case .slowDown:
+            return "Slow down to avoid weak room layout observations."
+        case .turnOnLight:
+            return "Add light before continuing the room layout pass."
+        case .lowTexture:
+            return "Find textured corners, posters, furniture edges, or door frames."
+        case .normal:
+            return "Continue sweeping walls, corners, openings, and large objects."
+        @unknown default:
+            return "Continue the RoomPlan scan slowly."
         }
     }
 

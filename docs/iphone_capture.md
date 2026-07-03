@@ -37,6 +37,14 @@ It also opens a native LiDAR preview backed by
 points from accepted keyframes. Use it as capture guidance evidence; full mesh
 or splat quality still needs host validation.
 
+Room mode also includes a **Room Plan** review surface on supported LiDAR
+iPhones. It opens Apple's RoomPlan scanner so you can inspect wall, opening,
+floor, and large-object layout while capturing a room. Stopping the Room Plan
+scan writes `room_plan/room.usdz` and `room_plan/room_plan_report.json` in the
+current capture folder when available. Treat this as room-layout guidance and
+scale/context evidence only; it is not COLMAP registration proof, collision
+geometry, or a 3DGS quality claim.
+
 Before COLMAP or VkSplat, run:
 
 ```bash

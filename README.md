@@ -33,6 +33,8 @@ scripts/setup_vksplat.sh external/vksplat
 
 Open `apps/ios/CaptureSplat/CaptureSplat.xcodeproj` in Xcode, set your signing team, run on a physical iPhone, choose **Video 3DGS**, record a slow overlapping scan, and export the capture folder to your computer.
 
+For room scans, the iPhone app also has a Room Plan review path on supported LiDAR iPhones. It can export `room_plan/room.usdz` plus a conservative layout report as capture guidance, not as 3DGS quality proof.
+
 Then run:
 
 ```bash
@@ -84,6 +86,7 @@ The iPhone app must be built with Apple tooling, but once you have an exported c
 - Prefer bright, even lighting.
 - Avoid motion blur and rolling-shutter sweeps.
 - Capture overlapping views and close the loop for room scans.
+- Use Room Plan for room-layout guidance when supported, then still validate capture quality and COLMAP/VkSplat evidence on the host.
 - For objects, orbit around the object and include slightly elevated/lower views.
 - Treat warnings from the app and host QA as real quality blockers.
 

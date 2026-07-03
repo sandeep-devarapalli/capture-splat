@@ -1,4 +1,5 @@
 import Foundation
+import RoomPlan
 import SceneKit
 import SwiftUI
 
@@ -45,6 +46,7 @@ private enum ActiveSheet: String, Identifiable {
     case export
     case camera
     case review
+    case roomPlan
 
     var id: String { rawValue }
 }
@@ -94,6 +96,8 @@ struct ContentView: View {
                 cameraSettingsSheet
             case .review:
                 pointCloudReviewSheet
+            case .roomPlan:
+                roomPlanCaptureSheet
             }
         }
     }
@@ -145,6 +149,7 @@ struct ContentView: View {
                         if scanMode == .roomWalk {
                             colmapCoachCard
                             roomQualityCard
+                            roomPlanCard
                         }
                         coverageStrip
                         sensorToggles
@@ -233,6 +238,16 @@ struct ContentView: View {
                     .buttonStyle(.bordered)
                     .disabled(capture.isRecording || !capture.isObjectTargetLocked)
                     .accessibilityLabel("Lock object extent")
+                }
+
+                if scanMode == .roomWalk {
+                    Button {
+                        activeSheet = .roomPlan
+                    } label: {
+                        Label("Room Plan", systemImage: "map")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(capture.isRecording)
                 }
 
                 Button {
@@ -328,6 +343,16 @@ struct ContentView: View {
                     .toggleStyle(.button)
                     .font(.caption)
                     .disabled(capture.isRecording)
+            }
+
+            if scanMode == .roomWalk {
+                Button {
+                    activeSheet = .roomPlan
+                } label: {
+                    Label("Room Plan", systemImage: "map")
+                }
+                .buttonStyle(.bordered)
+                .disabled(capture.isRecording)
             }
         }
     }
@@ -645,6 +670,38 @@ struct ContentView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
+    private var roomPlanCard: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Label(capture.roomPlanStatus, systemImage: "map")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                Spacer()
+                Text(capture.roomPlanSummaryText)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+            }
+
+            Text(capture.roomPlanDetail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                activeSheet = .roomPlan
+            } label: {
+                Label("Open Room Plan", systemImage: "map")
+            }
+            .buttonStyle(.bordered)
+            .disabled(capture.isRecording)
+        }
+        .padding(10)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
     private var coverageStrip: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -896,6 +953,29 @@ struct ContentView: View {
                 Text("\(capture.pointCloudPreviewPointCount) preview points")
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
+
+                Divider()
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(capture.roomPlanStatus)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                        Text(capture.roomPlanSummaryText)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                    Spacer()
+                    Button {
+                        activeSheet = .roomPlan
+                    } label: {
+                        Label("Room", systemImage: "map")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(capture.isRecording)
+                }
             }
             .padding(10)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -916,6 +996,7 @@ struct ContentView: View {
                         exportRow("Capture Bundle", detail: "Raw RGB-D, IMU, GNSS, metadata", icon: "archivebox", enabled: capture.currentSessionDirectory != nil)
                     }
                     .disabled(capture.currentSessionDirectory == nil || capture.isRecording)
+                    exportRow("Room Plan", detail: "RoomPlan USDZ and conservative layout report", icon: "map", enabled: capture.roomPlanFile != nil)
                     exportRow("PLY + LAS", detail: "Mac ingest output", icon: "point.3.connected.trianglepath.dotted", enabled: false)
                     exportRow("Nerfstudio", detail: "Images and transforms.json", icon: "film.stack", enabled: false)
                     exportRow("COLMAP", detail: "sparse/0 text model", icon: "camera.metering.matrix", enabled: false)
@@ -973,6 +1054,16 @@ struct ContentView: View {
             }
         }
         .presentationDetents([.large])
+    }
+
+    @ViewBuilder
+    private var roomPlanCaptureSheet: some View {
+        if #available(iOS 16.0, *) {
+            RoomPlanCaptureSheet()
+        } else {
+            Text("RoomPlan requires iOS 16 or later.")
+                .padding()
+        }
     }
 
     private var cameraSettingsSheet: some View {
@@ -1229,6 +1320,162 @@ struct ContentView: View {
             return "hand.raised"
         default:
             return "location.viewfinder"
+        }
+    }
+}
+
+@available(iOS 16.0, *)
+private struct RoomPlanCaptureSheet: View {
+    @EnvironmentObject private var capture: CaptureController
+    @Environment(\.dismiss) private var dismiss
+    @State private var isRunning = true
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 10) {
+                RoomPlanCaptureRepresentable(capture: capture, isRunning: $isRunning)
+                    .frame(minHeight: 420)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(capture.roomPlanStatus)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                        Text(capture.roomPlanDetail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    Text(capture.roomPlanSummaryText)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+
+                Button {
+                    if isRunning {
+                        isRunning = false
+                    } else {
+                        dismiss()
+                    }
+                } label: {
+                    Label(isRunning ? "Stop and Export" : "Done", systemImage: isRunning ? "stop.fill" : "checkmark")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding()
+            .navigationTitle("Room Plan")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        isRunning = false
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.large])
+    }
+}
+
+@available(iOS 16.0, *)
+private struct RoomPlanCaptureRepresentable: UIViewRepresentable {
+    let capture: CaptureController
+    @Binding var isRunning: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(capture: capture)
+    }
+
+    func makeUIView(context: Context) -> RoomCaptureView {
+        let view = RoomCaptureView(frame: .zero)
+        view.isModelEnabled = true
+        view.captureSession.delegate = context.coordinator
+        context.coordinator.start(view)
+        return view
+    }
+
+    func updateUIView(_ uiView: RoomCaptureView, context: Context) {
+        if isRunning {
+            context.coordinator.start(uiView)
+        } else {
+            context.coordinator.stop(uiView)
+        }
+    }
+
+    static func dismantleUIView(_ uiView: RoomCaptureView, coordinator: Coordinator) {
+        coordinator.stop(uiView)
+    }
+
+    final class Coordinator: NSObject, RoomCaptureSessionDelegate {
+        private weak var capture: CaptureController?
+        private var didStart = false
+        private var didStop = false
+
+        init(capture: CaptureController) {
+            self.capture = capture
+        }
+
+        func start(_ view: RoomCaptureView) {
+            guard !didStart, !didStop else { return }
+            guard RoomCaptureSession.isSupported else {
+                capture?.noteRoomPlanFailure("RoomPlan is not supported on this device.")
+                didStop = true
+                return
+            }
+            didStart = true
+            var configuration = RoomCaptureSession.Configuration()
+            configuration.isCoachingEnabled = true
+            capture?.roomPlanStatus = "RoomPlan scanning"
+            capture?.roomPlanDetail = "Sweep walls, corners, openings, and large objects slowly."
+            view.captureSession.run(configuration: configuration)
+        }
+
+        func stop(_ view: RoomCaptureView) {
+            guard didStart, !didStop else { return }
+            didStop = true
+            capture?.roomPlanStatus = "RoomPlan processing"
+            capture?.roomPlanDetail = "Building layout evidence and USDZ export."
+            view.captureSession.stop()
+        }
+
+        func captureSession(_ session: RoomCaptureSession, didUpdate room: CapturedRoom) {
+            DispatchQueue.main.async { [weak self] in
+                self?.capture?.updateRoomPlanPreview(room: room)
+            }
+        }
+
+        func captureSession(_ session: RoomCaptureSession, didProvide instruction: RoomCaptureSession.Instruction) {
+            DispatchQueue.main.async { [weak self] in
+                self?.capture?.noteRoomPlanInstruction(instruction)
+            }
+        }
+
+        func captureSession(_ session: RoomCaptureSession, didEndWith data: CapturedRoomData, error: Error?) {
+            if let error {
+                DispatchQueue.main.async { [weak self] in
+                    self?.capture?.noteRoomPlanFailure(error.localizedDescription)
+                }
+                return
+            }
+            let capture = capture
+            Task {
+                do {
+                    let builder = RoomBuilder(options: [.beautifyObjects])
+                    let room = try await builder.capturedRoom(from: data)
+                    await MainActor.run {
+                        capture?.exportRoomPlan(room: room)
+                    }
+                } catch {
+                    await MainActor.run {
+                        capture?.noteRoomPlanFailure(error.localizedDescription)
+                    }
+                }
+            }
         }
     }
 }

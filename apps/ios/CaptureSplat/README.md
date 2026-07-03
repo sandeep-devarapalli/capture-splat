@@ -20,9 +20,14 @@ confidence/
 imu.csv
 gps.csv
 metadata/
+room_plan/
 ```
 
 Use Video 3DGS mode for trainer input. The app records sharp RGB-D keyframes with camera metadata and quality reports; the host pipeline handles COLMAP and VkSplat training.
+
+In Room mode, supported LiDAR iPhones can open Room Plan review and export
+`room_plan/room.usdz` plus `room_plan/room_plan_report.json`. This is capture
+guidance for layout coverage, not a 3DGS quality claim.
 
 Saved frames include `capture_quality` metadata. The host pipeline uses accepted
 keyframes for ingest and COLMAP export, so rejected candidates remain diagnostic
