@@ -101,3 +101,18 @@ capture-splat qa-render-source \
 
 The report includes per-frame PSNR, SSIM, MAE, normalized correlation,
 edge-density, and sharpness proxies, plus weak-frame and tail-frame lists.
+
+When a rung is finite but render/source QA still holds, diagnose weak and tail
+frames before spending a longer run:
+
+```bash
+capture-splat qa-weak-frames-report \
+  --qa-summary runs/scan/render_qa/step_0030000/capture_splat_render_source_qa_summary.json \
+  --colmap-images runs/scan/colmap_package/sparse/0/images.txt \
+  --capture /path/to/capture_splat_session \
+  --out runs/scan/weak_frames/step_0030000
+```
+
+The weak-frame report attaches COLMAP observation support, optional capture
+quality proxies, render/source sharpness ratios, possible reason buckets, and a
+source/render contact sheet. It is diagnostic evidence, not a quality claim.

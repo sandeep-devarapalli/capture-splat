@@ -12,6 +12,7 @@ from .ply_stats import sanitize_ply_drop_non_finite
 from .render_source_qa import run_render_source_qa
 from .transforms_import import import_transforms_package
 from .vksplat_ladder import parse_steps, run_vksplat_ladder
+from .weak_frames_report import run_weak_frames_report
 from .vksplat_runner import doctor, run_vksplat
 
 
@@ -61,6 +62,17 @@ def main() -> None:
     p_sanitize = sub.add_parser("sanitize-ply", help="Drop non-finite PLY vertices and write a strict report")
     p_sanitize.add_argument("--input", type=Path, required=True)
     p_sanitize.add_argument("--out", type=Path)
+    p_weak = sub.add_parser("qa-weak-frames-report", help="Diagnose weak render/source QA frames")
+    p_weak.add_argument("--qa-summary", type=Path, required=True)
+    p_weak.add_argument("--out", type=Path, required=True)
+    p_weak.add_argument("--colmap-images", type=Path)
+    p_weak.add_argument("--capture", type=Path)
+    p_weak.add_argument("--min-colmap-observations", type=int, default=100)
+    p_weak.add_argument("--min-blur-score", type=float, default=0.006)
+    p_weak.add_argument("--min-parallax-meters", type=float, default=0.05)
+    p_weak.add_argument("--min-overlap-score", type=float, default=0.45)
+    p_weak.add_argument("--max-clipped-fraction", type=float, default=0.02)
+    p_weak.add_argument("--max-contact-frames", type=int, default=12)
     p_ladder = sub.add_parser("train-vksplat-ladder", help="Run controlled VkSplat training rungs")
     p_ladder.add_argument("--package", type=Path, required=True)
     p_ladder.add_argument("--out", type=Path, required=True)
@@ -123,6 +135,19 @@ def main() -> None:
         )
     elif args.command == "sanitize-ply":
         payload = sanitize_ply_drop_non_finite(args.input, args.out)
+    elif args.command == "qa-weak-frames-report":
+        payload = run_weak_frames_report(
+            args.qa_summary,
+            args.out,
+            colmap_images=args.colmap_images,
+            capture=args.capture,
+            min_colmap_observations=args.min_colmap_observations,
+            min_blur_score=args.min_blur_score,
+            min_parallax_meters=args.min_parallax_meters,
+            min_overlap_score=args.min_overlap_score,
+            max_clipped_fraction=args.max_clipped_fraction,
+            max_contact_frames=args.max_contact_frames,
+        )
     elif args.command == "train-vksplat-ladder":
         payload = run_vksplat_ladder(
             args.package,

@@ -72,6 +72,11 @@ capture-splat qa-render-source \
   --source-dir runs/my_scan/colmap_package/images \
   --render-dir runs/my_scan/render_canvases/step_0030000 \
   --out runs/my_scan/render_qa/step_0030000
+
+capture-splat qa-weak-frames-report \
+  --qa-summary runs/my_scan/render_qa/step_0030000/capture_splat_render_source_qa_summary.json \
+  --colmap-images runs/my_scan/colmap_package/sparse/0/images.txt \
+  --out runs/my_scan/weak_frames/step_0030000
 ```
 
 ## Linux, Windows, And Cloud GPUs
