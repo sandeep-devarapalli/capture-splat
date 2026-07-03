@@ -162,6 +162,118 @@ def inspect_ply(path: Path) -> dict[str, Any]:
     return summary
 
 
+def sanitize_ply_drop_non_finite(path: Path, out_path: Path | None = None) -> dict[str, Any]:
+    path = path.resolve()
+    out_path = (out_path or path.with_name(f"{path.stem}.finite.ply")).resolve()
+    with path.open("rb") as handle:
+        raw_header: list[bytes] = []
+        while True:
+            raw = handle.readline()
+            if raw == b"":
+                raise ValueError("PLY header ended before end_header")
+            raw_header.append(raw)
+            line = raw.decode("ascii").strip()
+            if line == "end_header":
+                break
+        data_offset = handle.tell()
+
+    with path.open("rb") as header_handle:
+        header, _ = _parse_header(header_handle)
+    vertex_element = next((element for element in header["elements"] if element["name"] == "vertex"), None)
+    if vertex_element is None:
+        raise ValueError("PLY has no vertex element")
+    vertex_count = int(vertex_element["count"])
+    vertex_properties = vertex_element["properties"]
+    extra_elements = [element for element in header["elements"] if element["name"] != "vertex" and int(element["count"]) > 0]
+    if extra_elements:
+        names = ", ".join(element["name"] for element in extra_elements)
+        raise ValueError(f"cannot sanitize PLY files with non-vertex elements: {names}")
+
+    kept_rows: list[bytes | str] = []
+    dropped: list[dict[str, Any]] = []
+    if header["format"] == "ascii":
+        text = path.read_text(encoding="ascii")
+        body = text[text.index("end_header") + len("end_header"):].strip().splitlines()
+        for row_index, line in enumerate(body[:vertex_count]):
+            parts = line.split()
+            if len(parts) < len(vertex_properties):
+                raise ValueError(f"vertex row {row_index + 1} has too few columns")
+            bad_properties = []
+            for index, prop in enumerate(vertex_properties):
+                if prop["kind"] != "scalar" or prop["type"] not in PLY_TYPES:
+                    continue
+                value = float(parts[index])
+                if not math.isfinite(value):
+                    bad_properties.append(prop["name"])
+            if bad_properties:
+                dropped.append({"row": row_index, "properties": bad_properties})
+            else:
+                kept_rows.append(line)
+    else:
+        endian = "<" if header["format"] == "binary_little_endian" else ">"
+        row_format_parts = []
+        for prop in vertex_properties:
+            if prop["kind"] == "list":
+                raise ValueError("cannot sanitize PLY files with list vertex properties")
+            if prop["type"] not in PLY_TYPES:
+                raise ValueError(f"unsupported PLY property type: {prop['type']}")
+            row_format_parts.append(PLY_TYPES[prop["type"]][0])
+        row_format = endian + "".join(row_format_parts)
+        row_size = struct.calcsize(row_format)
+        with path.open("rb") as handle:
+            handle.seek(data_offset)
+            for row_index in range(vertex_count):
+                raw = handle.read(row_size)
+                if len(raw) != row_size:
+                    raise ValueError("PLY binary data ended early")
+                values = struct.unpack(row_format, raw)
+                bad_properties = [
+                    prop["name"]
+                    for prop, value in zip(vertex_properties, values)
+                    if isinstance(value, float) and not math.isfinite(value)
+                ]
+                if bad_properties:
+                    dropped.append({"row": row_index, "properties": bad_properties})
+                else:
+                    kept_rows.append(raw)
+
+    out_header = []
+    for raw in raw_header:
+        line = raw.decode("ascii")
+        if line.startswith("element vertex "):
+            out_header.append(f"element vertex {len(kept_rows)}\n".encode("ascii"))
+        else:
+            out_header.append(raw)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if header["format"] == "ascii":
+        with out_path.open("w", encoding="ascii") as handle:
+            for raw in out_header:
+                handle.write(raw.decode("ascii"))
+            for row in kept_rows:
+                handle.write(str(row) + "\n")
+    else:
+        with out_path.open("wb") as handle:
+            for raw in out_header:
+                handle.write(raw)
+            for row in kept_rows:
+                handle.write(row)  # type: ignore[arg-type]
+
+    output_stats = inspect_ply(out_path)
+    report = {
+        "schema": "capture_splat.ply_sanitize_report.v0.1",
+        "source": str(path),
+        "output": str(out_path),
+        "method": "drop_vertices_with_non_finite_numeric_properties",
+        "source_vertex_count": vertex_count,
+        "output_vertex_count": len(kept_rows),
+        "dropped_vertex_count": len(dropped),
+        "dropped_vertices": dropped[:100],
+        "output_ply_stats": output_stats,
+    }
+    write_json_strict(out_path.with_suffix(out_path.suffix + ".sanitize_report.json"), report)
+    return report
+
+
 def write_ply_stats(path: Path, out_dir: Path) -> dict[str, Any]:
     summary = inspect_ply(path)
     write_json_strict(out_dir / "capture_splat_ply_stats.json", summary)

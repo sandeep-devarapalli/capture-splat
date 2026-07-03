@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .json_utils import load_json_strict, write_json_strict
-from .ply_stats import inspect_ply
+from .ply_stats import inspect_ply, sanitize_ply_drop_non_finite
 from .vksplat_runner import run_vksplat
 
 DEFAULT_STEPS = (3000, 7000, 15000, 30000)
@@ -82,6 +82,7 @@ def run_vksplat_ladder(
     sparse_dir: str = "sparse/0",
     strategy: str = "mcmc",
     dry_run: bool = False,
+    sanitize_non_finite_ply: bool = False,
     max_psnr_drop: float = 0.5,
     max_ssim_drop: float = 0.02,
     max_mae_increase: float = 0.01,
@@ -123,13 +124,26 @@ def run_vksplat_ladder(
             if dry_run:
                 rung["reasons"].append("dry_run_no_ply_validation")
             elif isinstance(splat_path, str):
-                ply_stats = inspect_ply(Path(splat_path))
+                splat = Path(splat_path)
+                ply_stats = inspect_ply(splat)
                 rung["splat_ply"] = splat_path
                 rung["ply_stats"] = ply_stats
                 rung["finite_ply"] = bool(ply_stats["finite"])
                 rung["splat_count"] = ply_stats["splat_count"]
                 rung["radius_summary"] = ply_stats["radius_summary"]
-                if not ply_stats["finite"]:
+                if not ply_stats["finite"] and sanitize_non_finite_ply:
+                    sanitize_report = sanitize_ply_drop_non_finite(splat, splat.with_name("splat.finite_drop_nonfinite.ply"))
+                    sanitized_stats = sanitize_report["output_ply_stats"]
+                    rung["original_splat_ply"] = splat_path
+                    rung["original_ply_stats"] = ply_stats
+                    rung["splat_ply"] = sanitize_report["output"]
+                    rung["ply_stats"] = sanitized_stats
+                    rung["finite_ply"] = bool(sanitized_stats["finite"])
+                    rung["splat_count"] = sanitized_stats["splat_count"]
+                    rung["radius_summary"] = sanitized_stats["radius_summary"]
+                    rung["ply_sanitize_report"] = sanitize_report
+                    rung["reasons"].append("non_finite_ply_sanitized")
+                if not rung["finite_ply"]:
                     rung["decision"] = "reject"
                     rung["reasons"].append("non_finite_ply")
             else:
@@ -179,6 +193,7 @@ def run_vksplat_ladder(
         "vksplat_root": str(vksplat_root),
         "steps": step_values,
         "dry_run": dry_run,
+        "sanitize_non_finite_ply": sanitize_non_finite_ply,
         "thresholds": {
             "max_psnr_drop": max_psnr_drop,
             "max_ssim_drop": max_ssim_drop,
@@ -205,6 +220,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--sparse-dir", default="sparse/0")
     parser.add_argument("--strategy", choices=["default", "mcmc"], default="mcmc")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--sanitize-non-finite-ply", action="store_true")
     parser.add_argument("--max-psnr-drop", type=float, default=0.5)
     parser.add_argument("--max-ssim-drop", type=float, default=0.02)
     parser.add_argument("--max-mae-increase", type=float, default=0.01)
@@ -224,6 +240,7 @@ def main(argv: list[str] | None = None) -> None:
         sparse_dir=args.sparse_dir,
         strategy=args.strategy,
         dry_run=args.dry_run,
+        sanitize_non_finite_ply=args.sanitize_non_finite_ply,
         max_psnr_drop=args.max_psnr_drop,
         max_ssim_drop=args.max_ssim_drop,
         max_mae_increase=args.max_mae_increase,

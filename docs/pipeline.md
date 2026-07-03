@@ -71,6 +71,20 @@ QA if supplied, and a `promote`, `hold`, or `reject` decision. A rung with only
 finite output is held until render/source QA or other quality evidence supports
 promotion.
 
+For trainer outputs with isolated non-finite splats, use the explicit repair
+path instead of editing files by hand:
+
+```bash
+capture-splat sanitize-ply \
+  --input runs/scan/vksplat_ladder/step_0003000/run/splat.ply \
+  --out runs/scan/vksplat_ladder/step_0003000/run/splat.finite_drop_nonfinite.ply
+```
+
+This drops vertices with non-finite numeric properties and writes a strict
+`*.sanitize_report.json`. The ladder can do the same repair with
+`--sanitize-non-finite-ply`, but the report still records the original rejected
+PLY and the sanitized finite candidate separately.
+
 ## Raw-Canvas Render QA
 
 Use raw render canvases for image metrics. Do not compare full app or viewer

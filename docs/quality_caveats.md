@@ -25,6 +25,11 @@ collision geometry, or general scene correctness.
 source frames. Full screenshots remain useful visual records, but they are not
 clean metric inputs.
 
+`capture-splat sanitize-ply` is a finite-output repair, not a quality upgrade.
+It may turn an otherwise usable trainer output into a viewer-loadable candidate
+by dropping non-finite vertex rows, but visual quality still needs render/source
+QA, viewer inspection, and comparison against the source frames.
+
 RoomPlan exports from the iPhone app are room-layout guidance. A RoomPlan USDZ
 or area estimate can help the operator cover walls, openings, floors, and large
 objects, but it does not replace source/render QA, COLMAP registration evidence,

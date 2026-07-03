@@ -8,6 +8,7 @@ from .app_output_compare import compare_app_outputs
 from .capture_quality_report import run_capture_quality_report
 from .colmap_export import export_colmap_text
 from .ingest import ingest_capture
+from .ply_stats import sanitize_ply_drop_non_finite
 from .render_source_qa import run_render_source_qa
 from .transforms_import import import_transforms_package
 from .vksplat_ladder import parse_steps, run_vksplat_ladder
@@ -57,6 +58,9 @@ def main() -> None:
     p_qa.add_argument("--max-mae", type=float, default=0.08)
     p_qa.add_argument("--min-correlation", type=float, default=0.75)
     p_qa.add_argument("--tail-fraction", type=float, default=0.25)
+    p_sanitize = sub.add_parser("sanitize-ply", help="Drop non-finite PLY vertices and write a strict report")
+    p_sanitize.add_argument("--input", type=Path, required=True)
+    p_sanitize.add_argument("--out", type=Path)
     p_ladder = sub.add_parser("train-vksplat-ladder", help="Run controlled VkSplat training rungs")
     p_ladder.add_argument("--package", type=Path, required=True)
     p_ladder.add_argument("--out", type=Path, required=True)
@@ -67,6 +71,7 @@ def main() -> None:
     p_ladder.add_argument("--sparse-dir", default="sparse/0")
     p_ladder.add_argument("--strategy", choices=["default", "mcmc"], default="mcmc")
     p_ladder.add_argument("--dry-run", action="store_true")
+    p_ladder.add_argument("--sanitize-non-finite-ply", action="store_true")
     p_ladder.add_argument("--max-psnr-drop", type=float, default=0.5)
     p_ladder.add_argument("--max-ssim-drop", type=float, default=0.02)
     p_ladder.add_argument("--max-mae-increase", type=float, default=0.01)
@@ -116,6 +121,8 @@ def main() -> None:
             min_correlation=args.min_correlation,
             tail_fraction=args.tail_fraction,
         )
+    elif args.command == "sanitize-ply":
+        payload = sanitize_ply_drop_non_finite(args.input, args.out)
     elif args.command == "train-vksplat-ladder":
         payload = run_vksplat_ladder(
             args.package,
@@ -127,6 +134,7 @@ def main() -> None:
             sparse_dir=args.sparse_dir,
             strategy=args.strategy,
             dry_run=args.dry_run,
+            sanitize_non_finite_ply=args.sanitize_non_finite_ply,
             max_psnr_drop=args.max_psnr_drop,
             max_ssim_drop=args.max_ssim_drop,
             max_mae_increase=args.max_mae_increase,

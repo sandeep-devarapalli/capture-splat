@@ -59,7 +59,10 @@ capture-splat import-transforms \
 The ladder runs controlled `3000 -> 7000 -> 15000 -> 30000` rungs and writes
 `capture_splat_vksplat_ladder_summary.json`. Single-step training is still
 available with `capture-splat train-vksplat --steps 30000`, but a finite `.ply`
-is only validated finite output, not a visual-quality claim.
+is only validated finite output, not a visual-quality claim. If a trainer writes
+a `.ply` with a few non-finite splats, `capture-splat sanitize-ply` can write a
+strict report and a finite copy that drops only non-finite vertex rows. The
+ladder only uses that repair when `--sanitize-non-finite-ply` is set.
 
 If you have raw rendered canvases from a viewer or app, compare them against the
 source images instead of full UI screenshots:
