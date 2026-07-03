@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from PIL import Image
 
 from .capture_schema import frame_selection_summary, iter_frames, load_capture
 from .json_utils import write_json_strict
@@ -28,6 +29,25 @@ def rotation_matrix_to_quaternion_wxyz(matrix: np.ndarray) -> tuple[float, float
     return ((m[1, 0] - m[0, 1]) / s, (m[0, 2] + m[2, 0]) / s, (m[1, 2] + m[2, 1]) / s, 0.25 * s)
 
 
+def intrinsics_for_image(intrinsics: dict[str, float], image_path: Path) -> dict[str, float]:
+    with Image.open(image_path) as image:
+        width, height = image.size
+    intr_w = int(intrinsics["w"])
+    intr_h = int(intrinsics["h"])
+    if intr_w <= 0 or intr_h <= 0:
+        raise ValueError("intrinsics w/h must be positive")
+    x_scale = width / intr_w
+    y_scale = height / intr_h
+    return {
+        "fl_x": intrinsics["fl_x"] * x_scale,
+        "fl_y": intrinsics["fl_y"] * y_scale,
+        "cx": intrinsics["cx"] * x_scale,
+        "cy": intrinsics["cy"] * y_scale,
+        "w": float(width),
+        "h": float(height),
+    }
+
+
 def export_colmap_text(capture_dir: Path, out_dir: Path, copy_images: bool = True) -> dict[str, Any]:
     capture_dir = capture_dir.resolve()
     out_dir = out_dir.resolve()
@@ -42,7 +62,10 @@ def export_colmap_text(capture_dir: Path, out_dir: Path, copy_images: bool = Tru
     image_lines: list[str] = ["# Image list with two lines of data per image:", "# IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, NAME", "# POINTS2D[] as (X, Y, POINT3D_ID)"]
     image_count = 0
     for frame in iter_frames(data, accepted_only=True):
-        intr = frame.intrinsics
+        src = (capture_dir / frame.image_path).resolve()
+        if not src.exists():
+            raise FileNotFoundError(f"frame image missing: {src}")
+        intr = intrinsics_for_image(frame.intrinsics, src)
         key = (intr["fl_x"], intr["fl_y"], intr["cx"], intr["cy"], int(intr["w"]), int(intr["h"]))
         if key not in camera_ids:
             camera_id = len(camera_ids) + 1
@@ -50,9 +73,6 @@ def export_colmap_text(capture_dir: Path, out_dir: Path, copy_images: bool = Tru
             camera_lines.append(f"{camera_id} PINHOLE {int(intr['w'])} {int(intr['h'])} {intr['fl_x']:.12g} {intr['fl_y']:.12g} {intr['cx']:.12g} {intr['cy']:.12g}")
         else:
             camera_id = camera_ids[key]
-        src = (capture_dir / frame.image_path).resolve()
-        if not src.exists():
-            raise FileNotFoundError(f"frame image missing: {src}")
         name = f"{frame.index:06d}{src.suffix.lower() or '.jpg'}"
         if copy_images:
             shutil.copy2(src, image_dir / name)

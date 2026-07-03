@@ -5,6 +5,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from .capture_schema import CAPTURE_SCHEMA, frame_selection_summary, iter_frames, load_capture
 from .json_utils import write_json_strict
 
@@ -27,6 +29,25 @@ def _copy_image(src: Path, dst_dir: Path, index: int) -> str:
     return f"images/{name}"
 
 
+def _intrinsics_for_image(intrinsics: dict[str, float], image_path: Path) -> dict[str, float]:
+    with Image.open(image_path) as image:
+        width, height = image.size
+    intr_w = int(intrinsics["w"])
+    intr_h = int(intrinsics["h"])
+    if intr_w <= 0 or intr_h <= 0:
+        raise ValueError("intrinsics w/h must be positive")
+    x_scale = width / intr_w
+    y_scale = height / intr_h
+    return {
+        "fl_x": intrinsics["fl_x"] * x_scale,
+        "fl_y": intrinsics["fl_y"] * y_scale,
+        "cx": intrinsics["cx"] * x_scale,
+        "cy": intrinsics["cy"] * y_scale,
+        "w": float(width),
+        "h": float(height),
+    }
+
+
 def ingest_capture(capture_dir: Path, out_dir: Path, copy_images: bool = True) -> dict[str, Any]:
     capture_dir = capture_dir.resolve()
     out_dir = out_dir.resolve()
@@ -42,7 +63,7 @@ def ingest_capture(capture_dir: Path, out_dir: Path, copy_images: bool = True) -
         src = (capture_dir / frame.image_path).resolve()
         if not src.exists():
             raise FileNotFoundError(f"frame image missing: {src}")
-        first_intrinsics = first_intrinsics or frame.intrinsics
+        first_intrinsics = first_intrinsics or _intrinsics_for_image(frame.intrinsics, src)
         file_path = _copy_image(src, images_dir, frame.index) if copy_images else str(src)
         frames_payload.append({
             "file_path": file_path,

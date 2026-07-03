@@ -20,6 +20,23 @@ def test_colmap_export_writes_text_model(tmp_path: Path) -> None:
     assert (out / "images" / "000001.jpg").exists()
 
 
+def test_colmap_export_scales_intrinsics_to_rgb_image_size(tmp_path: Path) -> None:
+    capture = make_capture(tmp_path / "capture")
+    Image.new("RGB", (8, 6), (255, 0, 0)).save(capture / "rgb" / "000001.jpg")
+    out = tmp_path / "out"
+
+    export_colmap_text(capture, out)
+    ingest_capture(capture, tmp_path / "ingest")
+
+    cameras = (out / "sparse" / "0" / "cameras.txt").read_text(encoding="utf-8")
+    transforms = load_json_strict(tmp_path / "ingest" / "nerfstudio_dataset" / "transforms.json")
+    assert "1 PINHOLE 8 6 8 6 4 3" in cameras
+    assert transforms["w"] == 8
+    assert transforms["h"] == 6
+    assert transforms["fl_x"] == 8
+    assert transforms["fl_y"] == 6
+
+
 def test_host_exports_only_accepted_quality_frames(tmp_path: Path) -> None:
     capture = tmp_path / "capture"
     image_dir = capture / "rgb"
