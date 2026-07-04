@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Sandeep Devarapalli" }]
-keywords = ["iphone", "3dgs", "gaussian-splatting", "vulkan", "vksplat", "colmap"]
+keywords = ["iphone", "3dgs", "gaussian-splatting", "vulkan", "vksplat", "gsplat", "cuda", "colmap"]
 dependencies = [
   "numpy>=1.24",
   "Pillow>=10.0",
@@ -25,3 +25,6 @@ capture-splat = "capture_splat.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["python"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

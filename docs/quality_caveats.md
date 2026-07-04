@@ -15,7 +15,7 @@ The host tools should report these as quality blockers rather than hiding them b
 
 ## Command Decisions
 
-`capture-splat train-vksplat-ladder` reports `promote`, `hold`, or `reject` per
+`capture-splat train-vksplat-ladder` and optional `capture-splat train-gsplat-ladder` report `promote`, `hold`, or `reject` per
 rung. Treat `hold` as useful evidence that is not sufficient for a quality
 claim. `promote` means the configured proxies improved or stayed within
 thresholds for the supplied evidence; it still does not prove metric geometry,
@@ -34,3 +34,6 @@ RoomPlan exports from the iPhone app are room-layout guidance. A RoomPlan USDZ
 or area estimate can help the operator cover walls, openings, floors, and large
 objects, but it does not replace source/render QA, COLMAP registration evidence,
 finite PLY checks, or viewer inspection.
+
+
+CUDA fallback is a backend choice, not a shortcut around evidence. If gsplat runs where Vulkan is unavailable, keep the same conservative language: finite output, render/source QA decision, weak-frame count, and explicit hold/reject/promote.

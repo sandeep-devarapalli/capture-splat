@@ -11,9 +11,24 @@ from .ingest import ingest_capture
 from .ply_stats import sanitize_ply_drop_non_finite
 from .render_source_qa import run_render_source_qa
 from .transforms_import import import_transforms_package
+from .gsplat_ladder import run_gsplat_ladder
+from .gsplat_runner import doctor as gsplat_doctor
+from .gsplat_runner import run_gsplat
 from .vksplat_ladder import parse_steps, run_vksplat_ladder
 from .weak_frames_report import run_weak_frames_report
-from .vksplat_runner import doctor, run_vksplat
+from .vksplat_runner import doctor as vksplat_doctor
+from .vksplat_runner import run_vksplat
+
+
+def _external_source_status(root: Path | None, required_files: list[str]) -> dict[str, object]:
+    if root is None:
+        return {"source_present": False}
+    root = root.resolve()
+    result: dict[str, object] = {"source_present": root.exists(), "root": str(root)}
+    if root.exists():
+        result["required_files_present"] = all((root / name).exists() for name in required_files)
+        result["build_dir_present"] = (root / "build").exists()
+    return result
 
 
 def main() -> None:
@@ -49,6 +64,16 @@ def main() -> None:
     p_train.add_argument("--vksplat-root", type=Path, required=True)
     p_train.add_argument("--steps", type=int, default=30000)
     p_train.add_argument("--dry-run", action="store_true")
+    p_train_gsplat = sub.add_parser("train-gsplat", help="Run gsplat CUDA training on a COLMAP package")
+    p_train_gsplat.add_argument("--package", type=Path, required=True)
+    p_train_gsplat.add_argument("--out", type=Path, required=True)
+    p_train_gsplat.add_argument("--gsplat-root", type=Path, required=True)
+    p_train_gsplat.add_argument("--steps", type=int, default=30000)
+    p_train_gsplat.add_argument("--strategy", choices=["default", "mcmc"], default="mcmc")
+    p_train_gsplat.add_argument("--image-dir", default="images")
+    p_train_gsplat.add_argument("--sparse-dir", default="sparse/0")
+    p_train_gsplat.add_argument("--data-factor", type=int, default=1)
+    p_train_gsplat.add_argument("--dry-run", action="store_true")
     p_qa = sub.add_parser("qa-render-source", help="Compare render canvases against source images")
     p_qa.add_argument("--source-dir", type=Path, required=True)
     p_qa.add_argument("--render-dir", type=Path, required=True)
@@ -73,6 +98,22 @@ def main() -> None:
     p_weak.add_argument("--min-overlap-score", type=float, default=0.45)
     p_weak.add_argument("--max-clipped-fraction", type=float, default=0.02)
     p_weak.add_argument("--max-contact-frames", type=int, default=12)
+    p_gsplat_ladder = sub.add_parser("train-gsplat-ladder", help="Run controlled gsplat CUDA training rungs")
+    p_gsplat_ladder.add_argument("--package", type=Path, required=True)
+    p_gsplat_ladder.add_argument("--out", type=Path, required=True)
+    p_gsplat_ladder.add_argument("--gsplat-root", type=Path, required=True)
+    p_gsplat_ladder.add_argument("--steps", default="3000,7000,15000,30000")
+    p_gsplat_ladder.add_argument("--qa-summary-dir", type=Path)
+    p_gsplat_ladder.add_argument("--image-dir", default="images")
+    p_gsplat_ladder.add_argument("--sparse-dir", default="sparse/0")
+    p_gsplat_ladder.add_argument("--strategy", choices=["default", "mcmc"], default="mcmc")
+    p_gsplat_ladder.add_argument("--data-factor", type=int, default=1)
+    p_gsplat_ladder.add_argument("--dry-run", action="store_true")
+    p_gsplat_ladder.add_argument("--sanitize-non-finite-ply", action="store_true")
+    p_gsplat_ladder.add_argument("--max-psnr-drop", type=float, default=0.5)
+    p_gsplat_ladder.add_argument("--max-ssim-drop", type=float, default=0.02)
+    p_gsplat_ladder.add_argument("--max-mae-increase", type=float, default=0.01)
+    p_gsplat_ladder.add_argument("--max-correlation-drop", type=float, default=0.03)
     p_ladder = sub.add_parser("train-vksplat-ladder", help="Run controlled VkSplat training rungs")
     p_ladder.add_argument("--package", type=Path, required=True)
     p_ladder.add_argument("--out", type=Path, required=True)
@@ -90,6 +131,9 @@ def main() -> None:
     p_ladder.add_argument("--max-correlation-drop", type=float, default=0.03)
     p_doctor = sub.add_parser("doctor", help="Check local runtime tools")
     p_doctor.add_argument("--vksplat-root", type=Path)
+    p_doctor.add_argument("--gsplat-root", type=Path)
+    p_doctor.add_argument("--three-dgs-cpp-root", type=Path)
+    p_doctor.add_argument("--andrew-3dgs-root", type=Path)
     args = parser.parse_args()
     if args.command == "ingest":
         payload = ingest_capture(args.capture, args.out)
@@ -121,6 +165,18 @@ def main() -> None:
         )
     elif args.command == "train-vksplat":
         payload = run_vksplat(args.package, args.out, args.vksplat_root, steps=args.steps, dry_run=args.dry_run)
+    elif args.command == "train-gsplat":
+        payload = run_gsplat(
+            args.package,
+            args.out,
+            args.gsplat_root,
+            steps=args.steps,
+            strategy=args.strategy,
+            image_dir=args.image_dir,
+            sparse_dir=args.sparse_dir,
+            data_factor=args.data_factor,
+            dry_run=args.dry_run,
+        )
     elif args.command == "qa-render-source":
         payload = run_render_source_qa(
             args.source_dir,
@@ -148,6 +204,24 @@ def main() -> None:
             max_clipped_fraction=args.max_clipped_fraction,
             max_contact_frames=args.max_contact_frames,
         )
+    elif args.command == "train-gsplat-ladder":
+        payload = run_gsplat_ladder(
+            args.package,
+            args.out,
+            args.gsplat_root,
+            steps=parse_steps(args.steps),
+            qa_summary_dir=args.qa_summary_dir,
+            image_dir=args.image_dir,
+            sparse_dir=args.sparse_dir,
+            strategy=args.strategy,
+            data_factor=args.data_factor,
+            dry_run=args.dry_run,
+            sanitize_non_finite_ply=args.sanitize_non_finite_ply,
+            max_psnr_drop=args.max_psnr_drop,
+            max_ssim_drop=args.max_ssim_drop,
+            max_mae_increase=args.max_mae_increase,
+            max_correlation_drop=args.max_correlation_drop,
+        )
     elif args.command == "train-vksplat-ladder":
         payload = run_vksplat_ladder(
             args.package,
@@ -166,7 +240,13 @@ def main() -> None:
             max_correlation_drop=args.max_correlation_drop,
         )
     elif args.command == "doctor":
-        payload = doctor(args.vksplat_root)
+        payload = {
+            "schema": "capture_splat.doctor.v0.2",
+            "vksplat": vksplat_doctor(args.vksplat_root),
+            "gsplat": gsplat_doctor(args.gsplat_root),
+            "three_dgs_cpp": _external_source_status(args.three_dgs_cpp_root, ["CMakeLists.txt"]),
+            "andrew_3dgs": _external_source_status(args.andrew_3dgs_root, ["CMakeLists.txt"]),
+        }
     else:
         raise AssertionError(args.command)
     print(json.dumps(payload, indent=2))

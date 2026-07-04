@@ -1,12 +1,13 @@
 # Capture Splat
 
-**iPhone capture to 3DGS with Vulkan/VkSplat.**
+**iPhone capture to 3DGS with Vulkan/VkSplat, plus optional CUDA evaluation.**
 
 Capture Splat is a brand-neutral starter kit for recording iPhone scan/video data and generating standard 3D Gaussian Splatting `.ply` files. It includes:
 
 - an iPhone app, **Capture Splat**, for guided Video 3DGS capture;
 - a Python host pipeline for capture validation, image package creation, and COLMAP text export;
-- a VkSplat/Vulkan training wrapper for macOS, Linux, Windows, and cloud GPU workflows.
+- a VkSplat/Vulkan training wrapper for macOS, Linux, Windows, and cloud GPU workflows;
+- an optional gsplat/CUDA wrapper for cloud NVIDIA fallback when Vulkan is unavailable.
 
 The output is a standard 3DGS `.ply` that can be inspected in compatible viewers such as SuperSplat, PlayCanvas-based viewers, Spark-compatible viewers, or other Gaussian viewers.
 
@@ -15,7 +16,7 @@ The output is a standard 3DGS `.ply` that can be inspected in compatible viewers
 This repo helps you go from:
 
 ```text
-iPhone capture folder -> COLMAP/VkSplat package -> trained splat.ply
+iPhone capture folder -> COLMAP package -> VkSplat or optional gsplat trainer -> trained splat.ply
 ```
 
 It is not a guarantee that every scan becomes high quality. Good splats still depend on sharp frames, strong overlap, enough parallax, stable exposure, COLMAP registration, and finite trainer output.
@@ -29,6 +30,8 @@ git clone https://github.com/sandeep-devarapalli/capture-splat.git
 cd capture-splat
 scripts/setup_macos.sh
 scripts/setup_vksplat.sh external/vksplat
+# Optional CUDA backend for Linux/cloud NVIDIA machines:
+# scripts/setup_gsplat.sh external/gsplat
 ```
 
 Open `apps/ios/CaptureSplat/CaptureSplat.xcodeproj` in Xcode, set your signing team, run on a physical iPhone, choose **Video 3DGS**, record a slow overlapping scan, and export the capture folder to your computer.
@@ -56,8 +59,8 @@ capture-splat import-transforms \
   --out runs/imported_capture
 ```
 
-The ladder runs controlled `3000 -> 7000 -> 15000 -> 30000` rungs and writes
-`capture_splat_vksplat_ladder_summary.json`. Single-step training is still
+The VkSplat ladder runs controlled `3000 -> 7000 -> 15000 -> 30000` rungs and writes
+`capture_splat_vksplat_ladder_summary.json`. On CUDA cloud machines, `capture-splat train-gsplat-ladder` can run the same conservative ladder through gsplat and writes `capture_splat_gsplat_ladder_summary.json`. Single-step training is still
 available with `capture-splat train-vksplat --steps 30000`, but a finite `.ply`
 is only validated finite output, not a visual-quality claim. If a trainer writes
 a `.ply` with a few non-finite splats, `capture-splat sanitize-ply` can write a
@@ -87,6 +90,21 @@ The iPhone app must be built with Apple tooling, but once you have an exported c
 - Windows: see `docs/windows_setup.md`.
 - Cloud NVIDIA: see `docs/cloud_gpu_setup.md` and `docker/Dockerfile.linux-nvidia`.
 - App comparisons: see `docs/app_comparison.md`.
+
+## Optional Backends
+
+VkSplat/Vulkan remains the default baseline because it is cross-platform in principle and keeps Capture Splat independent of CUDA. If a cloud image exposes CUDA but not a usable Vulkan device, `gsplat` is the preferred direct-CUDA fallback:
+
+```bash
+scripts/setup_gsplat.sh external/gsplat
+capture-splat doctor --gsplat-root external/gsplat
+capture-splat train-gsplat-ladder \
+  --package runs/my_scan/colmap_package \
+  --out runs/my_scan/gsplat_ladder \
+  --gsplat-root external/gsplat
+```
+
+`scripts/setup_external_3dgs_candidates.sh` can clone 3DGS.cpp and AndrewBoessen/3DGS into `external/` for evaluation. 3DGS.cpp is useful for macOS/Vulkan viewer-runtime checks; upstream lists training as TODO. AndrewBoessen/3DGS is a CUDA 13 C++ candidate and is not a default backend.
 
 ## Capture Tips
 

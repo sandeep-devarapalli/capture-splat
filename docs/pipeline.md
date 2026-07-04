@@ -8,7 +8,7 @@ iPhone Video 3DGS capture
   -> Nerfstudio-style transforms.json
   -> COLMAP text package
   -> COLMAP refinement or triangulation as needed
-  -> VkSplat/Vulkan training
+  -> VkSplat/Vulkan training, or optional gsplat/CUDA training on cloud NVIDIA
   -> standard splat.ply
 ```
 
@@ -35,7 +35,7 @@ Use these gates in order:
 2. Capture-time keyframe selection: use accepted frames and keep rejected candidates as diagnostics.
 3. Capture quality report: accepted count, blur, parallax, overlap, depth, and skip reasons.
 4. COLMAP registration summary: registered images, sparse points, observations, and weak-frame track counts.
-5. VkSplat finite-output check: `splat.ply` exists, parses, and has `0` non-finite float values.
+5. Trainer finite-output check: `splat.ply` or `point_cloud_<step>.ply` exists, parses, and has `0` non-finite float values.
 6. Radius/outlier check before and after any clamp.
 7. Viewer/app proof for selected source frames.
 8. Raw render canvas versus source-frame quality metrics.
@@ -56,7 +56,7 @@ for example `3000 -> 7000 -> 15000 -> 30000`, using the same package and the
 same selected proof frames. If a package regresses at a shorter rung, do not
 spend a longer run on it without changing the input package or capture quality.
 
-Run the reusable ladder command after COLMAP package creation:
+Run the reusable VkSplat ladder command after COLMAP package creation:
 
 ```bash
 capture-splat train-vksplat-ladder \
@@ -67,11 +67,13 @@ capture-splat train-vksplat-ladder \
 
 Each rung records the trainer command, step count, output `.ply`, finite PLY
 status, splat count, radius/scale summary when present, attached render/source
-QA if supplied, and a `promote`, `hold`, or `reject` decision. A rung with only
+QA if supplied, and a `promote`, `hold`, or `reject` decision. The optional
+`capture-splat train-gsplat-ladder` command records the same evidence for gsplat
+CUDA runs and writes `capture_splat_gsplat_ladder_summary.json`. A rung with only
 finite output is held until render/source QA or other quality evidence supports
 promotion.
 
-For trainer outputs with isolated non-finite splats, use the explicit repair
+For any trainer output with isolated non-finite splats, use the explicit repair
 path instead of editing files by hand:
 
 ```bash
@@ -116,3 +118,12 @@ capture-splat qa-weak-frames-report \
 The weak-frame report attaches COLMAP observation support, optional capture
 quality proxies, render/source sharpness ratios, possible reason buckets, and a
 source/render contact sheet. It is diagnostic evidence, not a quality claim.
+
+
+## External Backend Candidates
+
+`gsplat` is the first direct-CUDA fallback because its example trainer supports COLMAP input, controlled step counts, disabled viewer/video, and PLY export. Keep it optional and run it on Linux/cloud NVIDIA.
+
+`3DGS.cpp` is a macOS-friendly Vulkan viewer/runtime candidate. It is useful for loading and inspecting produced splats on Mac, but upstream lists training as TODO.
+
+`AndrewBoessen/3DGS` is an experimental CUDA 13 C++ trainer candidate. Do not treat it as production-ready until it passes the same finite PLY and render/source QA gates on Capture Splat packages.

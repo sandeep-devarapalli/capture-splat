@@ -5,6 +5,9 @@ Capture Splat does not vendor training backends in this repository. Setup script
 | Component | Role | License | Source |
 | --- | --- | --- | --- |
 | VkSplat | Vulkan 3DGS training backend | Apache-2.0 | https://github.com/harry7557558/vksplat |
+| gsplat | Optional CUDA 3DGS training backend | Apache-2.0 | https://github.com/nerfstudio-project/gsplat |
+| 3DGS.cpp | Optional Vulkan viewer/runtime candidate | LGPL | https://github.com/shg8/3DGS.cpp |
+| AndrewBoessen/3DGS | Experimental CUDA 13 C++ trainer candidate | See upstream | https://github.com/AndrewBoessen/3DGS |
 | COLMAP | SfM and camera-pose refinement | BSD | https://github.com/colmap/colmap |
 | Nerfstudio | Optional dataset/tooling compatibility reference | Apache-2.0 | https://github.com/nerfstudio-project/nerfstudio |
 | NumPy | Numeric processing | BSD-style | https://numpy.org |
