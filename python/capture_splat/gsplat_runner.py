@@ -24,6 +24,7 @@ def find_gsplat_trainer(gsplat_root: Path) -> Path:
 
 
 def build_command(gsplat_root: Path, trainer: Path, package_dir: Path, output_root: Path, steps: int, strategy: str, data_factor: int) -> list[str]:
+    step_value = str(int(steps))
     return [
         sys.executable,
         str(trainer),
@@ -35,14 +36,14 @@ def build_command(gsplat_root: Path, trainer: Path, package_dir: Path, output_ro
         "--data_factor",
         str(int(data_factor)),
         "--max_steps",
-        str(int(steps)),
+        step_value,
         "--eval_steps",
-        f"[{int(steps)}]",
+        step_value,
         "--save_steps",
-        f"[{int(steps)}]",
+        step_value,
         "--save_ply",
         "--ply_steps",
-        f"[{int(steps)}]",
+        step_value,
         "--disable_viewer",
         "--disable_video",
     ]

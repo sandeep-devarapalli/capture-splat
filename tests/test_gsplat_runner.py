@@ -36,7 +36,7 @@ def test_gsplat_dry_run_records_full_command(tmp_path: Path) -> None:
     assert "--disable_viewer" in summary["command"]
     assert "--disable_video" in summary["command"]
     assert "--save_ply" in summary["command"]
-    assert "[3000]" in summary["command"]
+    assert summary["command"].count("3000") == 4
     assert (tmp_path / "out" / "capture_splat_gsplat_summary.json").exists()
 
 
