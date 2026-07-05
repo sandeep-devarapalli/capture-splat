@@ -82,6 +82,24 @@ capture-splat qa-weak-frames-report \
   --out runs/my_scan/weak_frames/step_0030000
 ```
 
+To compare two backend outputs, use one explicit source-frame list and raw
+renders from each backend:
+
+```bash
+capture-splat compare-backend-renders \
+  --package runs/my_scan/colmap_package \
+  --frames 000001,000017,000025 \
+  --gsplat-ply runs/my_scan/gsplat_ladder/step_0007000/ply/point_cloud_6999.ply \
+  --vksplat-ply runs/my_scan/vksplat_ladder/step_0007000/splat.ply \
+  --gsplat-render-dir runs/my_scan/renders/gsplat_7000 \
+  --vksplat-render-dir runs/my_scan/renders/vksplat_7000 \
+  --out runs/my_scan/backend_compare_7000
+```
+
+If render directories are omitted, the command still writes the shared
+`camera_pairs.json` and reports `renderer_missing`; that is a setup blocker, not
+a quality result.
+
 ## Linux, Windows, And Cloud GPUs
 
 The iPhone app must be built with Apple tooling, but once you have an exported capture folder, the processing side is intended to work on macOS, Linux, Windows, and cloud NVIDIA machines.

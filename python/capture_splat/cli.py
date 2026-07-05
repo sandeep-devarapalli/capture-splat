@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .app_output_compare import compare_app_outputs
+from .backend_render_compare import compare_backend_renders
 from .capture_quality_report import run_capture_quality_report
 from .colmap_export import export_colmap_text
 from .ingest import ingest_capture
@@ -58,6 +59,18 @@ def main() -> None:
     p_compare.add_argument("--splatking", type=Path)
     p_compare.add_argument("--kiri", type=Path)
     p_compare.add_argument("--out", type=Path, required=True)
+    p_compare_backends = sub.add_parser("compare-backend-renders", help="Compare backend renders against one shared source frame list")
+    p_compare_backends.add_argument("--package", type=Path, required=True)
+    p_compare_backends.add_argument("--out", type=Path, required=True)
+    p_compare_backends.add_argument("--frames", help="Comma-separated frame ids or filenames")
+    p_compare_backends.add_argument("--frames-json", type=Path)
+    p_compare_backends.add_argument("--gsplat-ply", type=Path)
+    p_compare_backends.add_argument("--vksplat-ply", type=Path)
+    p_compare_backends.add_argument("--gsplat-render-dir", type=Path)
+    p_compare_backends.add_argument("--vksplat-render-dir", type=Path)
+    p_compare_backends.add_argument("--gsplat-renderer-command")
+    p_compare_backends.add_argument("--vksplat-renderer-command")
+    p_compare_backends.add_argument("--image-dir", default="images")
     p_train = sub.add_parser("train-vksplat", help="Run VkSplat on a COLMAP package")
     p_train.add_argument("--package", type=Path, required=True)
     p_train.add_argument("--out", type=Path, required=True)
@@ -162,6 +175,20 @@ def main() -> None:
             capture_splat=args.capture_splat,
             splatking=args.splatking,
             kiri=args.kiri,
+        )
+    elif args.command == "compare-backend-renders":
+        payload = compare_backend_renders(
+            args.package,
+            args.out,
+            frames=args.frames,
+            frames_json=args.frames_json,
+            gsplat_ply=args.gsplat_ply,
+            vksplat_ply=args.vksplat_ply,
+            gsplat_render_dir=args.gsplat_render_dir,
+            vksplat_render_dir=args.vksplat_render_dir,
+            gsplat_renderer_command=args.gsplat_renderer_command,
+            vksplat_renderer_command=args.vksplat_renderer_command,
+            image_dir_name=args.image_dir,
         )
     elif args.command == "train-vksplat":
         payload = run_vksplat(args.package, args.out, args.vksplat_root, steps=args.steps, dry_run=args.dry_run)

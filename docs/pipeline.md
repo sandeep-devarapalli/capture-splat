@@ -104,6 +104,22 @@ capture-splat qa-render-source \
 The report includes per-frame PSNR, SSIM, MAE, normalized correlation,
 edge-density, and sharpness proxies, plus weak-frame and tail-frame lists.
 
+For backend comparisons, first build one shared source-frame list and compare
+raw renders from each backend against that same list:
+
+```bash
+capture-splat compare-backend-renders \
+  --package runs/scan/colmap_package \
+  --frames 000001,000017,000025 \
+  --gsplat-render-dir runs/scan/renders/gsplat_7000 \
+  --vksplat-render-dir runs/scan/renders/vksplat_7000 \
+  --out runs/scan/backend_compare_7000
+```
+
+If backend render directories are not available, the command writes the shared
+frame contract and reports `renderer_missing`. That is a blocked comparison, not
+visual-quality evidence.
+
 When a rung is finite but render/source QA still holds, diagnose weak and tail
 frames before spending a longer run:
 
