@@ -17,7 +17,7 @@ from .ingest import ingest_capture
 from .ply_stats import prune_ply_by_alpha, sanitize_ply_drop_non_finite
 from .render_source_qa import run_render_source_qa
 from .scene_transform import write_scene_transform_sidecar
-from .sfm_runner import run_sfm
+from .sfm_runner import run_sfm, run_triangulate
 from .transforms_import import import_transforms_package
 from .gsplat_ladder import run_gsplat_ladder
 from .gsplat_runner import doctor as gsplat_doctor
@@ -160,7 +160,18 @@ def main() -> None:
     p_sfm.add_argument("--vocab-tree", type=Path)
     p_sfm.add_argument("--max-features", type=int, default=8192)
     p_sfm.add_argument("--no-copy-images", action="store_true")
+    p_sfm.add_argument("--background-sphere", action="store_true")
     p_sfm.add_argument("--dry-run", action="store_true")
+    p_triangulate = sub.add_parser("triangulate", help="Triangulate a device-pose package with COLMAP and align orientation")
+    p_triangulate.add_argument("--package", type=Path, required=True)
+    p_triangulate.add_argument("--out", type=Path, required=True)
+    p_triangulate.add_argument("--overlap", type=int, default=30)
+    p_triangulate.add_argument("--loop-detection", action="store_true")
+    p_triangulate.add_argument("--vocab-tree", type=Path)
+    p_triangulate.add_argument("--max-features", type=int, default=8192)
+    p_triangulate.add_argument("--refine-poses", action="store_true")
+    p_triangulate.add_argument("--background-sphere", action="store_true")
+    p_triangulate.add_argument("--dry-run", action="store_true")
     p_prune = sub.add_parser("prune-ply", help="Drop near-transparent splats below an alpha threshold for viewer hygiene")
     p_prune.add_argument("--input", type=Path, required=True)
     p_prune.add_argument("--out", type=Path)
@@ -376,6 +387,19 @@ def main() -> None:
             vocab_tree=args.vocab_tree,
             max_features=args.max_features,
             copy_images=not args.no_copy_images,
+            background_sphere=args.background_sphere,
+            dry_run=args.dry_run,
+        )
+    elif args.command == "triangulate":
+        payload = run_triangulate(
+            args.package,
+            args.out,
+            overlap=args.overlap,
+            loop_detection=args.loop_detection,
+            vocab_tree=args.vocab_tree,
+            max_features=args.max_features,
+            refine_poses=args.refine_poses,
+            background_sphere=args.background_sphere,
             dry_run=args.dry_run,
         )
     elif args.command == "prune-ply":

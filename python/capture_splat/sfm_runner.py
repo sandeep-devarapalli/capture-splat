@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .background_sphere import append_background_sphere
 from .json_utils import write_json_strict
 
 SUMMARY_SCHEMA = "capture_splat.sfm_summary.v0.1"
@@ -206,6 +207,7 @@ def run_sfm(
     min_reject_ratio: float = 0.60,
     min_hold_ratio: float = 0.85,
     copy_images: bool = True,
+    background_sphere: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     images_dir = images_dir.resolve()
@@ -279,6 +281,118 @@ def run_sfm(
     summary["registered_ratio"] = ratio
     summary["decision"] = decision
     summary["sparse_dir"] = str(sparse_zero)
+    if background_sphere:
+        summary["background_sphere"] = append_background_sphere(sparse_zero)
+    write_json_strict(out_dir / "capture_splat_sfm_summary.json", summary)
+    return summary
+
+
+def run_triangulate(
+    package_dir: Path,
+    out_dir: Path,
+    overlap: int = 30,
+    loop_detection: bool = False,
+    vocab_tree: Path | None = None,
+    max_features: int = 8192,
+    refine_poses: bool = False,
+    min_reject_ratio: float = 0.60,
+    min_hold_ratio: float = 0.85,
+    background_sphere: bool = False,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    package_dir = package_dir.resolve()
+    out_dir = out_dir.resolve()
+    images_dir = package_dir / "images"
+    sparse_zero = package_dir / "sparse" / "0"
+    if not images_dir.is_dir():
+        raise FileNotFoundError(f"package images missing: {images_dir}")
+    if not (sparse_zero / "images.txt").exists():
+        raise FileNotFoundError(f"package poses missing: {sparse_zero / 'images.txt'}")
+    if loop_detection and vocab_tree is None:
+        loop_detection = False
+    database = out_dir / "database.db"
+    triangulated = package_dir / "sparse" / "0_triangulated"
+    refined = package_dir / "sparse" / "0_refined"
+    commands: list[list[str]] = [
+        [
+            "colmap", "feature_extractor",
+            "--database_path", str(database),
+            "--image_path", str(images_dir),
+            "--ImageReader.single_camera", "1",
+            "--SiftExtraction.max_num_features", str(int(max_features)),
+        ],
+        [
+            "colmap", "sequential_matcher",
+            "--database_path", str(database),
+            "--SequentialMatching.overlap", str(int(overlap)),
+            "--SequentialMatching.loop_detection", "1" if loop_detection else "0",
+            *(["--SequentialMatching.vocab_tree_path", str(vocab_tree)] if loop_detection and vocab_tree else []),
+        ],
+        [
+            "colmap", "point_triangulator",
+            "--database_path", str(database),
+            "--image_path", str(images_dir),
+            "--input_path", str(sparse_zero),
+            "--output_path", str(triangulated),
+        ],
+    ]
+    if refine_poses:
+        commands.append([
+            "colmap", "bundle_adjuster",
+            "--input_path", str(triangulated),
+            "--output_path", str(refined),
+        ])
+    total_images = count_images(images_dir)
+    summary: dict[str, Any] = {
+        "schema": SUMMARY_SCHEMA,
+        "mode": "triangulate_device_pose_prior",
+        "package_dir": str(package_dir),
+        "output_dir": str(out_dir),
+        "overlap": overlap,
+        "loop_detection": loop_detection,
+        "refine_poses": refine_poses,
+        "total_images": total_images,
+        "commands": commands,
+        "blockers": [] if find_binary("colmap") else ["colmap_binary_missing"],
+        "dry_run": dry_run,
+        "authority": {"registration_evidence": True, "pose_prior": "device_poses", "quality_claim": False},
+    }
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if summary["blockers"] or dry_run:
+        summary["decision"] = "blocked" if summary["blockers"] else "dry_run"
+        write_json_strict(out_dir / "capture_splat_sfm_summary.json", summary)
+        if summary["blockers"]:
+            raise RuntimeError("triangulate blocked: colmap_binary_missing")
+        return summary
+    triangulated.mkdir(parents=True, exist_ok=True)
+    if refine_poses:
+        refined.mkdir(parents=True, exist_ok=True)
+    for command in commands:
+        completed = subprocess.run(command, text=True)
+        if completed.returncode != 0:
+            summary["decision"] = "reject"
+            summary["failed_command"] = command
+            write_json_strict(out_dir / "capture_splat_sfm_summary.json", summary)
+            raise RuntimeError(f"triangulate step failed ({command[1]}), exit {completed.returncode}")
+    final = refined if refine_poses else triangulated
+    backup = package_dir / "sparse" / "0_before_triangulation"
+    if backup.exists():
+        shutil.rmtree(backup)
+    shutil.move(str(sparse_zero), str(backup))
+    shutil.move(str(final), str(sparse_zero))
+    if triangulated.exists():
+        shutil.rmtree(triangulated, ignore_errors=True)
+    summary["pose_backup"] = str(backup)
+    summary["orientation_alignment"] = align_orientation(images_dir, sparse_zero)
+    model_to_text(sparse_zero)
+    stats = read_model_stats(sparse_zero)
+    summary["model"] = stats
+    decision, ratio = decide(stats["registered_images"], total_images, min_reject_ratio, min_hold_ratio)
+    summary["registered_ratio"] = ratio
+    summary["decision"] = decision
+    summary["sparse_dir"] = str(sparse_zero)
+    if background_sphere:
+        summary["background_sphere"] = append_background_sphere(sparse_zero)
     write_json_strict(out_dir / "capture_splat_sfm_summary.json", summary)
     return summary
 
