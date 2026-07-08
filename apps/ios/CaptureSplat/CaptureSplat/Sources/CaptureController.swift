@@ -175,7 +175,9 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var targetCoverageSector = 0
     @Published var coverageNavigationText = "Target sector will appear while scanning."
     @Published var scanTargetMode = "object"
+    @Published var isCaptureLockEnabled = true
     private let videoRecorder = CaptureVideoRecorder()
+    private var planeAnchors: [UUID: ARPlaneAnchor] = [:]
     @Published var isObjectTargetLocked = false
     @Published var isRoomTargetLocked = false
     @Published var targetLockStatus = "Lock object before recording"
@@ -413,6 +415,9 @@ final class CaptureController: NSObject, ObservableObject {
             try makeExportFolders(in: directory)
             currentSessionDirectory = directory
             try videoRecorder.start(in: directory)
+            if isCaptureLockEnabled {
+                applyCaptureLocks(true)
+            }
             try writeCSVHeader("imu.csv", columns: [
                 "timestamp", "accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z",
                 "quat_w", "quat_x", "quat_y", "quat_z",
@@ -523,6 +528,7 @@ final class CaptureController: NSObject, ObservableObject {
         isRecording = false
         motion.stopDeviceMotionUpdates()
         videoRecorder.finish()
+        applyCaptureLocks(false)
         writeMetadata()
         do {
             let directory = try writeCaptureManifest()
@@ -681,6 +687,7 @@ final class CaptureController: NSObject, ObservableObject {
             "missing_sector_count": missingSectorCount,
             "background_warning": backgroundWarning,
         ], to: metadata.appendingPathComponent("sensor_health.json"))
+        writeJSON(planesReport(), to: metadata.appendingPathComponent("planes.json"))
         writeJSON(coverageReport(), to: metadata.appendingPathComponent("coverage_report.json"))
         writeJSON(keyframeReport(), to: metadata.appendingPathComponent("keyframe_report.json"))
         writeJSON(roomCaptureQualityReport(), to: metadata.appendingPathComponent("room_capture_quality_report.json"))
@@ -870,6 +877,68 @@ final class CaptureController: NSObject, ObservableObject {
 
     private static var primaryCaptureDevice: AVCaptureDevice? {
         ARWorldTrackingConfiguration.configurableCaptureDeviceForPrimaryCamera
+    }
+
+    private func applyCaptureLocks(_ locked: Bool) {
+        guard let device = Self.primaryCaptureDevice else {
+            if locked {
+                statusText = "Exposure lock unavailable on this device."
+            }
+            return
+        }
+        do {
+            try device.lockForConfiguration()
+            if locked {
+                if device.isExposureModeSupported(.locked) { device.exposureMode = .locked }
+                if device.isWhiteBalanceModeSupported(.locked) { device.whiteBalanceMode = .locked }
+                if device.isFocusModeSupported(.locked) { device.focusMode = .locked }
+            } else {
+                if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+                if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { device.whiteBalanceMode = .continuousAutoWhiteBalance }
+                if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
+            }
+            device.unlockForConfiguration()
+        } catch {
+            statusText = "Capture lock change failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func planesReport() -> [String: Any] {
+        var floorY: Float?
+        let planes = planeAnchors.values.map { anchor -> [String: Any] in
+            let center = simd_mul(anchor.transform, simd_float4(anchor.center, 1))
+            let width = anchor.planeExtent.width
+            let height = anchor.planeExtent.height
+            let isHorizontal = anchor.alignment == .horizontal
+            if isHorizontal, width * height > 0.5, floorY == nil || center.y < floorY! {
+                floorY = center.y
+            }
+            return [
+                "alignment": isHorizontal ? "horizontal" : "vertical",
+                "classification": planeClassificationLabel(anchor.classification),
+                "center_world": [center.x, center.y, center.z],
+                "extent": [width, height],
+            ]
+        }
+        return [
+            "plane_count": planes.count,
+            "floor_y_estimate": floorY as Any,
+            "planes": planes,
+            "authority": "capture_guidance_only",
+        ]
+    }
+
+    private func planeClassificationLabel(_ classification: ARPlaneAnchor.Classification) -> String {
+        switch classification {
+        case .floor: return "floor"
+        case .ceiling: return "ceiling"
+        case .wall: return "wall"
+        case .table: return "table"
+        case .seat: return "seat"
+        case .door: return "door"
+        case .window: return "window"
+        default: return "unknown"
+        }
     }
 
     private func updateCaptureProfileText() {
@@ -2760,6 +2829,30 @@ final class CaptureController: NSObject, ObservableObject {
 }
 
 extension CaptureController: ARSessionDelegate {
+    func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
+        for anchor in anchors {
+            if let plane = anchor as? ARPlaneAnchor {
+                planeAnchors[plane.identifier] = plane
+            }
+        }
+    }
+
+    func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
+        for anchor in anchors {
+            if let plane = anchor as? ARPlaneAnchor {
+                planeAnchors[plane.identifier] = plane
+            }
+        }
+    }
+
+    func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
+        for anchor in anchors {
+            if anchor is ARPlaneAnchor {
+                planeAnchors.removeValue(forKey: anchor.identifier)
+            }
+        }
+    }
+
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         trackingStatus = trackingStateText(frame.camera.trackingState)
         latestFeaturePointCount = frame.rawFeaturePoints?.points.count ?? 0

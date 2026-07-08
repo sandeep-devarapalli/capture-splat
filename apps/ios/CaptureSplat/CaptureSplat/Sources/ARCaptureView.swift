@@ -13,6 +13,7 @@ struct ARCaptureView: UIViewRepresentable {
         if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
             configuration.frameSemantics.insert(.sceneDepth)
         }
+        configuration.planeDetection = [.horizontal, .vertical]
         view.session.run(configuration)
         return view
     }
