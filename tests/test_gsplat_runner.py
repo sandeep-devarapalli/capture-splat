@@ -24,7 +24,7 @@ def make_gsplat_root(root: Path) -> Path:
     return gsplat
 
 
-def test_gsplat_dry_run_records_full_command(tmp_path: Path) -> None:
+def test_gsplat_dry_run_scales_schedule_instead_of_truncating(tmp_path: Path) -> None:
     package = make_package(tmp_path)
     gsplat = make_gsplat_root(tmp_path)
 
@@ -33,11 +33,41 @@ def test_gsplat_dry_run_records_full_command(tmp_path: Path) -> None:
     assert summary["schema"] == "capture_splat.gsplat_run_summary.v0.1"
     assert summary["dry_run"] is True
     assert summary["steps"] == 3000
-    assert "--disable_viewer" in summary["command"]
-    assert "--disable_video" in summary["command"]
-    assert "--save_ply" in summary["command"]
-    assert summary["command"].count("3000") == 4
+    command = summary["command"]
+    assert "--disable_viewer" in command
+    assert "--disable_video" in command
+    assert "--save_ply" in command
+    assert command.count("30000") == 4
+    assert "3000" not in command
+    assert command[command.index("--steps_scaler") + 1] == "0.1"
+    assert "--use_bilateral_grid" in command
+    assert "--random_bkgd" in command
+    assert command[command.index("--strategy.cap-max") + 1] == "1000000"
     assert (tmp_path / "out" / "capture_splat_gsplat_summary.json").exists()
+
+
+def test_gsplat_full_schedule_run_omits_scaler_and_respects_opt_outs(tmp_path: Path) -> None:
+    package = make_package(tmp_path)
+    gsplat = make_gsplat_root(tmp_path)
+
+    summary = run_gsplat(
+        package,
+        tmp_path / "out",
+        gsplat,
+        steps=30000,
+        strategy="mcmc",
+        dry_run=True,
+        use_bilateral_grid=False,
+        random_bkgd=False,
+        max_gaussians=500_000,
+    )
+
+    command = summary["command"]
+    assert "--steps_scaler" not in command
+    assert command.count("30000") == 4
+    assert "--use_bilateral_grid" not in command
+    assert "--random_bkgd" not in command
+    assert command[command.index("--strategy.cap-max") + 1] == "500000"
 
 
 def test_gsplat_missing_package_is_rejected(tmp_path: Path) -> None:

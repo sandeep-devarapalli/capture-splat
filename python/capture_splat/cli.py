@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from pathlib import Path
 
 from .app_output_compare import compare_app_outputs
@@ -14,6 +15,7 @@ from .colmap_support_repair import build_colmap_support_repair
 from .ingest import ingest_capture
 from .ply_stats import prune_ply_by_alpha, sanitize_ply_drop_non_finite
 from .render_source_qa import run_render_source_qa
+from .scene_transform import write_scene_transform_sidecar
 from .sfm_runner import run_sfm
 from .transforms_import import import_transforms_package
 from .gsplat_ladder import run_gsplat_ladder
@@ -118,7 +120,15 @@ def main() -> None:
     p_train_gsplat.add_argument("--image-dir", default="images")
     p_train_gsplat.add_argument("--sparse-dir", default="sparse/0")
     p_train_gsplat.add_argument("--data-factor", type=int, default=1)
+    p_train_gsplat.add_argument("--no-bilateral-grid", action="store_true")
+    p_train_gsplat.add_argument("--no-random-bkgd", action="store_true")
+    p_train_gsplat.add_argument("--max-gaussians", type=int, default=1_000_000)
     p_train_gsplat.add_argument("--dry-run", action="store_true")
+    p_scene_transform = sub.add_parser("scene-transform", help="Write the scene transform sidecar next to a trained PLY")
+    p_scene_transform.add_argument("--ply", type=Path, required=True)
+    p_scene_transform.add_argument("--sparse-dir", type=Path)
+    p_scene_transform.add_argument("--trainer", choices=["gsplat", "vksplat"], default="gsplat")
+    p_scene_transform.add_argument("--no-normalize", action="store_true")
     p_qa = sub.add_parser("qa-render-source", help="Compare render canvases against source images")
     p_qa.add_argument("--source-dir", type=Path, required=True)
     p_qa.add_argument("--render-dir", type=Path, required=True)
@@ -318,7 +328,12 @@ def main() -> None:
             sparse_dir=args.sparse_dir,
             data_factor=args.data_factor,
             dry_run=args.dry_run,
+            use_bilateral_grid=not args.no_bilateral_grid,
+            random_bkgd=not args.no_random_bkgd,
+            max_gaussians=args.max_gaussians,
         )
+    elif args.command == "scene-transform":
+        payload = write_scene_transform_sidecar(args.ply, args.sparse_dir, args.trainer, normalized=not args.no_normalize)
     elif args.command == "qa-render-source":
         payload = run_render_source_qa(
             args.source_dir,
@@ -444,6 +459,7 @@ def main() -> None:
     elif args.command == "doctor":
         payload = {
             "schema": "capture_splat.doctor.v0.2",
+            "tools": {name: shutil.which(name) for name in ("colmap", "glomap", "ffmpeg", "ffprobe")},
             "vksplat": vksplat_doctor(args.vksplat_root),
             "gsplat": gsplat_doctor(args.gsplat_root),
             "three_dgs_cpp": _external_source_status(args.three_dgs_cpp_root, ["CMakeLists.txt"]),
