@@ -8,6 +8,9 @@ from .app_output_compare import compare_app_outputs
 from .backend_render_compare import compare_backend_renders
 from .capture_quality_report import run_capture_quality_report
 from .colmap_export import export_colmap_text
+from .colmap_focused_repair import run_colmap_focused_repair
+from .colmap_support_delta import compare_colmap_support_delta
+from .colmap_support_repair import build_colmap_support_repair
 from .ingest import ingest_capture
 from .ply_stats import sanitize_ply_drop_non_finite
 from .render_source_qa import run_render_source_qa
@@ -19,6 +22,8 @@ from .vksplat_ladder import parse_steps, run_vksplat_ladder
 from .weak_frames_report import run_weak_frames_report
 from .vksplat_runner import doctor as vksplat_doctor
 from .vksplat_runner import run_vksplat
+from .vksplat_render_probe import run_vksplat_render_probe
+from .world_studio_export import export_world_studio_handoff
 
 
 def _external_source_status(root: Path | None, required_files: list[str]) -> dict[str, object]:
@@ -71,12 +76,38 @@ def main() -> None:
     p_compare_backends.add_argument("--gsplat-renderer-command")
     p_compare_backends.add_argument("--vksplat-renderer-command")
     p_compare_backends.add_argument("--image-dir", default="images")
+    p_world_studio = sub.add_parser("export-world-studio", help="Write a Capture Splat handoff package for World Studio")
+    p_world_studio.add_argument("--package", type=Path, required=True)
+    p_world_studio.add_argument("--out", type=Path, required=True)
+    p_world_studio.add_argument("--gaussian", type=Path)
+    p_world_studio.add_argument("--points", type=Path)
+    p_world_studio.add_argument("--capture-manifest", type=Path)
+    p_world_studio.add_argument("--transforms", type=Path)
+    p_world_studio.add_argument("--poses", type=Path)
+    p_world_studio.add_argument("--camera-poses", type=Path)
+    p_world_studio.add_argument("--splat", type=Path)
+    p_world_studio.add_argument("--spz", type=Path)
+    p_world_studio.add_argument("--image-dir", default="images")
+    p_world_studio.add_argument("--sparse-dir", default="sparse/0")
+    p_world_studio.add_argument("--copy-files", action="store_true")
     p_train = sub.add_parser("train-vksplat", help="Run VkSplat on a COLMAP package")
     p_train.add_argument("--package", type=Path, required=True)
     p_train.add_argument("--out", type=Path, required=True)
     p_train.add_argument("--vksplat-root", type=Path, required=True)
     p_train.add_argument("--steps", type=int, default=30000)
+    p_train.add_argument("--save-train-renders", action="store_true")
+    p_train.add_argument("--stop-reset-at", type=int, help="Stop VkSplat opacity resets after this step.")
     p_train.add_argument("--dry-run", action="store_true")
+    p_probe = sub.add_parser("vksplat-render-probe", help="Train VkSplat with train renders enabled and QA exact source-frame cameras")
+    p_probe.add_argument("--package", type=Path, required=True)
+    p_probe.add_argument("--out", type=Path, required=True)
+    p_probe.add_argument("--vksplat-root", type=Path, required=True)
+    p_probe.add_argument("--frames", help="Comma-separated frame ids or filenames")
+    p_probe.add_argument("--steps", type=int, default=7000)
+    p_probe.add_argument("--image-dir", default="images")
+    p_probe.add_argument("--sparse-dir", default="sparse/0")
+    p_probe.add_argument("--strategy", choices=["default", "mcmc"], default="mcmc")
+    p_probe.add_argument("--dry-run", action="store_true")
     p_train_gsplat = sub.add_parser("train-gsplat", help="Run gsplat CUDA training on a COLMAP package")
     p_train_gsplat.add_argument("--package", type=Path, required=True)
     p_train_gsplat.add_argument("--out", type=Path, required=True)
@@ -106,11 +137,49 @@ def main() -> None:
     p_weak.add_argument("--colmap-images", type=Path)
     p_weak.add_argument("--capture", type=Path)
     p_weak.add_argument("--min-colmap-observations", type=int, default=100)
+    p_weak.add_argument("--min-colmap-observation-ratio", type=float, default=0.10)
     p_weak.add_argument("--min-blur-score", type=float, default=0.006)
     p_weak.add_argument("--min-parallax-meters", type=float, default=0.05)
     p_weak.add_argument("--min-overlap-score", type=float, default=0.45)
     p_weak.add_argument("--max-clipped-fraction", type=float, default=0.02)
     p_weak.add_argument("--max-contact-frames", type=int, default=12)
+    p_repair = sub.add_parser("colmap-support-repair", help="Build a targeted COLMAP support repair manifest")
+    p_repair.add_argument("--weak-report", type=Path, required=True)
+    p_repair.add_argument("--package", type=Path, required=True)
+    p_repair.add_argument("--out", type=Path, required=True)
+    p_repair.add_argument("--capture", type=Path)
+    p_repair.add_argument("--colmap-images", type=Path)
+    p_repair.add_argument("--image-dir", default="images")
+    p_repair.add_argument("--neighbor-radius", type=int, default=4)
+    p_repair.add_argument("--max-anchors-per-target", type=int, default=8)
+    p_repair.add_argument("--min-colmap-observations", type=int, default=100)
+    p_repair.add_argument("--min-colmap-observation-ratio", type=float, default=0.10)
+    p_delta = sub.add_parser("colmap-support-delta", help="Compare COLMAP observation support before and after a repair pass")
+    p_delta.add_argument("--original-images", type=Path, required=True)
+    p_delta.add_argument("--repaired-images", type=Path, required=True)
+    p_delta.add_argument("--out", type=Path, required=True)
+    p_delta.add_argument("--frames")
+    p_delta.add_argument("--weak-report", type=Path)
+    p_delta.add_argument("--min-observation-gain", type=int, default=100)
+    p_delta.add_argument("--min-ratio-gain", type=float, default=0.03)
+    p_delta.add_argument("--require-all-improved", action="store_true")
+    p_focused_repair = sub.add_parser("colmap-focused-repair", help="Run a focused COLMAP repair workspace for weak frames")
+    p_focused_repair.add_argument("--package", type=Path, required=True)
+    p_focused_repair.add_argument("--out", type=Path, required=True)
+    p_focused_repair.add_argument("--weak-report", type=Path)
+    p_focused_repair.add_argument("--repair-manifest", type=Path)
+    p_focused_repair.add_argument("--image-dir", default="images")
+    p_focused_repair.add_argument("--sparse-dir", default="sparse/0")
+    p_focused_repair.add_argument("--neighbor-radius", type=int, default=4)
+    p_focused_repair.add_argument("--max-anchors-per-target", type=int, default=8)
+    p_focused_repair.add_argument("--max-num-features", type=int, default=16384)
+    p_focused_repair.add_argument("--use-gpu", action="store_true")
+    p_focused_repair.add_argument("--include-all-registered-images", action="store_true")
+    p_focused_repair.add_argument("--bridge-ranges")
+    p_focused_repair.add_argument("--bridge-window", type=int, default=6)
+    p_focused_repair.add_argument("--preserve-existing-points", action="store_true")
+    p_focused_repair.add_argument("--dry-run", action="store_true")
+    p_focused_repair.add_argument("--colmap-binary", default="colmap")
     p_gsplat_ladder = sub.add_parser("train-gsplat-ladder", help="Run controlled gsplat CUDA training rungs")
     p_gsplat_ladder.add_argument("--package", type=Path, required=True)
     p_gsplat_ladder.add_argument("--out", type=Path, required=True)
@@ -138,6 +207,7 @@ def main() -> None:
     p_ladder.add_argument("--strategy", choices=["default", "mcmc"], default="mcmc")
     p_ladder.add_argument("--dry-run", action="store_true")
     p_ladder.add_argument("--sanitize-non-finite-ply", action="store_true")
+    p_ladder.add_argument("--stop-reset-at", type=int, help="Stop VkSplat opacity resets after this step for every rung.")
     p_ladder.add_argument("--max-psnr-drop", type=float, default=0.5)
     p_ladder.add_argument("--max-ssim-drop", type=float, default=0.02)
     p_ladder.add_argument("--max-mae-increase", type=float, default=0.01)
@@ -190,8 +260,36 @@ def main() -> None:
             vksplat_renderer_command=args.vksplat_renderer_command,
             image_dir_name=args.image_dir,
         )
+    elif args.command == "export-world-studio":
+        payload = export_world_studio_handoff(
+            args.package,
+            args.out,
+            gaussian=args.gaussian,
+            points=args.points,
+            capture_manifest=args.capture_manifest,
+            transforms=args.transforms,
+            poses=args.poses,
+            camera_poses=args.camera_poses,
+            splat=args.splat,
+            spz=args.spz,
+            image_dir_name=args.image_dir,
+            sparse_dir_name=args.sparse_dir,
+            copy_files=args.copy_files,
+        )
     elif args.command == "train-vksplat":
-        payload = run_vksplat(args.package, args.out, args.vksplat_root, steps=args.steps, dry_run=args.dry_run)
+        payload = run_vksplat(args.package, args.out, args.vksplat_root, steps=args.steps, dry_run=args.dry_run, save_train_renders=args.save_train_renders, stop_reset_at=args.stop_reset_at)
+    elif args.command == "vksplat-render-probe":
+        payload = run_vksplat_render_probe(
+            args.package,
+            args.out,
+            args.vksplat_root,
+            frames=args.frames,
+            steps=args.steps,
+            image_dir=args.image_dir,
+            sparse_dir=args.sparse_dir,
+            strategy=args.strategy,
+            dry_run=args.dry_run,
+        )
     elif args.command == "train-gsplat":
         payload = run_gsplat(
             args.package,
@@ -225,11 +323,55 @@ def main() -> None:
             colmap_images=args.colmap_images,
             capture=args.capture,
             min_colmap_observations=args.min_colmap_observations,
+            min_colmap_observation_ratio=args.min_colmap_observation_ratio,
             min_blur_score=args.min_blur_score,
             min_parallax_meters=args.min_parallax_meters,
             min_overlap_score=args.min_overlap_score,
             max_clipped_fraction=args.max_clipped_fraction,
             max_contact_frames=args.max_contact_frames,
+        )
+    elif args.command == "colmap-support-repair":
+        payload = build_colmap_support_repair(
+            args.weak_report,
+            args.package,
+            args.out,
+            capture=args.capture,
+            colmap_images=args.colmap_images,
+            image_dir_name=args.image_dir,
+            neighbor_radius=args.neighbor_radius,
+            max_anchors_per_target=args.max_anchors_per_target,
+            min_colmap_observations=args.min_colmap_observations,
+            min_colmap_observation_ratio=args.min_colmap_observation_ratio,
+        )
+    elif args.command == "colmap-support-delta":
+        payload = compare_colmap_support_delta(
+            args.original_images,
+            args.repaired_images,
+            args.out,
+            frames=args.frames,
+            weak_report=args.weak_report,
+            min_observation_gain=args.min_observation_gain,
+            min_ratio_gain=args.min_ratio_gain,
+            require_all_improved=args.require_all_improved,
+        )
+    elif args.command == "colmap-focused-repair":
+        payload = run_colmap_focused_repair(
+            args.package,
+            args.out,
+            weak_report=args.weak_report,
+            repair_manifest=args.repair_manifest,
+            image_dir_name=args.image_dir,
+            sparse_dir_name=args.sparse_dir,
+            neighbor_radius=args.neighbor_radius,
+            max_anchors_per_target=args.max_anchors_per_target,
+            max_num_features=args.max_num_features,
+            use_gpu=args.use_gpu,
+            include_all_registered_images=args.include_all_registered_images,
+            bridge_ranges=args.bridge_ranges,
+            bridge_window=args.bridge_window,
+            preserve_existing_points=args.preserve_existing_points,
+            dry_run=args.dry_run,
+            colmap_binary=args.colmap_binary,
         )
     elif args.command == "train-gsplat-ladder":
         payload = run_gsplat_ladder(
@@ -261,6 +403,7 @@ def main() -> None:
             strategy=args.strategy,
             dry_run=args.dry_run,
             sanitize_non_finite_ply=args.sanitize_non_finite_ply,
+            stop_reset_at=args.stop_reset_at,
             max_psnr_drop=args.max_psnr_drop,
             max_ssim_drop=args.max_ssim_drop,
             max_mae_increase=args.max_mae_increase,
@@ -277,3 +420,7 @@ def main() -> None:
     else:
         raise AssertionError(args.command)
     print(json.dumps(payload, indent=2))
+
+
+if __name__ == "__main__":
+    main()

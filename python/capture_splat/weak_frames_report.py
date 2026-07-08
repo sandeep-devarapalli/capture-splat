@@ -88,6 +88,7 @@ def _reason_buckets(
     colmap: dict[str, Any] | None,
     capture_quality: dict[str, Any] | None,
     min_colmap_observations: int,
+    min_colmap_observation_ratio: float,
     min_blur_score: float,
     min_parallax_meters: float,
     min_overlap_score: float,
@@ -99,6 +100,9 @@ def _reason_buckets(
     else:
         observations = int(colmap.get("observation_count") or 0)
         if observations < min_colmap_observations:
+            reasons.append("weak_colmap_support")
+        ratio = _num(colmap.get("valid_observation_ratio"))
+        if ratio is not None and ratio < min_colmap_observation_ratio and "weak_colmap_support" not in reasons:
             reasons.append("weak_colmap_support")
 
     render_sharpness_ratio = _ratio(frame.get("render_laplacian_variance"), frame.get("source_laplacian_variance"))
@@ -172,6 +176,7 @@ def run_weak_frames_report(
     colmap_images: Path | None = None,
     capture: Path | None = None,
     min_colmap_observations: int = 100,
+    min_colmap_observation_ratio: float = 0.10,
     min_blur_score: float = 0.006,
     min_parallax_meters: float = 0.05,
     min_overlap_score: float = 0.45,
@@ -227,6 +232,7 @@ def run_weak_frames_report(
                 colmap,
                 quality,
                 min_colmap_observations,
+                min_colmap_observation_ratio,
                 min_blur_score,
                 min_parallax_meters,
                 min_overlap_score,
@@ -252,6 +258,7 @@ def run_weak_frames_report(
         "capture": str(capture.resolve()) if capture else None,
         "thresholds": {
             "min_colmap_observations": min_colmap_observations,
+            "min_colmap_observation_ratio": min_colmap_observation_ratio,
             "min_blur_score": min_blur_score,
             "min_parallax_meters": min_parallax_meters,
             "min_overlap_score": min_overlap_score,
@@ -283,6 +290,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--colmap-images", type=Path)
     parser.add_argument("--capture", type=Path)
     parser.add_argument("--min-colmap-observations", type=int, default=100)
+    parser.add_argument("--min-colmap-observation-ratio", type=float, default=0.10)
     parser.add_argument("--min-blur-score", type=float, default=0.006)
     parser.add_argument("--min-parallax-meters", type=float, default=0.05)
     parser.add_argument("--min-overlap-score", type=float, default=0.45)
@@ -299,6 +307,7 @@ def main(argv: list[str] | None = None) -> None:
         colmap_images=args.colmap_images,
         capture=args.capture,
         min_colmap_observations=args.min_colmap_observations,
+        min_colmap_observation_ratio=args.min_colmap_observation_ratio,
         min_blur_score=args.min_blur_score,
         min_parallax_meters=args.min_parallax_meters,
         min_overlap_score=args.min_overlap_score,

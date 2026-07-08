@@ -47,6 +47,8 @@ capture-splat doctor --vksplat-root external/vksplat
 capture-splat ingest --capture "$CAPTURE" --out runs/my_scan
 capture-splat colmap-export --capture "$CAPTURE" --out runs/my_scan/colmap_package
 capture-splat train-vksplat-ladder   --package runs/my_scan/colmap_package   --out runs/my_scan/vksplat_ladder   --vksplat-root external/vksplat
+# For long rungs that show late reset instability, record a controlled schedule:
+# capture-splat train-vksplat-ladder --package runs/my_scan/colmap_package --out runs/my_scan/vksplat_ladder_stop9000 --vksplat-root external/vksplat --stop-reset-at 9000
 ```
 
 For Record3D, Roomly-style, or Nerfstudio-style exports that already provide
@@ -60,7 +62,7 @@ capture-splat import-transforms \
 ```
 
 The VkSplat ladder runs controlled `3000 -> 7000 -> 15000 -> 30000` rungs and writes
-`capture_splat_vksplat_ladder_summary.json`. On CUDA cloud machines, `capture-splat train-gsplat-ladder` can run the same conservative ladder through gsplat and writes `capture_splat_gsplat_ladder_summary.json`. Single-step training is still
+`capture_splat_vksplat_ladder_summary.json`. The optional `--stop-reset-at` flag records a VkSplat schedule cutoff for opacity resets, useful when longer rungs show late-reset instability; it is a controlled training setting, not a quality claim by itself. On CUDA cloud machines, `capture-splat train-gsplat-ladder` can run the same conservative ladder through gsplat and writes `capture_splat_gsplat_ladder_summary.json`. Single-step training is still
 available with `capture-splat train-vksplat --steps 30000`, but a finite `.ply`
 is only validated finite output, not a visual-quality claim. If a trainer writes
 a `.ply` with a few non-finite splats, `capture-splat sanitize-ply` can write a
@@ -82,6 +84,68 @@ capture-splat qa-weak-frames-report \
   --out runs/my_scan/weak_frames/step_0030000
 ```
 
+For exact-frame VkSplat diagnosis, rerun the same step count with train renders
+enabled and QA only the requested cameras:
+
+```bash
+capture-splat vksplat-render-probe \
+  --package runs/my_scan/colmap_package \
+  --out runs/my_scan/vksplat_7000_render_probe \
+  --vksplat-root external/vksplat \
+  --steps 7000 \
+  --frames 000033,000065,000076,000086,000164
+```
+
+This is useful when weak frames were part of the train split and therefore were
+not present in the normal validation renders. The output remains diagnostic
+render/source evidence, not a high-quality claim.
+
+Use the weak-frame report to build and optionally run a focused COLMAP repair
+workspace before retraining:
+
+```bash
+capture-splat colmap-focused-repair \
+  --package runs/my_scan/colmap_package \
+  --weak-report runs/my_scan/weak_frames/step_0030000/capture_splat_weak_frames_report.json \
+  --out runs/my_scan/colmap_focused_repair
+```
+
+The command writes a focused image/pair plan, runs COLMAP when available, and
+rewrites the focused sparse input so COLMAP 4 database image IDs, `frames.txt`,
+and `rigs.txt` are aligned. If it reports `blocked`, fix the COLMAP support
+package before treating longer training as more than an experiment.
+
+For weak viewpoint neighborhoods, keep the registered package broad and add
+bridge pairs instead of training on a tiny subset:
+
+```bash
+capture-splat colmap-focused-repair \
+  --package runs/my_scan/colmap_package \
+  --repair-manifest runs/my_scan/colmap_focused_repair/support_manifest/capture_splat_colmap_support_repair_manifest.json \
+  --include-all-registered-images \
+  --bridge-ranges 000074-000077,000080-000090 \
+  --bridge-window 6 \
+  --out runs/my_scan/colmap_broader_repair
+```
+
+`--preserve-existing-points` is available only when the database feature rows
+match the existing sparse model; if COLMAP re-extracts features, use support
+delta to verify the result instead of assuming old tracks were preserved.
+
+After a targeted COLMAP repair pass completes, compare support before
+retraining:
+
+```bash
+capture-splat colmap-support-delta \
+  --original-images runs/my_scan/colmap_package/sparse/0/images.txt \
+  --repaired-images runs/my_scan/colmap_repair/sparse/0/images.txt \
+  --weak-report runs/my_scan/weak_frames/step_0030000/capture_splat_weak_frames_report.json \
+  --out runs/my_scan/colmap_repair/support_delta
+```
+
+`proceed_to_training_probe` means the sparse support improved enough to justify
+a short 3000-step probe. It is not a quality claim.
+
 To compare two backend outputs, use one explicit source-frame list and raw
 renders from each backend:
 
@@ -99,6 +163,22 @@ capture-splat compare-backend-renders \
 If render directories are omitted, the command still writes the shared
 `camera_pairs.json` and reports `renderer_missing`; that is a setup blocker, not
 a quality result.
+
+To hand a run to World Studio, write a local package with relative references
+and conservative authority metadata:
+
+```bash
+capture-splat export-world-studio \
+  --package runs/my_scan/colmap_package \
+  --gaussian runs/my_scan/vksplat_ladder/step_0007000/splat.ply \
+  --transforms runs/my_scan/ingest/nerfstudio_dataset/transforms.json \
+  --out runs/my_scan/world_studio_package
+```
+
+This writes `capture-splat.world-studio.json` with schema
+`capture_splat.world_studio_handoff.v0.1`. Source frames are visual evidence;
+trained splats are review proposals, not metric, collision, semantic, or
+navigation authority.
 
 ## Linux, Windows, And Cloud GPUs
 

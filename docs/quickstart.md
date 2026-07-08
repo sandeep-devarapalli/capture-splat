@@ -19,5 +19,7 @@ capture-splat qa-render-source --source-dir runs/scan/colmap_package/images --re
 ```
 
 Use `capture-splat train-vksplat --steps 30000` only when you need one explicit
-trainer run. Use the ladder summary and raw-canvas QA reports before treating a
-run as promoted rather than merely finite.
+trainer run. If long rungs show late-reset instability, repeat the ladder with
+`--stop-reset-at 9000` and compare the same raw-canvas QA frames. Use the ladder
+summary and raw-canvas QA reports before treating a run as promoted rather than
+merely finite.

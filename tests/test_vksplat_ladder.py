@@ -57,6 +57,8 @@ def test_ladder_dry_run_records_commands_and_rejects_regression(tmp_path: Path) 
     assert summary["stop_reason"] == "step_0007000_rejected"
     assert len(summary["rungs"]) == 2
     assert summary["rungs"][0]["command"]
+    assert summary["vksplat_schedule"] == {"stop_reset_at": None}
+    assert summary["rungs"][0]["run_summary"]["stop_reset_at"] is None
     assert summary["rungs"][0]["decision"] == "hold"
     assert "mean_psnr_regressed" in summary["rungs"][1]["reasons"]
     assert (tmp_path / "out" / "capture_splat_vksplat_ladder_summary.json").exists()
@@ -111,3 +113,23 @@ def test_ladder_can_use_sanitized_finite_ply_with_promoting_qa(tmp_path: Path, m
     assert rung["ply_stats"]["finite"] is True
     assert rung["ply_sanitize_report"]["dropped_vertex_count"] == 1
     assert "non_finite_ply_sanitized" in rung["reasons"]
+
+
+def test_ladder_threads_stop_reset_schedule_into_runner(tmp_path: Path) -> None:
+    package = make_package(tmp_path)
+    vksplat = make_vksplat_root(tmp_path)
+
+    summary = run_vksplat_ladder(
+        package,
+        tmp_path / "out",
+        vksplat,
+        steps=[15000],
+        dry_run=True,
+        stop_reset_at=9000,
+    )
+
+    rung = summary["rungs"][0]
+    runner = tmp_path / "out" / "step_0015000" / "capture_splat_vksplat_runner.py"
+    assert summary["vksplat_schedule"] == {"stop_reset_at": 9000}
+    assert rung["run_summary"]["stop_reset_at"] == 9000
+    assert "config.stop_reset_at = 9000" in runner.read_text(encoding="utf-8")
