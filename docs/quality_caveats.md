@@ -36,4 +36,12 @@ objects, but it does not replace source/render QA, COLMAP registration evidence,
 finite PLY checks, or viewer inspection.
 
 
+Bilateral-grid training compensates per-frame exposure/white balance during
+optimization. The exported PLY colors are the splat appearance model, so
+render/source QA still compares fairly, but per-frame scores can shift
+versus non-bilagrid runs; compare ladders with the same recipe.
+
+The background sphere and scene-transform sidecar are packaging aids: seeds
+and coordinate metadata, not reconstruction improvements.
+
 CUDA fallback is a backend choice, not a shortcut around evidence. If gsplat runs where Vulkan is unavailable, keep the same conservative language: finite output, render/source QA decision, weak-frame count, and explicit hold/reject/promote.

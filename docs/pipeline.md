@@ -49,6 +49,34 @@ capture-splat capture-quality-report \
   --out runs/scan/capture_quality
 ```
 
+## Recommended Room-Scan Flow
+
+For room interiors, prefer the automated reconstruction path over the raw
+ARKit-pose export:
+
+```bash
+capture-splat extract-frames --video capture.mov --out runs/scan/frames \
+  --target-frames 300            # sharpest-per-window; add --frame-index when
+                                 # the app exported metadata/frame_index.jsonl
+capture-splat sfm --images runs/scan/frames/images --out runs/scan/colmap_package
+# or, to keep ARKit poses as the prior:
+capture-splat triangulate --package runs/scan/colmap_package --out runs/scan/triangulate
+capture-splat train-gsplat-ladder ... # bilateral grid + random background are
+                                      # on by default; rungs compress the full
+                                      # schedule via steps_scaler
+capture-splat prune-ply --input .../splat.ply
+capture-splat export-world-studio --package ... --capture-profile room_interior
+```
+
+`sfm` runs COLMAP feature extraction, sequential matching (loop detection
+when a vocab tree is supplied), mapping, best-model selection, and
+`model_orientation_aligner`, and gates the result on registration ratio
+(reject below 60%, hold below 85%). GLOMAP is used when installed.
+`--background-sphere` seeds distant background points for room and outdoor
+scenes. Both trainers write `capture_splat_scene_transform.json` next to the
+PLY so viewers can map package cameras into the trained splat world; these
+are registration and alignment evidence, not quality claims.
+
 ## Training Ladder
 
 Short runs are smoke tests. Quality should be judged with controlled ladders,
