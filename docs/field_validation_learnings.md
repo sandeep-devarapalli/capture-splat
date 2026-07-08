@@ -60,6 +60,30 @@ Every serious training run should record and reject on these before claiming pro
 - VkSplat should be the default baseline for this repo, but OpenSplat/MPS remains useful as a sanity-check backend on Apple machines.
 - COLMAP 4.1+ should be evaluated for faster/refined reconstruction paths, but only after the current package gates are reproducible.
 
+## Carry-Forward From The vid2scene Comparison (2026-07-08)
+
+- Frame budget dominates: production video->3DGS pipelines extract hundreds
+  of frames per capture; our ~24 accepted keyframes are the first
+  bottleneck. `extract-frames` closes this on the host; app-side continuous
+  video capture is the remaining unlock.
+- Gsplat ladder rungs must compress the whole schedule (`steps_scaler`),
+  not truncate a 30000-step one; truncated rungs under-train refine/reset
+  behavior and mislead comparisons.
+- Bilateral-grid training absorbs iPhone auto-exposure drift; it is a
+  mitigation, not a substitute for locking exposure at capture.
+- Orientation alignment (`model_orientation_aligner`) plus a persisted
+  scene transform sidecar removes viewer up-axis guessing.
+- Alpha pruning is viewer hygiene, not reconstruction improvement: on the
+  retained 20000-step room run, 34.5% of splats (999,720 -> 654,488) sat
+  below alpha 12/255 and rendered as fog.
+- First `capture-splat sfm` run on the retained room package (218 frames,
+  COLMAP sequential, 2026-07-08): 112/218 registered (51.4%), 38,702
+  points, 196,781 observations, mean track 5.08, mean reprojection 0.846,
+  orientation aligned. The registration gate returned `reject` - a denser
+  model than the historical 99/125 baseline, but the ratio honestly flags
+  weak coverage across the full frame set. The A/B training comparison
+  (same rung, old vs new package) is prepared but not yet run.
+
 ## Immediate Carry-Forward Work
 
 1. Add a public sample-capture QA ladder to this repo with small fixtures first, then real captures.

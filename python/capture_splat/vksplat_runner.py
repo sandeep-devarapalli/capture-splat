@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .json_utils import write_json_strict
+from .scene_transform import SIDECAR_NAME, write_scene_transform_sidecar
 
 
 def find_simple_trainer(vksplat_root: Path) -> Path:
@@ -90,6 +91,9 @@ def run_vksplat(package_dir: Path, output_root: Path, vksplat_root: Path, steps:
     summary["returncode"] = completed.returncode
     splat = find_latest_splat(output_root)
     summary["splat_ply"] = str(splat) if splat else None
+    if splat is not None:
+        sidecar = write_scene_transform_sidecar(splat, package_dir / sparse_dir, "vksplat", normalized=True)
+        summary["scene_transform_sidecar"] = str(splat.parent / SIDECAR_NAME) if sidecar else None
     write_json_strict(output_root / "capture_splat_vksplat_summary.json", summary)
     if completed.returncode != 0:
         raise RuntimeError(f"VkSplat training failed with exit code {completed.returncode}")

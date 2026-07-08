@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from pathlib import Path
 
 from .app_output_compare import compare_app_outputs
 from .backend_render_compare import compare_backend_renders
 from .capture_quality_report import run_capture_quality_report
 from .colmap_export import export_colmap_text
+from .frames_extract import run_extract_frames
 from .colmap_focused_repair import run_colmap_focused_repair
 from .colmap_support_delta import compare_colmap_support_delta
 from .colmap_support_repair import build_colmap_support_repair
 from .ingest import ingest_capture
 from .ply_stats import prune_ply_by_alpha, sanitize_ply_drop_non_finite
 from .render_source_qa import run_render_source_qa
+from .scene_transform import write_scene_transform_sidecar
+from .sfm_runner import run_sfm, run_triangulate
 from .transforms_import import import_transforms_package
 from .gsplat_ladder import run_gsplat_ladder
 from .gsplat_runner import doctor as gsplat_doctor
@@ -90,6 +94,7 @@ def main() -> None:
     p_world_studio.add_argument("--image-dir", default="images")
     p_world_studio.add_argument("--sparse-dir", default="sparse/0")
     p_world_studio.add_argument("--copy-files", action="store_true")
+    p_world_studio.add_argument("--capture-profile", choices=["object", "room_interior", "walkthrough", "outdoor", "video_360"])
     p_train = sub.add_parser("train-vksplat", help="Run VkSplat on a COLMAP package")
     p_train.add_argument("--package", type=Path, required=True)
     p_train.add_argument("--out", type=Path, required=True)
@@ -117,7 +122,15 @@ def main() -> None:
     p_train_gsplat.add_argument("--image-dir", default="images")
     p_train_gsplat.add_argument("--sparse-dir", default="sparse/0")
     p_train_gsplat.add_argument("--data-factor", type=int, default=1)
+    p_train_gsplat.add_argument("--no-bilateral-grid", action="store_true")
+    p_train_gsplat.add_argument("--no-random-bkgd", action="store_true")
+    p_train_gsplat.add_argument("--max-gaussians", type=int, default=1_000_000)
     p_train_gsplat.add_argument("--dry-run", action="store_true")
+    p_scene_transform = sub.add_parser("scene-transform", help="Write the scene transform sidecar next to a trained PLY")
+    p_scene_transform.add_argument("--ply", type=Path, required=True)
+    p_scene_transform.add_argument("--sparse-dir", type=Path)
+    p_scene_transform.add_argument("--trainer", choices=["gsplat", "vksplat"], default="gsplat")
+    p_scene_transform.add_argument("--no-normalize", action="store_true")
     p_qa = sub.add_parser("qa-render-source", help="Compare render canvases against source images")
     p_qa.add_argument("--source-dir", type=Path, required=True)
     p_qa.add_argument("--render-dir", type=Path, required=True)
@@ -131,6 +144,35 @@ def main() -> None:
     p_sanitize = sub.add_parser("sanitize-ply", help="Drop non-finite PLY vertices and write a strict report")
     p_sanitize.add_argument("--input", type=Path, required=True)
     p_sanitize.add_argument("--out", type=Path)
+    p_frames = sub.add_parser("extract-frames", help="Extract training frames from a capture video")
+    p_frames.add_argument("--video", type=Path, required=True)
+    p_frames.add_argument("--out", type=Path, required=True)
+    p_frames.add_argument("--target-frames", type=int, default=300)
+    p_frames.add_argument("--max-edge", type=int, default=1920)
+    p_frames.add_argument("--pick", choices=["sharpest", "first"], default="sharpest")
+    p_frames.add_argument("--frame-index", type=Path)
+    p_sfm = sub.add_parser("sfm", help="Run COLMAP/GLOMAP SfM and produce an orientation-aligned package")
+    p_sfm.add_argument("--images", type=Path, required=True)
+    p_sfm.add_argument("--out", type=Path, required=True)
+    p_sfm.add_argument("--method", choices=["colmap", "glomap"], default="colmap")
+    p_sfm.add_argument("--matcher", choices=["sequential", "exhaustive", "retrieval"], default="sequential")
+    p_sfm.add_argument("--overlap", type=int, default=30)
+    p_sfm.add_argument("--no-loop-detection", action="store_true")
+    p_sfm.add_argument("--vocab-tree", type=Path)
+    p_sfm.add_argument("--max-features", type=int, default=8192)
+    p_sfm.add_argument("--no-copy-images", action="store_true")
+    p_sfm.add_argument("--background-sphere", action="store_true")
+    p_sfm.add_argument("--dry-run", action="store_true")
+    p_triangulate = sub.add_parser("triangulate", help="Triangulate a device-pose package with COLMAP and align orientation")
+    p_triangulate.add_argument("--package", type=Path, required=True)
+    p_triangulate.add_argument("--out", type=Path, required=True)
+    p_triangulate.add_argument("--overlap", type=int, default=30)
+    p_triangulate.add_argument("--loop-detection", action="store_true")
+    p_triangulate.add_argument("--vocab-tree", type=Path)
+    p_triangulate.add_argument("--max-features", type=int, default=8192)
+    p_triangulate.add_argument("--refine-poses", action="store_true")
+    p_triangulate.add_argument("--background-sphere", action="store_true")
+    p_triangulate.add_argument("--dry-run", action="store_true")
     p_prune = sub.add_parser("prune-ply", help="Drop near-transparent splats below an alpha threshold for viewer hygiene")
     p_prune.add_argument("--input", type=Path, required=True)
     p_prune.add_argument("--out", type=Path)
@@ -280,6 +322,7 @@ def main() -> None:
             image_dir_name=args.image_dir,
             sparse_dir_name=args.sparse_dir,
             copy_files=args.copy_files,
+            capture_profile=args.capture_profile,
         )
     elif args.command == "train-vksplat":
         payload = run_vksplat(args.package, args.out, args.vksplat_root, steps=args.steps, dry_run=args.dry_run, save_train_renders=args.save_train_renders, stop_reset_at=args.stop_reset_at)
@@ -306,7 +349,12 @@ def main() -> None:
             sparse_dir=args.sparse_dir,
             data_factor=args.data_factor,
             dry_run=args.dry_run,
+            use_bilateral_grid=not args.no_bilateral_grid,
+            random_bkgd=not args.no_random_bkgd,
+            max_gaussians=args.max_gaussians,
         )
+    elif args.command == "scene-transform":
+        payload = write_scene_transform_sidecar(args.ply, args.sparse_dir, args.trainer, normalized=not args.no_normalize)
     elif args.command == "qa-render-source":
         payload = run_render_source_qa(
             args.source_dir,
@@ -321,6 +369,41 @@ def main() -> None:
         )
     elif args.command == "sanitize-ply":
         payload = sanitize_ply_drop_non_finite(args.input, args.out)
+    elif args.command == "extract-frames":
+        payload = run_extract_frames(
+            args.video,
+            args.out,
+            target_frames=args.target_frames,
+            max_edge=args.max_edge,
+            pick=args.pick,
+            frame_index=args.frame_index,
+        )
+    elif args.command == "sfm":
+        payload = run_sfm(
+            args.images,
+            args.out,
+            method=args.method,
+            matcher=args.matcher,
+            overlap=args.overlap,
+            loop_detection=not args.no_loop_detection,
+            vocab_tree=args.vocab_tree,
+            max_features=args.max_features,
+            copy_images=not args.no_copy_images,
+            background_sphere=args.background_sphere,
+            dry_run=args.dry_run,
+        )
+    elif args.command == "triangulate":
+        payload = run_triangulate(
+            args.package,
+            args.out,
+            overlap=args.overlap,
+            loop_detection=args.loop_detection,
+            vocab_tree=args.vocab_tree,
+            max_features=args.max_features,
+            refine_poses=args.refine_poses,
+            background_sphere=args.background_sphere,
+            dry_run=args.dry_run,
+        )
     elif args.command == "prune-ply":
         payload = prune_ply_by_alpha(args.input, args.out, min_alpha=args.min_alpha, max_dropped_fraction=args.max_dropped_fraction)
     elif args.command == "qa-weak-frames-report":
@@ -419,6 +502,7 @@ def main() -> None:
     elif args.command == "doctor":
         payload = {
             "schema": "capture_splat.doctor.v0.2",
+            "tools": {name: shutil.which(name) for name in ("colmap", "glomap", "ffmpeg", "ffprobe")},
             "vksplat": vksplat_doctor(args.vksplat_root),
             "gsplat": gsplat_doctor(args.gsplat_root),
             "three_dgs_cpp": _external_source_status(args.three_dgs_cpp_root, ["CMakeLists.txt"]),
