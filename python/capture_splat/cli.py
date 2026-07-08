@@ -14,6 +14,7 @@ from .colmap_support_repair import build_colmap_support_repair
 from .ingest import ingest_capture
 from .ply_stats import prune_ply_by_alpha, sanitize_ply_drop_non_finite
 from .render_source_qa import run_render_source_qa
+from .sfm_runner import run_sfm
 from .transforms_import import import_transforms_package
 from .gsplat_ladder import run_gsplat_ladder
 from .gsplat_runner import doctor as gsplat_doctor
@@ -131,6 +132,17 @@ def main() -> None:
     p_sanitize = sub.add_parser("sanitize-ply", help="Drop non-finite PLY vertices and write a strict report")
     p_sanitize.add_argument("--input", type=Path, required=True)
     p_sanitize.add_argument("--out", type=Path)
+    p_sfm = sub.add_parser("sfm", help="Run COLMAP/GLOMAP SfM and produce an orientation-aligned package")
+    p_sfm.add_argument("--images", type=Path, required=True)
+    p_sfm.add_argument("--out", type=Path, required=True)
+    p_sfm.add_argument("--method", choices=["colmap", "glomap"], default="colmap")
+    p_sfm.add_argument("--matcher", choices=["sequential", "exhaustive", "retrieval"], default="sequential")
+    p_sfm.add_argument("--overlap", type=int, default=30)
+    p_sfm.add_argument("--no-loop-detection", action="store_true")
+    p_sfm.add_argument("--vocab-tree", type=Path)
+    p_sfm.add_argument("--max-features", type=int, default=8192)
+    p_sfm.add_argument("--no-copy-images", action="store_true")
+    p_sfm.add_argument("--dry-run", action="store_true")
     p_prune = sub.add_parser("prune-ply", help="Drop near-transparent splats below an alpha threshold for viewer hygiene")
     p_prune.add_argument("--input", type=Path, required=True)
     p_prune.add_argument("--out", type=Path)
@@ -321,6 +333,19 @@ def main() -> None:
         )
     elif args.command == "sanitize-ply":
         payload = sanitize_ply_drop_non_finite(args.input, args.out)
+    elif args.command == "sfm":
+        payload = run_sfm(
+            args.images,
+            args.out,
+            method=args.method,
+            matcher=args.matcher,
+            overlap=args.overlap,
+            loop_detection=not args.no_loop_detection,
+            vocab_tree=args.vocab_tree,
+            max_features=args.max_features,
+            copy_images=not args.no_copy_images,
+            dry_run=args.dry_run,
+        )
     elif args.command == "prune-ply":
         payload = prune_ply_by_alpha(args.input, args.out, min_alpha=args.min_alpha, max_dropped_fraction=args.max_dropped_fraction)
     elif args.command == "qa-weak-frames-report":
