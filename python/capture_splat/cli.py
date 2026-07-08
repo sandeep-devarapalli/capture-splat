@@ -9,6 +9,7 @@ from .app_output_compare import compare_app_outputs
 from .backend_render_compare import compare_backend_renders
 from .capture_quality_report import run_capture_quality_report
 from .colmap_export import export_colmap_text
+from .frames_extract import run_extract_frames
 from .colmap_focused_repair import run_colmap_focused_repair
 from .colmap_support_delta import compare_colmap_support_delta
 from .colmap_support_repair import build_colmap_support_repair
@@ -142,6 +143,13 @@ def main() -> None:
     p_sanitize = sub.add_parser("sanitize-ply", help="Drop non-finite PLY vertices and write a strict report")
     p_sanitize.add_argument("--input", type=Path, required=True)
     p_sanitize.add_argument("--out", type=Path)
+    p_frames = sub.add_parser("extract-frames", help="Extract training frames from a capture video")
+    p_frames.add_argument("--video", type=Path, required=True)
+    p_frames.add_argument("--out", type=Path, required=True)
+    p_frames.add_argument("--target-frames", type=int, default=300)
+    p_frames.add_argument("--max-edge", type=int, default=1920)
+    p_frames.add_argument("--pick", choices=["sharpest", "first"], default="sharpest")
+    p_frames.add_argument("--frame-index", type=Path)
     p_sfm = sub.add_parser("sfm", help="Run COLMAP/GLOMAP SfM and produce an orientation-aligned package")
     p_sfm.add_argument("--images", type=Path, required=True)
     p_sfm.add_argument("--out", type=Path, required=True)
@@ -348,6 +356,15 @@ def main() -> None:
         )
     elif args.command == "sanitize-ply":
         payload = sanitize_ply_drop_non_finite(args.input, args.out)
+    elif args.command == "extract-frames":
+        payload = run_extract_frames(
+            args.video,
+            args.out,
+            target_frames=args.target_frames,
+            max_edge=args.max_edge,
+            pick=args.pick,
+            frame_index=args.frame_index,
+        )
     elif args.command == "sfm":
         payload = run_sfm(
             args.images,
