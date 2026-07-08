@@ -274,6 +274,162 @@ def sanitize_ply_drop_non_finite(path: Path, out_path: Path | None = None) -> di
     return report
 
 
+ALPHA_HISTOGRAM_EDGES = (0.0, 1.0, 2.0, 4.0, 8.0, 12.0, 16.0, 32.0, 64.0, 128.0, 255.0)
+
+
+def _alpha_from_logit(logit: float) -> float:
+    if logit >= 0.0:
+        return 255.0 / (1.0 + math.exp(-logit))
+    value = math.exp(logit)
+    return 255.0 * value / (1.0 + value)
+
+
+def _alpha_histogram(alphas: list[float]) -> list[dict[str, float | int]]:
+    buckets = []
+    for low, high in zip(ALPHA_HISTOGRAM_EDGES[:-1], ALPHA_HISTOGRAM_EDGES[1:]):
+        count = sum(1 for alpha in alphas if low <= alpha < high or (high == 255.0 and alpha == 255.0))
+        buckets.append({"min_alpha": low, "max_alpha": high, "count": count})
+    return buckets
+
+
+def prune_ply_by_alpha(path: Path, out_path: Path | None = None, min_alpha: float = 12.0, max_dropped_fraction: float = 0.6) -> dict[str, Any]:
+    path = path.resolve()
+    alpha_tag = f"{min_alpha:g}".replace(".", "p")
+    out_path = (out_path or path.with_name(f"{path.stem}.pruned_a{alpha_tag}.ply")).resolve()
+    with path.open("rb") as handle:
+        raw_header: list[bytes] = []
+        while True:
+            raw = handle.readline()
+            if raw == b"":
+                raise ValueError("PLY header ended before end_header")
+            raw_header.append(raw)
+            if raw.decode("ascii").strip() == "end_header":
+                break
+        data_offset = handle.tell()
+
+    with path.open("rb") as header_handle:
+        header, _ = _parse_header(header_handle)
+    vertex_element = next((element for element in header["elements"] if element["name"] == "vertex"), None)
+    if vertex_element is None:
+        raise ValueError("PLY has no vertex element")
+    vertex_count = int(vertex_element["count"])
+    vertex_properties = vertex_element["properties"]
+    extra_elements = [element for element in header["elements"] if element["name"] != "vertex" and int(element["count"]) > 0]
+    if extra_elements:
+        names = ", ".join(element["name"] for element in extra_elements)
+        raise ValueError(f"cannot prune PLY files with non-vertex elements: {names}")
+    opacity_index = next((index for index, prop in enumerate(vertex_properties) if prop["kind"] == "scalar" and prop["name"] == "opacity"), None)
+    if opacity_index is None:
+        raise ValueError("PLY has no scalar opacity property; not a 3DGS splat PLY")
+
+    kept_rows: list[bytes | str] = []
+    alphas: list[float] = []
+    opacity_min = math.inf
+    opacity_max = -math.inf
+    dropped_count = 0
+    if header["format"] == "ascii":
+        text = path.read_text(encoding="ascii")
+        body = text[text.index("end_header") + len("end_header"):].strip().splitlines()
+        for row_index, line in enumerate(body[:vertex_count]):
+            parts = line.split()
+            if len(parts) < len(vertex_properties):
+                raise ValueError(f"vertex row {row_index + 1} has too few columns")
+            logit = float(parts[opacity_index])
+            alpha = _alpha_from_logit(logit) if math.isfinite(logit) else 0.0
+            alphas.append(alpha)
+            if math.isfinite(logit):
+                opacity_min = min(opacity_min, logit)
+                opacity_max = max(opacity_max, logit)
+            if alpha >= min_alpha:
+                kept_rows.append(line)
+            else:
+                dropped_count += 1
+    else:
+        endian = "<" if header["format"] == "binary_little_endian" else ">"
+        row_format_parts = []
+        for prop in vertex_properties:
+            if prop["kind"] == "list":
+                raise ValueError("cannot prune PLY files with list vertex properties")
+            if prop["type"] not in PLY_TYPES:
+                raise ValueError(f"unsupported PLY property type: {prop['type']}")
+            row_format_parts.append(PLY_TYPES[prop["type"]][0])
+        row_format = endian + "".join(row_format_parts)
+        row_size = struct.calcsize(row_format)
+        with path.open("rb") as handle:
+            handle.seek(data_offset)
+            for _ in range(vertex_count):
+                raw = handle.read(row_size)
+                if len(raw) != row_size:
+                    raise ValueError("PLY binary data ended early")
+                logit = float(struct.unpack(row_format, raw)[opacity_index])
+                alpha = _alpha_from_logit(logit) if math.isfinite(logit) else 0.0
+                alphas.append(alpha)
+                if math.isfinite(logit):
+                    opacity_min = min(opacity_min, logit)
+                    opacity_max = max(opacity_max, logit)
+                if alpha >= min_alpha:
+                    kept_rows.append(raw)
+                else:
+                    dropped_count += 1
+
+    dropped_fraction = dropped_count / vertex_count if vertex_count else 0.0
+    warnings = []
+    if math.isfinite(opacity_min) and 0.0 <= opacity_min and opacity_max <= 1.0:
+        warnings.append("opacity_values_all_within_0_1_may_already_be_activated")
+    refused = dropped_fraction > max_dropped_fraction
+    report: dict[str, Any] = {
+        "schema": "capture_splat.ply_prune_report.v0.1",
+        "source": str(path),
+        "output": str(out_path) if not refused else None,
+        "method": "drop_vertices_below_alpha_threshold",
+        "opacity_interpretation": "logit_sigmoid_255",
+        "min_alpha": min_alpha,
+        "max_dropped_fraction": max_dropped_fraction,
+        "source_vertex_count": vertex_count,
+        "output_vertex_count": len(kept_rows),
+        "dropped_vertex_count": dropped_count,
+        "dropped_fraction": dropped_fraction,
+        "alpha_histogram": _alpha_histogram(alphas),
+        "warnings": warnings,
+        "decision": "reject" if refused else "pruned",
+        "authority": {
+            "viewer_hygiene_only": True,
+            "quality_claim": False,
+        },
+    }
+    report_path = out_path.with_suffix(out_path.suffix + ".prune_report.json")
+    write_json_strict(report_path, report)
+    if refused:
+        raise RuntimeError(
+            f"refusing to prune: {dropped_fraction:.1%} of splats fall below alpha {min_alpha:g} "
+            f"(limit {max_dropped_fraction:.0%}); the training run is the problem, not the tail. Report: {report_path}"
+        )
+
+    out_header = []
+    for raw in raw_header:
+        line = raw.decode("ascii")
+        if line.startswith("element vertex "):
+            out_header.append(f"element vertex {len(kept_rows)}\n".encode("ascii"))
+        else:
+            out_header.append(raw)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if header["format"] == "ascii":
+        with out_path.open("w", encoding="ascii") as handle:
+            for raw in out_header:
+                handle.write(raw.decode("ascii"))
+            for row in kept_rows:
+                handle.write(str(row) + "\n")
+    else:
+        with out_path.open("wb") as handle:
+            for raw in out_header:
+                handle.write(raw)
+            for row in kept_rows:
+                handle.write(row)  # type: ignore[arg-type]
+    report["output_ply_stats"] = inspect_ply(out_path)
+    write_json_strict(report_path, report)
+    return report
+
+
 def write_ply_stats(path: Path, out_dir: Path) -> dict[str, Any]:
     summary = inspect_ply(path)
     write_json_strict(out_dir / "capture_splat_ply_stats.json", summary)
