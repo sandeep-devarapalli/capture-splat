@@ -81,8 +81,22 @@ Every serious training run should record and reject on these before claiming pro
   points, 196,781 observations, mean track 5.08, mean reprojection 0.846,
   orientation aligned. The registration gate returned `reject` - a denser
   model than the historical 99/125 baseline, but the ratio honestly flags
-  weak coverage across the full frame set. The A/B training comparison
-  (same rung, old vs new package) is prepared but not yet run.
+  weak coverage across the full frame set.
+- A/B training comparison (2026-07-08, JarvisLabs L4, gsplat v1.5.3 mcmc,
+  identical recipe per package: steps_scaler 7000/30000, bilateral grid,
+  random background, 1M cap): the raw ARKit-pose package versus the new
+  `sfm` COLMAP-refined orientation-aligned package, same source images.
+  Held-out validation (every 8th registered frame):
+  ARKit-pose package: PSNR 20.62, SSIM 0.829, LPIPS 0.313.
+  sfm package: PSNR 21.47, SSIM 0.854, LPIPS 0.239.
+  The sfm package improved every proxy (+0.85 dB PSNR, -23% LPIPS) while
+  training on fewer registered views, and its splat is gravity-aligned
+  for viewers. Caveats: the two runs hold out different frame subsets
+  (each package's own registration), and these are quality proxies on one
+  capture, not a general claim. Decision: promote the sfm path as the
+  default reconstruction route; the capture itself remains the limiting
+  factor (51% registration) until continuous-video captures land.
+  Artifacts: runs/video3dgs_first_device/c1_gsplat_ab_20260708.
 
 ## Immediate Carry-Forward Work
 
