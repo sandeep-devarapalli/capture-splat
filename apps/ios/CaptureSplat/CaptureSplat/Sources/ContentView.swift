@@ -338,6 +338,11 @@ struct ContentView: View {
                 .font(.caption)
                 .disabled(capture.isRecording)
 
+            Toggle("Lock", isOn: $capture.isCaptureLockEnabled)
+                .toggleStyle(.button)
+                .font(.caption)
+                .disabled(capture.isRecording)
+
             if scanMode == .objectOrbit {
                 Toggle("Mask", isOn: $capture.isObjectMaskEnabled)
                     .toggleStyle(.button)
