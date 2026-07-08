@@ -97,6 +97,23 @@ Every serious training run should record and reject on these before claiming pro
   default reconstruction route; the capture itself remains the limiting
   factor (51% registration) until continuous-video captures land.
   Artifacts: runs/video3dgs_first_device/c1_gsplat_ab_20260708.
+- Exhaustive-matching follow-up (2026-07-09, same recipe and rung). GPU
+  COLMAP (CUDA 4.1) exhaustive matching on the same 218 frames registered
+  213/218 (97.7%, single connected model, 69,211 points, decision
+  `promote`) - correcting the earlier caveat: sequential matching, not
+  the capture, was the limiting factor. Training that package at the same
+  rung: PSNR 20.52, SSIM 0.831, LPIPS 0.305 (color-corrected 22.90 /
+  0.844 / 0.281 versus ARKit 22.92 / 0.842 / 0.290). Reading this
+  honestly: the three runs hold out different frame subsets. The
+  sequential package's higher proxies come from validating only on the
+  112 frames it could register - a self-selected, easier subset - so they
+  do not mean it reconstructs the room better. On near-matched held-out
+  coverage (213 vs 218 registered frames), the exhaustive package's
+  proxies are on par with ARKit poses while adding SfM-refined,
+  orientation-alignable geometry and full-orbit coverage. Decision:
+  prefer exhaustive matching on GPU COLMAP for room orbits (now the
+  `sfm` default; CPU runs require an explicit recorded override). A
+  matched-holdout, longer-rung ladder comparison remains open.
 
 ## Immediate Carry-Forward Work
 
