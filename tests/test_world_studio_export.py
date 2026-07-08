@@ -108,3 +108,31 @@ def test_export_world_studio_can_write_into_package_without_removing_assets(tmp_
     assert (package / "splat.ply").exists()
     assert manifest["source_frames"][0]["rgb_path"] == "images/000001.jpg"
     assert manifest["assets"]["gaussian_ply"]["path"] == "splat.ply"
+    assert manifest["assets"]["gaussian_ply"]["variant"] == "raw"
+
+
+def test_export_world_studio_prefers_alpha_pruned_gaussian(tmp_path: Path) -> None:
+    package = tmp_path / "colmap_package"
+    write_image(package / "images" / "000001.jpg")
+    write_ascii_ply(package / "splat.ply")
+    write_ascii_ply(package / "splat.pruned_a12.ply")
+
+    export_world_studio_handoff(package, tmp_path / "world_studio", copy_files=True)
+    manifest = load_json_strict(tmp_path / "world_studio" / MANIFEST_NAME)
+
+    gaussian = manifest["assets"]["gaussian_ply"]
+    assert gaussian["path"] == "splat.ply"
+    assert gaussian["variant"] == "alpha_pruned"
+    assert gaussian["source_name"] == "splat.pruned_a12.ply"
+
+
+def test_export_world_studio_explicit_gaussian_wins_over_pruned(tmp_path: Path) -> None:
+    package = tmp_path / "colmap_package"
+    write_image(package / "images" / "000001.jpg")
+    write_ascii_ply(package / "splat.ply")
+    write_ascii_ply(package / "splat.pruned_a12.ply")
+
+    export_world_studio_handoff(package, tmp_path / "world_studio", gaussian=package / "splat.ply", copy_files=True)
+    manifest = load_json_strict(tmp_path / "world_studio" / MANIFEST_NAME)
+
+    assert manifest["assets"]["gaussian_ply"]["variant"] == "raw"

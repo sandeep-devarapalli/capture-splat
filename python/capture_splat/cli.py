@@ -12,7 +12,7 @@ from .colmap_focused_repair import run_colmap_focused_repair
 from .colmap_support_delta import compare_colmap_support_delta
 from .colmap_support_repair import build_colmap_support_repair
 from .ingest import ingest_capture
-from .ply_stats import sanitize_ply_drop_non_finite
+from .ply_stats import prune_ply_by_alpha, sanitize_ply_drop_non_finite
 from .render_source_qa import run_render_source_qa
 from .transforms_import import import_transforms_package
 from .gsplat_ladder import run_gsplat_ladder
@@ -131,6 +131,11 @@ def main() -> None:
     p_sanitize = sub.add_parser("sanitize-ply", help="Drop non-finite PLY vertices and write a strict report")
     p_sanitize.add_argument("--input", type=Path, required=True)
     p_sanitize.add_argument("--out", type=Path)
+    p_prune = sub.add_parser("prune-ply", help="Drop near-transparent splats below an alpha threshold for viewer hygiene")
+    p_prune.add_argument("--input", type=Path, required=True)
+    p_prune.add_argument("--out", type=Path)
+    p_prune.add_argument("--min-alpha", type=float, default=12.0, help="Keep splats with sigmoid(opacity)*255 >= this value")
+    p_prune.add_argument("--max-dropped-fraction", type=float, default=0.6)
     p_weak = sub.add_parser("qa-weak-frames-report", help="Diagnose weak render/source QA frames")
     p_weak.add_argument("--qa-summary", type=Path, required=True)
     p_weak.add_argument("--out", type=Path, required=True)
@@ -316,6 +321,8 @@ def main() -> None:
         )
     elif args.command == "sanitize-ply":
         payload = sanitize_ply_drop_non_finite(args.input, args.out)
+    elif args.command == "prune-ply":
+        payload = prune_ply_by_alpha(args.input, args.out, min_alpha=args.min_alpha, max_dropped_fraction=args.max_dropped_fraction)
     elif args.command == "qa-weak-frames-report":
         payload = run_weak_frames_report(
             args.qa_summary,

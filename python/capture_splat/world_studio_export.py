@@ -160,7 +160,15 @@ def export_world_studio_handoff(
     images = _find_images(package, image_dir_name)
     if not images:
         raise FileNotFoundError(f"no source images found in {package / image_dir_name}")
-    gaussian = gaussian or _first_existing(package, ("splat.ply", "gaussians.ply", "gaussian.ply"))
+    gaussian = gaussian or _first_existing(package, (
+        "splat.pruned_a12.ply",
+        "gaussians.pruned_a12.ply",
+        "gaussian.pruned_a12.ply",
+        "splat.ply",
+        "gaussians.ply",
+        "gaussian.ply",
+    ))
+    gaussian_variant = "alpha_pruned" if gaussian is not None and ".pruned_a" in gaussian.name else "raw"
     points = points or _first_existing(package, ("points.ply", "point_cloud.ply", "cloud.ply"))
     capture_manifest = capture_manifest or _first_existing(package, ("capture.json",))
     transforms = transforms or _first_existing(package, ("transforms.json",))
@@ -184,7 +192,11 @@ def export_world_studio_handoff(
     if copied_points:
         assets["points"] = _file_ref(copied_points, out_dir)
     if copied_gaussian:
-        assets["gaussian_ply" if copied_gaussian.suffix.lower() == ".ply" else "gaussian"] = _file_ref(copied_gaussian, out_dir)
+        gaussian_ref = _file_ref(copied_gaussian, out_dir)
+        gaussian_ref["variant"] = gaussian_variant
+        if gaussian_variant == "alpha_pruned":
+            gaussian_ref["source_name"] = gaussian.name if gaussian else None
+        assets["gaussian_ply" if copied_gaussian.suffix.lower() == ".ply" else "gaussian"] = gaussian_ref
     if copied_capture:
         assets["capture_manifest"] = _file_ref(copied_capture, out_dir)
     if copied_transforms:
