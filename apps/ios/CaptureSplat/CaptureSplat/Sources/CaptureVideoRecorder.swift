@@ -1,0 +1,153 @@
+import ARKit
+import AVFoundation
+import Foundation
+
+/// Records the continuous ARKit RGB stream to video/capture.mov and writes
+/// metadata/frame_index.jsonl with one line per appended video frame so host
+/// tools can extract hundreds of training frames with device pose priors.
+final class CaptureVideoRecorder {
+    private var writer: AVAssetWriter?
+    private var input: AVAssetWriterInput?
+    private var adaptor: AVAssetWriterInputPixelBufferAdaptor?
+    private var indexHandle: FileHandle?
+    private var startTimestamp: TimeInterval?
+    private var lastAppendedTimestamp: TimeInterval = -.infinity
+    private let minimumFrameInterval: TimeInterval
+    private(set) var appendedFrameCount = 0
+    private(set) var droppedFrameCount = 0
+
+    static let videoRelativePath = "video/capture.mov"
+    static let frameIndexRelativePath = "metadata/frame_index.jsonl"
+
+    init(targetFPS: Double = 30) {
+        minimumFrameInterval = targetFPS > 0 ? (1.0 / targetFPS) * 0.9 : 0
+    }
+
+    var isActive: Bool { writer != nil }
+
+    func start(in directory: URL) throws {
+        finish()
+        let videoDirectory = directory.appendingPathComponent("video", isDirectory: true)
+        try FileManager.default.createDirectory(at: videoDirectory, withIntermediateDirectories: true)
+        let indexURL = directory.appendingPathComponent(Self.frameIndexRelativePath)
+        FileManager.default.createFile(atPath: indexURL.path, contents: nil)
+        indexHandle = try FileHandle(forWritingTo: indexURL)
+        let movURL = directory.appendingPathComponent(Self.videoRelativePath)
+        try? FileManager.default.removeItem(at: movURL)
+        writer = try AVAssetWriter(outputURL: movURL, fileType: .mov)
+        startTimestamp = nil
+        lastAppendedTimestamp = -.infinity
+        appendedFrameCount = 0
+        droppedFrameCount = 0
+    }
+
+    func append(frame: ARFrame, captureDevice: AVCaptureDevice?) {
+        guard let writer else { return }
+        let timestamp = frame.timestamp
+        guard timestamp - lastAppendedTimestamp >= minimumFrameInterval else { return }
+        let pixelBuffer = frame.capturedImage
+        if input == nil {
+            let settings: [String: Any] = [
+                AVVideoCodecKey: AVVideoCodecType.hevc,
+                AVVideoWidthKey: CVPixelBufferGetWidth(pixelBuffer),
+                AVVideoHeightKey: CVPixelBufferGetHeight(pixelBuffer),
+            ]
+            let newInput = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
+            newInput.expectsMediaDataInRealTime = true
+            guard writer.canAdd(newInput) else { return }
+            writer.add(newInput)
+            guard writer.startWriting() else { return }
+            writer.startSession(atSourceTime: .zero)
+            input = newInput
+            adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: newInput, sourcePixelBufferAttributes: nil)
+            startTimestamp = timestamp
+        }
+        guard let input, let adaptor, let startTimestamp else { return }
+        guard input.isReadyForMoreMediaData else {
+            droppedFrameCount += 1
+            return
+        }
+        let relative = timestamp - startTimestamp
+        let presentation = CMTime(seconds: relative, preferredTimescale: 600)
+        guard adaptor.append(pixelBuffer, withPresentationTime: presentation) else {
+            droppedFrameCount += 1
+            return
+        }
+        lastAppendedTimestamp = timestamp
+        writeIndexLine(frame: frame, relativeTimestamp: relative, captureDevice: captureDevice)
+        appendedFrameCount += 1
+    }
+
+    func finish() {
+        try? indexHandle?.close()
+        indexHandle = nil
+        if let writer, let input, writer.status == .writing {
+            input.markAsFinished()
+            writer.finishWriting {}
+        }
+        writer = nil
+        input = nil
+        adaptor = nil
+        startTimestamp = nil
+    }
+
+    private func writeIndexLine(frame: ARFrame, relativeTimestamp: TimeInterval, captureDevice: AVCaptureDevice?) {
+        guard let indexHandle else { return }
+        let transform = frame.camera.transform
+        let cameraToWorld = (0..<4).map { row in
+            (0..<4).map { column in Double(transform[column][row]) }
+        }
+        let intrinsicsMatrix = frame.camera.intrinsics
+        let resolution = frame.camera.imageResolution
+        var entry: [String: Any] = [
+            "video_frame_idx": appendedFrameCount,
+            "timestamp": relativeTimestamp,
+            "camera_to_world": cameraToWorld,
+            "intrinsics": [
+                "fl_x": Double(intrinsicsMatrix[0][0]),
+                "fl_y": Double(intrinsicsMatrix[1][1]),
+                "cx": Double(intrinsicsMatrix[2][0]),
+                "cy": Double(intrinsicsMatrix[2][1]),
+                "w": Double(resolution.width),
+                "h": Double(resolution.height),
+            ],
+            "tracking_state": trackingStateLabel(frame.camera.trackingState),
+            "exposure_duration": frame.camera.exposureDuration,
+        ]
+        if frame.camera.exposureOffset.isFinite {
+            entry["exposure_offset"] = Double(frame.camera.exposureOffset)
+        }
+        if let device = captureDevice {
+            entry["iso"] = Double(device.iso)
+        }
+        if let light = frame.lightEstimate {
+            entry["ambient_intensity"] = light.ambientIntensity
+            entry["ambient_color_temperature_k"] = light.ambientColorTemperature
+        }
+        guard JSONSerialization.isValidJSONObject(entry),
+              let data = try? JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys]) else {
+            return
+        }
+        indexHandle.write(data)
+        indexHandle.write(Data("\n".utf8))
+    }
+
+    private func trackingStateLabel(_ state: ARCamera.TrackingState) -> String {
+        switch state {
+        case .normal:
+            return "normal"
+        case .notAvailable:
+            return "not_available"
+        case .limited(.excessiveMotion):
+            return "limited_excessive_motion"
+        case .limited(.insufficientFeatures):
+            return "limited_insufficient_features"
+        case .limited(.initializing):
+            return "limited_initializing"
+        case .limited(.relocalizing):
+            return "limited_relocalizing"
+        case .limited:
+            return "limited"
+        }
+    }
+}

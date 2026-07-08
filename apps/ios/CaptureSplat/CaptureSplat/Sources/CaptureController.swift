@@ -1,4 +1,5 @@
 import ARKit
+import AVFoundation
 import CoreImage
 import CoreLocation
 import CoreMotion
@@ -174,6 +175,7 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var targetCoverageSector = 0
     @Published var coverageNavigationText = "Target sector will appear while scanning."
     @Published var scanTargetMode = "object"
+    private let videoRecorder = CaptureVideoRecorder()
     @Published var isObjectTargetLocked = false
     @Published var isRoomTargetLocked = false
     @Published var targetLockStatus = "Lock object before recording"
@@ -410,6 +412,7 @@ final class CaptureController: NSObject, ObservableObject {
             let directory = try makeSessionDirectory()
             try makeExportFolders(in: directory)
             currentSessionDirectory = directory
+            try videoRecorder.start(in: directory)
             try writeCSVHeader("imu.csv", columns: [
                 "timestamp", "accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z",
                 "quat_w", "quat_x", "quat_y", "quat_z",
@@ -519,6 +522,7 @@ final class CaptureController: NSObject, ObservableObject {
         guard isRecording else { return }
         isRecording = false
         motion.stopDeviceMotionUpdates()
+        videoRecorder.finish()
         writeMetadata()
         do {
             let directory = try writeCaptureManifest()
@@ -552,7 +556,9 @@ final class CaptureController: NSObject, ObservableObject {
                 buildNumber: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
             ),
             captureMode: captureModeLabel(),
+            captureProfile: captureProfileLabel(),
             depthMode: "sceneDepth",
+            sessionConfig: makeSessionConfig(),
             rgb: StreamReport(
                 format: "jpeg",
                 requestedFPS: 30,
@@ -570,6 +576,9 @@ final class CaptureController: NSObject, ObservableObject {
                 units: "meters"
             ),
             intrinsics: intrinsics,
+            videoFile: videoRecorder.appendedFrameCount > 0 ? CaptureVideoRecorder.videoRelativePath : nil,
+            frameIndexFile: videoRecorder.appendedFrameCount > 0 ? CaptureVideoRecorder.frameIndexRelativePath : nil,
+            videoFrameCount: videoRecorder.appendedFrameCount > 0 ? videoRecorder.appendedFrameCount : nil,
             roomPlanFile: roomPlanFile == nil ? nil : "room_plan/room.usdz",
             roomPlanReportFile: roomPlanReportFile == nil ? nil : "room_plan/room_plan_report.json",
             frames: frames,
@@ -835,6 +844,32 @@ final class CaptureController: NSObject, ObservableObject {
         default:
             return "Rear LiDAR Object Reconstruction"
         }
+    }
+
+    private func captureProfileLabel() -> String {
+        switch scanTargetMode {
+        case "room":
+            return "room_interior"
+        case "video_3dgs":
+            return "walkthrough"
+        default:
+            return "object"
+        }
+    }
+
+    private func makeSessionConfig() -> SessionConfig {
+        let device = Self.primaryCaptureDevice
+        return SessionConfig(
+            aeLock: device?.exposureMode == .locked,
+            awbLock: device?.whiteBalanceMode == .locked,
+            focusLock: device?.focusMode == .locked,
+            videoFormat: videoRecorder.appendedFrameCount > 0 ? "hevc" : nil,
+            videoTargetFPS: videoRecorder.appendedFrameCount > 0 ? 30 : nil
+        )
+    }
+
+    private static var primaryCaptureDevice: AVCaptureDevice? {
+        ARWorldTrackingConfiguration.configurableCaptureDeviceForPrimaryCamera
     }
 
     private func updateCaptureProfileText() {
@@ -2729,6 +2764,9 @@ extension CaptureController: ARSessionDelegate {
         trackingStatus = trackingStateText(frame.camera.trackingState)
         latestFeaturePointCount = frame.rawFeaturePoints?.points.count ?? 0
         updateMotionRate(from: frame)
+        if isRecording, currentSessionDirectory != nil {
+            videoRecorder.append(frame: frame, captureDevice: Self.primaryCaptureDevice)
+        }
         guard let sceneDepth = frame.sceneDepth else {
             guidancePoints.removeAll()
             if isRecording {

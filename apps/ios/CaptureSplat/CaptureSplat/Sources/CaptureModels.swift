@@ -68,12 +68,14 @@ struct CameraIntrinsics: Encodable {
 }
 
 struct CaptureManifest: Encodable {
-    let schema = "capture_splat.v0.1"
+    let schema = "capture_splat.v0.2"
     let device: DeviceInfo
     let captureMode: String
+    let captureProfile: String
     let depthMode: String
     let source = "CaptureSplat"
     let depthScale = 1.0
+    let sessionConfig: SessionConfig
     let rgb: StreamReport
     let depth: StreamReport
     let intrinsics: CameraIntrinsics
@@ -83,6 +85,9 @@ struct CaptureManifest: Encodable {
     let roomCaptureQualityFile = "metadata/room_capture_quality_report.json"
     let captureProfileFile = "metadata/capture_profile_report.json"
     let pointCloudPreviewFile = "pointcloud_preview/preview.json"
+    let videoFile: String?
+    let frameIndexFile: String?
+    let videoFrameCount: Int?
     let roomPlanFile: String?
     let roomPlanReportFile: String?
     let frames: [CapturedFrame]
@@ -91,16 +96,45 @@ struct CaptureManifest: Encodable {
     enum CodingKeys: String, CodingKey {
         case schema, device, source, rgb, depth, intrinsics, frames, authority
         case captureMode = "capture_mode"
+        case captureProfile = "capture_profile"
         case depthMode = "depth_mode"
         case depthScale = "depth_scale"
+        case sessionConfig = "session_config"
         case imuFile = "imu_file"
         case gpsFile = "gps_file"
         case objectMatteFile = "object_matte_file"
         case roomCaptureQualityFile = "room_capture_quality_file"
         case captureProfileFile = "capture_profile_file"
         case pointCloudPreviewFile = "pointcloud_preview_file"
+        case videoFile = "video_file"
+        case frameIndexFile = "frame_index_file"
+        case videoFrameCount = "video_frame_count"
         case roomPlanFile = "room_plan_file"
         case roomPlanReportFile = "room_plan_report_file"
+    }
+}
+
+struct SessionConfig: Encodable {
+    let worldAlignment = "gravity"
+    let upAxis: [Float] = [0, 1, 0]
+    let scaleAuthority = "arkit_vio_metric"
+    let aeLock: Bool
+    let awbLock: Bool
+    let focusLock: Bool
+    let videoFormat: String?
+    let videoTargetFPS: Int?
+    let lens = "wide"
+
+    enum CodingKeys: String, CodingKey {
+        case lens
+        case worldAlignment = "world_alignment"
+        case upAxis = "up_axis"
+        case scaleAuthority = "scale_authority"
+        case aeLock = "ae_lock"
+        case awbLock = "awb_lock"
+        case focusLock = "focus_lock"
+        case videoFormat = "video_format"
+        case videoTargetFPS = "video_target_fps"
     }
 }
 
