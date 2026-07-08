@@ -29,6 +29,21 @@ def find_binary(name: str) -> str | None:
     return shutil.which(name)
 
 
+def colmap_has_cuda() -> bool | None:
+    if find_binary("colmap") is None:
+        return None
+    try:
+        completed = subprocess.run(["colmap", "help"], text=True, capture_output=True)
+    except OSError:
+        return None
+    banner = (completed.stdout or "") + (completed.stderr or "")
+    if "with CUDA" in banner:
+        return True
+    if "without CUDA" in banner:
+        return False
+    return None
+
+
 def count_images(images_dir: Path) -> int:
     return sum(1 for path in images_dir.iterdir() if path.suffix.lower() in {".jpg", ".jpeg", ".png"})
 
@@ -199,7 +214,7 @@ def run_sfm(
     images_dir: Path,
     out_dir: Path,
     method: str = "colmap",
-    matcher: str = "sequential",
+    matcher: str = "exhaustive",
     overlap: int = 30,
     loop_detection: bool = True,
     vocab_tree: Path | None = None,
@@ -208,6 +223,7 @@ def run_sfm(
     min_hold_ratio: float = 0.85,
     copy_images: bool = True,
     background_sphere: bool = False,
+    allow_cpu_matching: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     images_dir = images_dir.resolve()
@@ -217,11 +233,18 @@ def run_sfm(
     if matcher == "retrieval":
         raise RuntimeError("retrieval matching requires hloc (see scripts/setup_sfm.sh); use sequential or exhaustive")
     blockers: list[str] = []
+    colmap_cuda: bool | None = None
     if find_binary("colmap") is None:
         blockers.append("colmap_binary_missing")
+    else:
+        colmap_cuda = colmap_has_cuda()
+        if colmap_cuda is not True and not allow_cpu_matching:
+            blockers.append("colmap_cuda_missing")
     if method == "glomap" and find_binary("glomap") is None:
         blockers.append("glomap_binary_missing")
-    if loop_detection and matcher == "sequential" and vocab_tree is None:
+    if matcher != "sequential":
+        loop_detection = False
+    elif loop_detection and vocab_tree is None:
         loop_detection = False
     out_dir.mkdir(parents=True, exist_ok=True)
     package_images = out_dir / "images"
@@ -250,6 +273,8 @@ def run_sfm(
         "total_images": total_images,
         "commands": commands,
         "blockers": blockers,
+        "colmap_cuda": colmap_cuda,
+        "cpu_matching_override": bool(allow_cpu_matching and colmap_cuda is not True),
         "dry_run": dry_run,
         "authority": {"registration_evidence": True, "quality_claim": False},
     }
@@ -298,6 +323,7 @@ def run_triangulate(
     min_reject_ratio: float = 0.60,
     min_hold_ratio: float = 0.85,
     background_sphere: bool = False,
+    allow_cpu_matching: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     package_dir = package_dir.resolve()
@@ -343,6 +369,14 @@ def run_triangulate(
             "--output_path", str(refined),
         ])
     total_images = count_images(images_dir)
+    blockers: list[str] = []
+    colmap_cuda: bool | None = None
+    if find_binary("colmap") is None:
+        blockers.append("colmap_binary_missing")
+    else:
+        colmap_cuda = colmap_has_cuda()
+        if colmap_cuda is not True and not allow_cpu_matching:
+            blockers.append("colmap_cuda_missing")
     summary: dict[str, Any] = {
         "schema": SUMMARY_SCHEMA,
         "mode": "triangulate_device_pose_prior",
@@ -353,7 +387,9 @@ def run_triangulate(
         "refine_poses": refine_poses,
         "total_images": total_images,
         "commands": commands,
-        "blockers": [] if find_binary("colmap") else ["colmap_binary_missing"],
+        "blockers": blockers,
+        "colmap_cuda": colmap_cuda,
+        "cpu_matching_override": bool(allow_cpu_matching and colmap_cuda is not True),
         "dry_run": dry_run,
         "authority": {"registration_evidence": True, "pose_prior": "device_poses", "quality_claim": False},
     }
@@ -362,7 +398,7 @@ def run_triangulate(
         summary["decision"] = "blocked" if summary["blockers"] else "dry_run"
         write_json_strict(out_dir / "capture_splat_sfm_summary.json", summary)
         if summary["blockers"]:
-            raise RuntimeError("triangulate blocked: colmap_binary_missing")
+            raise RuntimeError(f"triangulate blocked: {', '.join(blockers)}")
         return summary
     triangulated.mkdir(parents=True, exist_ok=True)
     if refine_poses:
@@ -402,12 +438,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--images", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--method", choices=["colmap", "glomap"], default="colmap")
-    parser.add_argument("--matcher", choices=["sequential", "exhaustive", "retrieval"], default="sequential")
+    parser.add_argument("--matcher", choices=["sequential", "exhaustive", "retrieval"], default="exhaustive")
     parser.add_argument("--overlap", type=int, default=30)
     parser.add_argument("--no-loop-detection", action="store_true")
     parser.add_argument("--vocab-tree", type=Path)
     parser.add_argument("--max-features", type=int, default=8192)
     parser.add_argument("--no-copy-images", action="store_true")
+    parser.add_argument("--allow-cpu-matching", action="store_true", help="Run without CUDA COLMAP; recorded in the summary as cpu_matching_override")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
@@ -424,6 +461,7 @@ def main(argv: list[str] | None = None) -> None:
         vocab_tree=args.vocab_tree,
         max_features=args.max_features,
         copy_images=not args.no_copy_images,
+        allow_cpu_matching=args.allow_cpu_matching,
         dry_run=args.dry_run,
     )
     print(json.dumps(summary, indent=2))

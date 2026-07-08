@@ -4,7 +4,7 @@ import pytest
 from PIL import Image
 
 from capture_splat.json_utils import load_json_strict
-from capture_splat.sfm_runner import build_commands, decide, read_model_stats, run_sfm, select_best_sparse_subdir
+from capture_splat.sfm_runner import build_commands, colmap_has_cuda, decide, read_model_stats, run_sfm, select_best_sparse_subdir
 
 
 def write_image(path: Path) -> None:
@@ -73,7 +73,23 @@ def test_decide_gates() -> None:
     assert decide(90, 100, 0.60, 0.85)[0] == "promote"
 
 
-def test_run_sfm_dry_run_writes_summary(tmp_path: Path) -> None:
+def test_colmap_has_cuda_parses_banner(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("capture_splat.sfm_runner.find_binary", lambda name: "/usr/bin/colmap")
+
+    class Completed:
+        def __init__(self, stdout: str) -> None:
+            self.stdout = stdout
+            self.stderr = ""
+
+    monkeypatch.setattr("capture_splat.sfm_runner.subprocess.run", lambda *a, **k: Completed("COLMAP 4.1.0 (Commit Unknown on Unknown with CUDA)"))
+    assert colmap_has_cuda() is True
+    monkeypatch.setattr("capture_splat.sfm_runner.subprocess.run", lambda *a, **k: Completed("COLMAP 4.0.4 (Commit Unknown on Unknown without CUDA)"))
+    assert colmap_has_cuda() is False
+
+
+def test_run_sfm_dry_run_writes_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("capture_splat.sfm_runner.find_binary", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("capture_splat.sfm_runner.colmap_has_cuda", lambda: True)
     images = tmp_path / "frames"
     for index in range(3):
         write_image(images / f"{index:06d}.jpg")
@@ -83,10 +99,38 @@ def test_run_sfm_dry_run_writes_summary(tmp_path: Path) -> None:
 
     assert summary["decision"] == "dry_run"
     assert saved["total_images"] == 3
-    assert saved["matcher"] == "sequential"
+    assert saved["matcher"] == "exhaustive"
     assert saved["loop_detection"] is False
+    assert saved["colmap_cuda"] is True
+    assert saved["cpu_matching_override"] is False
     assert (tmp_path / "out" / "images" / "000001.jpg").exists()
     assert saved["authority"]["quality_claim"] is False
+
+
+def test_run_sfm_blocked_without_cuda(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("capture_splat.sfm_runner.find_binary", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("capture_splat.sfm_runner.colmap_has_cuda", lambda: False)
+    images = tmp_path / "frames"
+    write_image(images / "000001.jpg")
+
+    with pytest.raises(RuntimeError, match="colmap_cuda_missing"):
+        run_sfm(images, tmp_path / "out")
+    saved = load_json_strict(tmp_path / "out" / "capture_splat_sfm_summary.json")
+    assert saved["decision"] == "blocked"
+    assert saved["colmap_cuda"] is False
+
+
+def test_run_sfm_cpu_matching_override_recorded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("capture_splat.sfm_runner.find_binary", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("capture_splat.sfm_runner.colmap_has_cuda", lambda: False)
+    images = tmp_path / "frames"
+    write_image(images / "000001.jpg")
+
+    summary = run_sfm(images, tmp_path / "out", allow_cpu_matching=True, dry_run=True)
+
+    assert summary["decision"] == "dry_run"
+    assert summary["blockers"] == []
+    assert summary["cpu_matching_override"] is True
 
 
 def test_run_sfm_retrieval_requires_hloc(tmp_path: Path) -> None:
@@ -99,6 +143,7 @@ def test_run_sfm_retrieval_requires_hloc(tmp_path: Path) -> None:
 
 def test_run_sfm_blocked_without_glomap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("capture_splat.sfm_runner.find_binary", lambda name: "/usr/bin/colmap" if name == "colmap" else None)
+    monkeypatch.setattr("capture_splat.sfm_runner.colmap_has_cuda", lambda: True)
     images = tmp_path / "frames"
     write_image(images / "000001.jpg")
 

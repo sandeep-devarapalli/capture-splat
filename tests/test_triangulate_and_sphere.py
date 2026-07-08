@@ -27,7 +27,9 @@ def make_pose_package(root: Path) -> Path:
     return package
 
 
-def test_triangulate_dry_run_records_pipeline(tmp_path: Path) -> None:
+def test_triangulate_dry_run_records_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("capture_splat.sfm_runner.find_binary", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("capture_splat.sfm_runner.colmap_has_cuda", lambda: True)
     package = make_pose_package(tmp_path)
 
     summary = run_triangulate(package, tmp_path / "out", refine_poses=True, dry_run=True)
@@ -36,6 +38,7 @@ def test_triangulate_dry_run_records_pipeline(tmp_path: Path) -> None:
     assert names == ["feature_extractor", "sequential_matcher", "point_triangulator", "bundle_adjuster"]
     assert summary["decision"] == "dry_run"
     assert summary["authority"]["pose_prior"] == "device_poses"
+    assert summary["colmap_cuda"] is True
     saved = load_json_strict(tmp_path / "out" / "capture_splat_sfm_summary.json")
     assert saved["mode"] == "triangulate_device_pose_prior"
 

@@ -68,10 +68,16 @@ capture-splat prune-ply --input .../splat.ply
 capture-splat export-world-studio --package ... --capture-profile room_interior
 ```
 
-`sfm` runs COLMAP feature extraction, sequential matching (loop detection
-when a vocab tree is supplied), mapping, best-model selection, and
-`model_orientation_aligner`, and gates the result on registration ratio
-(reject below 60%, hold below 85%). GLOMAP is used when installed.
+`sfm` runs COLMAP feature extraction, exhaustive matching by default
+(`--matcher sequential` with an optional vocab tree remains available),
+mapping, best-model selection, and `model_orientation_aligner`, and gates
+the result on registration ratio (reject below 60%, hold below 85%).
+GLOMAP is used when installed. CUDA COLMAP is required: `sfm` and
+`triangulate` block with `colmap_cuda_missing` when the local COLMAP build
+reports `without CUDA`. Exhaustive matching recovers revisit pairs that
+sequential matching misses on room orbits, and it is only practical on GPU
+builds. Pass `--allow-cpu-matching` to run a deliberate CPU job; the
+summary records `cpu_matching_override` so the evidence trail shows it.
 `--background-sphere` seeds distant background points for room and outdoor
 scenes. Both trainers write `capture_splat_scene_transform.json` next to the
 PLY so viewers can map package cameras into the trained splat world; these
