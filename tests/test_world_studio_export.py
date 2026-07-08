@@ -51,7 +51,7 @@ def test_export_world_studio_writes_relative_handoff_manifest(tmp_path: Path) ->
     )
     manifest = load_json_strict(tmp_path / "world_studio" / MANIFEST_NAME)
 
-    assert summary["schema"] == "capture_splat.world_studio_handoff.v0.1"
+    assert summary["schema"] == "capture_splat.world_studio_handoff.v0.2"
     assert manifest["status"] == "visual_evidence_with_3dgs_proposal"
     assert manifest["source_frames"][0]["rgb_path"] == "images/000001.jpg"
     assert manifest["source_frames"][0]["source_role"] == "visual_evidence"
@@ -124,6 +124,53 @@ def test_export_world_studio_prefers_alpha_pruned_gaussian(tmp_path: Path) -> No
     assert gaussian["path"] == "splat.ply"
     assert gaussian["variant"] == "alpha_pruned"
     assert gaussian["source_name"] == "splat.pruned_a12.ply"
+
+
+def test_export_world_studio_v02_scene_fields(tmp_path: Path) -> None:
+    package = tmp_path / "colmap_package"
+    write_image(package / "images" / "000001.jpg")
+    sparse = package / "sparse" / "0"
+    sparse.mkdir(parents=True)
+    (sparse / "cameras.txt").write_text("1 PINHOLE 8 6 8 6 4 3\n", encoding="utf-8")
+    (sparse / "images.txt").write_text("1 1 0 0 0 0.5 0.1 2.0 1 000001.jpg\n\n", encoding="utf-8")
+    (sparse / "points3D.txt").write_text("# empty\n", encoding="utf-8")
+    rows = [f"{x} {y} 0 0" for x in (-1.0, -0.5, 0.0, 0.5, 1.0) for y in (-1.0, 0.0, 1.0)]
+    (package / "splat.ply").write_text(
+        "\n".join([
+            "ply",
+            "format ascii 1.0",
+            f"element vertex {len(rows)}",
+            "property float x",
+            "property float y",
+            "property float z",
+            "property float opacity",
+            "end_header",
+            *rows,
+        ]) + "\n",
+        encoding="ascii",
+    )
+    write_json_strict(package / "capture_splat_scene_transform.json", {
+        "schema": "capture_splat.scene_transform.v0.1",
+        "trainer": "vksplat",
+        "ply": "splat.ply",
+        "trainer_transform": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+        "trainer_transform_source": "trainer_train_json",
+    })
+    write_json_strict(package / "capture.json", {"schema": "capture_splat.v0.2", "capture_profile": "room_interior", "frames": [{"rgb": "images/000001.jpg", "transform_matrix": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], "intrinsics": {"fl_x": 8, "fl_y": 6, "cx": 4, "cy": 3, "w": 8, "h": 6}}]})
+
+    export_world_studio_handoff(package, tmp_path / "world_studio", copy_files=True)
+    manifest = load_json_strict(tmp_path / "world_studio" / MANIFEST_NAME)
+
+    assert manifest["schema"] == "capture_splat.world_studio_handoff.v0.2"
+    assert manifest["scene_transform"]["trainer_transform_source"] == "trainer_train_json"
+    assert manifest["dataparser_transform"] == manifest["scene_transform"]["trainer_transform"]
+    assert manifest["scene_radius"] > 0
+    assert manifest["median_structure_distance"] <= manifest["scene_radius"]
+    assert manifest["capture_profile"] == "room_interior"
+    camera = manifest["initial_camera"]
+    assert camera["mode"] == "inside"
+    assert camera["coordinate_frame"] == "colmap_world"
+    assert camera["position"] == [-0.5, -0.1, -2.0]
 
 
 def test_export_world_studio_explicit_gaussian_wins_over_pruned(tmp_path: Path) -> None:

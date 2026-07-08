@@ -94,6 +94,7 @@ def main() -> None:
     p_world_studio.add_argument("--image-dir", default="images")
     p_world_studio.add_argument("--sparse-dir", default="sparse/0")
     p_world_studio.add_argument("--copy-files", action="store_true")
+    p_world_studio.add_argument("--capture-profile", choices=["object", "room_interior", "walkthrough", "outdoor", "video_360"])
     p_train = sub.add_parser("train-vksplat", help="Run VkSplat on a COLMAP package")
     p_train.add_argument("--package", type=Path, required=True)
     p_train.add_argument("--out", type=Path, required=True)
@@ -321,6 +322,7 @@ def main() -> None:
             image_dir_name=args.image_dir,
             sparse_dir_name=args.sparse_dir,
             copy_files=args.copy_files,
+            capture_profile=args.capture_profile,
         )
     elif args.command == "train-vksplat":
         payload = run_vksplat(args.package, args.out, args.vksplat_root, steps=args.steps, dry_run=args.dry_run, save_train_renders=args.save_train_renders, stop_reset_at=args.stop_reset_at)
