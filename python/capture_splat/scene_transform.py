@@ -116,6 +116,80 @@ def transform_points(matrix: np.ndarray, points: np.ndarray) -> np.ndarray:
     return points @ matrix[:3, :3].T + matrix[:3, 3]
 
 
+# eigh eigenvector signs are arbitrary; any even number of row flips keeps the
+# principal-axes rotation right-handed, so the recomputed transform can differ
+# from the trainer's by one of these without failing the determinant check.
+FLIP_SIGN_CANDIDATES = ((1.0, 1.0, 1.0), (1.0, -1.0, -1.0), (-1.0, 1.0, -1.0), (-1.0, -1.0, 1.0))
+
+
+def load_ply_positions(ply_path: Path, limit: int = 2000) -> np.ndarray:
+    data = ply_path.read_bytes()
+    marker = b"end_header\n"
+    index = data.find(marker)
+    if index < 0:
+        return np.empty((0, 3))
+    header = data[:index].decode("ascii", errors="replace")
+    if "format binary_little_endian" not in header:
+        return np.empty((0, 3))
+    vertex_count = 0
+    property_count = 0
+    in_vertex = False
+    for line in header.splitlines():
+        parts = line.split()
+        if parts[:2] == ["element", "vertex"]:
+            vertex_count = int(parts[2])
+            in_vertex = True
+        elif parts and parts[0] == "element":
+            in_vertex = False
+        elif in_vertex and parts and parts[0] == "property":
+            if parts[1] != "float":
+                return np.empty((0, 3))
+            property_count += 1
+    if vertex_count == 0 or property_count < 3:
+        return np.empty((0, 3))
+    body = np.frombuffer(data, dtype="<f4", count=vertex_count * property_count, offset=index + len(marker))
+    positions = body.reshape(vertex_count, property_count)[:, :3]
+    stride = max(1, vertex_count // limit)
+    return positions[::stride].astype(float)
+
+
+def disambiguate_flip_with_ply(
+    transform: np.ndarray,
+    points: np.ndarray,
+    ply_positions: np.ndarray,
+    sample: int = 1500,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    if len(points) < 3 or len(ply_positions) < 3:
+        return transform, {"applied": False, "reason": "insufficient_points"}
+    rng = np.random.default_rng(0)
+    pts = points[rng.choice(len(points), min(sample, len(points)), replace=False)]
+    ply = ply_positions[rng.choice(len(ply_positions), min(sample, len(ply_positions)), replace=False)]
+    distances: dict[tuple[float, float, float], float] = {}
+    for signs in FLIP_SIGN_CANDIDATES:
+        candidate = transform.copy()
+        candidate[:3, :] = np.diag(signs) @ candidate[:3, :]
+        moved = transform_points(candidate, pts)
+        total = 0.0
+        for start in range(0, len(moved), 256):
+            chunk = moved[start:start + 256]
+            total += float(np.sqrt(((chunk[:, None, :] - ply[None, :, :]) ** 2).sum(-1)).min(axis=1).sum())
+        distances[signs] = total / len(moved)
+    ranked = sorted(distances.items(), key=lambda entry: entry[1])
+    chosen, best = ranked[0]
+    margin = ranked[1][1] / best if best > 0 else float("inf")
+    resolved = transform.copy()
+    resolved[:3, :] = np.diag(chosen) @ resolved[:3, :]
+    report: dict[str, Any] = {
+        "applied": True,
+        "chosen_signs": list(chosen),
+        "chamfer_best": best,
+        "chamfer_margin_over_best": margin,
+    }
+    if margin < 1.2:
+        report["warning"] = "flip_ambiguous_low_margin"
+    return resolved, report
+
+
 def compute_gsplat_normalize_transform(sparse_dir: Path) -> dict[str, Any]:
     c2w = load_camera_to_worlds(sparse_dir)
     points = load_points(sparse_dir)
@@ -178,11 +252,18 @@ def write_scene_transform_sidecar(
         sidecar["trainer_transform_source"] = "trainer_train_json"
     elif trainer == "gsplat" and normalized and sparse_dir is not None and (sparse_dir / "images.txt").exists():
         recomputed = compute_gsplat_normalize_transform(sparse_dir)
-        sidecar["trainer_transform"] = recomputed["transform"]
+        transform = np.asarray(recomputed["transform"])
+        try:
+            ply_positions = load_ply_positions(ply_path)
+        except (OSError, ValueError):
+            ply_positions = np.empty((0, 3))
+        transform, flip_report = disambiguate_flip_with_ply(transform, load_points(sparse_dir), ply_positions)
+        sidecar["trainer_transform"] = transform.tolist()
         sidecar["trainer_transform_source"] = "recomputed_gsplat_parser_normalize"
         sidecar["method"] = recomputed["method"]
         sidecar["camera_count"] = recomputed["camera_count"]
         sidecar["point_count"] = recomputed["point_count"]
+        sidecar["flip_disambiguation"] = flip_report
     elif not normalized:
         sidecar["trainer_transform"] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
         sidecar["trainer_transform_source"] = "identity_normalization_disabled"
