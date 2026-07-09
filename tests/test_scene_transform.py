@@ -9,11 +9,31 @@ from capture_splat.json_utils import load_json_strict
 from capture_splat.scene_transform import (
     SIDECAR_NAME,
     compute_gsplat_normalize_transform,
+    disambiguate_flip_with_ply,
     load_camera_to_worlds,
+    load_ply_positions,
     similarity_from_cameras,
     transform_points,
     write_scene_transform_sidecar,
 )
+
+
+def write_binary_ply(path: Path, positions: np.ndarray, extra_props: int = 2) -> None:
+    props = ["x", "y", "z"] + [f"f_{i}" for i in range(extra_props)]
+    header = "ply\nformat binary_little_endian 1.0\n"
+    header += f"element vertex {len(positions)}\n"
+    header += "".join(f"property float {name}\n" for name in props)
+    header += "end_header\n"
+    body = np.zeros((len(positions), len(props)), dtype="<f4")
+    body[:, :3] = positions
+    path.write_bytes(header.encode("ascii") + body.tobytes())
+
+
+def skewed_cloud(count: int = 240) -> np.ndarray:
+    rng = np.random.default_rng(7)
+    cloud = rng.standard_normal((count, 3)) * np.array([2.0, 0.6, 1.1])
+    cloud[:, 1] += 0.4 * cloud[:, 0] ** 2 / 4.0
+    return cloud
 
 
 def write_sparse(sparse: Path, camera_heights: list[float]) -> None:
@@ -95,6 +115,63 @@ def test_sidecar_recomputes_gsplat_normalize(tmp_path: Path) -> None:
     assert sidecar is not None
     assert sidecar["trainer_transform_source"] == "recomputed_gsplat_parser_normalize"
     assert len(sidecar["trainer_transform"]) == 4
+    assert sidecar["flip_disambiguation"]["applied"] is False
+
+
+def test_load_ply_positions_reads_binary_vertices(tmp_path: Path) -> None:
+    positions = skewed_cloud(50)
+    ply = tmp_path / "cloud.ply"
+    write_binary_ply(ply, positions)
+
+    loaded = load_ply_positions(ply, limit=50)
+
+    assert loaded.shape == (50, 3)
+    assert np.allclose(loaded, positions, atol=1e-5)
+
+
+def test_disambiguate_flip_recovers_trainer_transform() -> None:
+    points = skewed_cloud()
+    angle = 0.7
+    rotation = np.array([
+        [math.cos(angle), 0.0, math.sin(angle)],
+        [0.0, 1.0, 0.0],
+        [-math.sin(angle), 0.0, math.cos(angle)],
+    ])
+    t_true = np.eye(4)
+    t_true[:3, :3] = 0.4 * rotation
+    t_true[:3, 3] = [0.3, -0.2, 0.9]
+    ply_positions = transform_points(t_true, points)
+    flipped = t_true.copy()
+    flipped[:3, :] = np.diag([1.0, -1.0, -1.0]) @ flipped[:3, :]
+
+    resolved, report = disambiguate_flip_with_ply(flipped, points, ply_positions)
+
+    assert report["applied"] is True
+    assert report["chosen_signs"] == [1.0, -1.0, -1.0]
+    assert np.allclose(resolved, t_true, atol=1e-9)
+    assert report["chamfer_margin_over_best"] > 1.2
+
+
+def test_sidecar_flip_disambiguation_matches_trained_ply(tmp_path: Path) -> None:
+    sparse = tmp_path / "sparse0"
+    write_sparse(sparse, [0.1, 0.2, 0.15, 0.1])
+    points = []
+    for index, point in enumerate(skewed_cloud(80), start=1):
+        points.append(f"{index} {point[0]} {point[1]} {point[2]} 128 128 128 0.5 1 0")
+    (sparse / "points3D.txt").write_text("# points\n" + "\n".join(points) + "\n", encoding="utf-8")
+    recomputed = np.asarray(compute_gsplat_normalize_transform(sparse)["transform"])
+    trainer = recomputed.copy()
+    trainer[:3, :] = np.diag([-1.0, 1.0, -1.0]) @ trainer[:3, :]
+    from capture_splat.scene_transform import load_points
+    ply = tmp_path / "point_cloud_6999.ply"
+    write_binary_ply(ply, transform_points(trainer, load_points(sparse)))
+
+    sidecar = write_scene_transform_sidecar(ply, sparse, "gsplat", normalized=True)
+
+    assert sidecar is not None
+    assert sidecar["flip_disambiguation"]["applied"] is True
+    assert sidecar["flip_disambiguation"]["chosen_signs"] == [-1.0, 1.0, -1.0]
+    assert np.allclose(np.asarray(sidecar["trainer_transform"]), trainer, atol=1e-9)
 
 
 def test_sidecar_identity_when_normalization_disabled(tmp_path: Path) -> None:
