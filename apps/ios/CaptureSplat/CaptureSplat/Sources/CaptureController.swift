@@ -7,6 +7,15 @@ import Foundation
 import RoomPlan
 import UIKit
 
+struct CaptureIntentOption: Identifiable {
+    let id: String
+    let title: String
+    let shortTitle: String
+    let detail: String
+    let guidance: String
+    let systemImage: String
+}
+
 struct ScanGuidancePoint: Identifiable {
     let id: Int
     let normalizedX: Double
@@ -170,6 +179,7 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var lastAcceptedViewHint = "No accepted view yet."
     @Published var captureProfileText = "RGB-D keyframes"
     @Published var captureProfileDetail = "Quality-gated RGB, depth, pose, IMU, and GNSS bundle."
+    @Published var captureIntent = "scene_cluster"
     @Published var hapticAcceptedCount = 0
     @Published var currentCoverageSector = 0
     @Published var targetCoverageSector = 0
@@ -197,6 +207,73 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var roomPlanFile: URL?
     @Published var roomPlanReportFile: URL?
     @Published var roomPlanSemanticsFile: URL?
+
+    static let captureIntentOptions: [CaptureIntentOption] = [
+        CaptureIntentOption(
+            id: "scene_cluster",
+            title: "Desk / Cluster",
+            shortTitle: "Desk",
+            detail: "For a work desk, shelf, bed/table area, or kitchen counter. Stay close, use side steps, and cover the cluster from 2-3 heights.",
+            guidance: "Circle the desk cluster slowly. Add side angles, top-down angles, and close texture passes.",
+            systemImage: "rectangle.3.group"
+        ),
+        CaptureIntentOption(
+            id: "room_walkthrough",
+            title: "Room Walkthrough",
+            shortTitle: "Room",
+            detail: "For bedrooms, offices, and halls. Walk a connected perimeter, add cross-room passes, and revisit corners/doorways.",
+            guidance: "Walk the room perimeter slowly. Keep corners, doors, and furniture edges overlapping.",
+            systemImage: "door.left.hand.open"
+        ),
+        CaptureIntentOption(
+            id: "object_orbit",
+            title: "Object Orbit",
+            shortTitle: "Object",
+            detail: "For a single object. Orbit around it at low, middle, and high angles with the subject centered.",
+            guidance: "Orbit the object at 2-3 heights. Keep the object centered and avoid fast pans.",
+            systemImage: "cube.transparent"
+        ),
+        CaptureIntentOption(
+            id: "corridor_passage",
+            title: "Corridor / Passage",
+            shortTitle: "Corridor",
+            detail: "For hallways and narrow paths. Move forward with side glances and return along the path if possible.",
+            guidance: "Move forward slowly, add side glances, and return along the path for overlap.",
+            systemImage: "arrow.forward.to.line"
+        ),
+        CaptureIntentOption(
+            id: "facade_wall",
+            title: "Wall / Facade",
+            shortTitle: "Wall",
+            detail: "For flat walls, posters, cabinets, doors, and windows. Use sideways sweeps plus oblique angles.",
+            guidance: "Side-step along the wall. Add oblique angles; do not just stand still and pan.",
+            systemImage: "rectangle.split.3x1"
+        ),
+        CaptureIntentOption(
+            id: "outdoor_object",
+            title: "Outdoor Object",
+            shortTitle: "Outdoor",
+            detail: "For gardens, vehicles, planters, and statues. Orbit the subject and watch sunlight, wind, and moving shadows.",
+            guidance: "Orbit slowly and add wider establishing views. Avoid moving leaves and harsh exposure jumps.",
+            systemImage: "sun.max"
+        ),
+        CaptureIntentOption(
+            id: "full_room_semantic",
+            title: "RoomPlan + 3DGS",
+            shortTitle: "Semantic",
+            detail: "For VR room review. Capture appearance with Video 3DGS and export RoomPlan for walls, doors, windows, and furniture proposals.",
+            guidance: "Capture the room, then run RoomPlan so layout semantics travel with the 3DGS evidence.",
+            systemImage: "map"
+        ),
+        CaptureIntentOption(
+            id: "detail_repair",
+            title: "Detail Repair",
+            shortTitle: "Repair",
+            detail: "For a weak corner, shiny table, window, shelf, bed edge, or dark area. Make a short focused follow-up pass.",
+            guidance: "Focus on the weak area. Move slowly with close, overlapping side steps.",
+            systemImage: "wrench.and.screwdriver"
+        ),
+    ]
 
     private let motion = CMMotionManager()
     private let location = CLLocationManager()
@@ -313,6 +390,13 @@ final class CaptureController: NSObject, ObservableObject {
         scanTargetMode = mode
         updateCaptureProfileText()
         refreshTargetLockStatus()
+        updateGuidance()
+    }
+
+    func setCaptureIntent(_ intent: String) {
+        guard Self.captureIntentOptions.contains(where: { $0.id == intent }) else { return }
+        captureIntent = intent
+        updateCaptureProfileText()
         updateGuidance()
     }
 
@@ -513,7 +597,7 @@ final class CaptureController: NSObject, ObservableObject {
             isRecording = true
             statusText = "Recording"
             guidanceText = scanTargetMode == "video_3dgs"
-                ? "Record a slow video-style orbit. Haptics mark accepted sharp frames."
+                ? currentCaptureIntentOption.guidance
                 : "Move slowly around the subject. Favor side steps over panning."
             acceptedHaptic.prepare()
             if isIMUEnabled {
@@ -567,6 +651,7 @@ final class CaptureController: NSObject, ObservableObject {
             ),
             captureMode: captureModeLabel(),
             captureProfile: captureProfileLabel(),
+            captureIntent: captureIntent,
             depthMode: "sceneDepth",
             sessionConfig: makeSessionConfig(),
             rgb: StreamReport(
@@ -932,6 +1017,10 @@ final class CaptureController: NSObject, ObservableObject {
         scanTargetMode == "video_3dgs" ? videoKeyframeScoreThreshold : keyframeScoreThreshold
     }
 
+    var currentCaptureIntentOption: CaptureIntentOption {
+        Self.captureIntentOptions.first { $0.id == captureIntent } ?? Self.captureIntentOptions[0]
+    }
+
     private func captureModeLabel() -> String {
         switch scanTargetMode {
         case "room":
@@ -1037,8 +1126,8 @@ final class CaptureController: NSObject, ObservableObject {
             captureProfileText = "Room COLMAP keyframes"
             captureProfileDetail = "Strict overlap, parallax, blur, and reconnect guidance for room 3DGS input."
         case "video_3dgs":
-            captureProfileText = "Video 3DGS Max"
-            captureProfileDetail = "Max-density sharp RGB-D keyframes with ARKit poses for later COLMAP/VkSplat gates."
+            captureProfileText = "Video 3DGS Max - \(currentCaptureIntentOption.shortTitle)"
+            captureProfileDetail = currentCaptureIntentOption.detail
         default:
             captureProfileText = "Object RGB-D keyframes"
             captureProfileDetail = "Object-locked RGB, LiDAR depth, pose, and foreground proposal metadata."
@@ -1110,7 +1199,7 @@ final class CaptureController: NSObject, ObservableObject {
             backgroundWarning = "Depth dots show samples, not scan quality."
             guidanceArrowSystemImage = scanTargetMode == "video_3dgs" ? "video.circle" : "arrow.up.circle"
             guidanceText = scanTargetMode == "video_3dgs"
-                ? "Use Video 3DGS for denser sharp frames; keep motion slow and continuous."
+                ? currentCaptureIntentOption.guidance
                 : (canStartForCurrentTargetMode ? "Start with a slow orbit and keep overlap between views." : targetLockDetail)
         } else if trackingStatus != "normal" {
             readinessState = "Hold"
@@ -1619,6 +1708,8 @@ final class CaptureController: NSObject, ObservableObject {
             "partial_sector_count": partialSectorCount(),
             "missing_sector_count": missingSectorCount,
             "coverage_hint": coverageHintText,
+            "capture_intent": captureIntent,
+            "capture_intent_label": currentCaptureIntentOption.title,
             "readiness_state": readinessState,
             "next_action": nextAction,
             "background_warning": backgroundWarning,
@@ -1684,6 +1775,9 @@ final class CaptureController: NSObject, ObservableObject {
             "schema": "capture_splat.profile_report.v0.1",
             "scan_target_mode": scanTargetMode,
             "capture_mode": captureModeLabel(),
+            "capture_intent": captureIntent,
+            "capture_intent_label": currentCaptureIntentOption.title,
+            "capture_intent_guidance": currentCaptureIntentOption.guidance,
             "profile_name": profileName,
             "profile_model": profileModel,
             "profile_text": captureProfileText,

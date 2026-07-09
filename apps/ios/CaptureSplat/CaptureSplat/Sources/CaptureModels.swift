@@ -72,6 +72,7 @@ struct CaptureManifest: Encodable {
     let device: DeviceInfo
     let captureMode: String
     let captureProfile: String
+    let captureIntent: String
     let depthMode: String
     let source = "CaptureSplat"
     let depthScale = 1.0
@@ -98,6 +99,7 @@ struct CaptureManifest: Encodable {
         case schema, device, source, rgb, depth, intrinsics, frames, authority
         case captureMode = "capture_mode"
         case captureProfile = "capture_profile"
+        case captureIntent = "capture_intent"
         case depthMode = "depth_mode"
         case depthScale = "depth_scale"
         case sessionConfig = "session_config"

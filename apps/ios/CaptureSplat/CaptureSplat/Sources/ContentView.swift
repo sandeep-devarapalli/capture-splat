@@ -215,6 +215,8 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
                 .disabled(capture.isRecording)
 
+                captureIntentPicker
+
                 if scanMode != .video3DGS {
                     Button {
                         if scanMode == .roomWalk {
@@ -323,6 +325,8 @@ struct ContentView: View {
             .buttonStyle(.bordered)
             .disabled(capture.isRecording)
 
+            captureIntentPicker
+
             Picker("View", selection: $viewMode) {
                 ForEach(ScanViewMode.allCases) { mode in
                     Text(mode.rawValue).tag(mode)
@@ -356,6 +360,20 @@ struct ContentView: View {
             .buttonStyle(.bordered)
             .disabled(capture.isRecording)
         }
+    }
+
+    private var captureIntentPicker: some View {
+        Menu {
+            Picker("Capture Intent", selection: captureIntentBinding) {
+                ForEach(CaptureController.captureIntentOptions) { intent in
+                    Label(intent.title, systemImage: intent.systemImage).tag(intent.id)
+                }
+            }
+        } label: {
+            Label(capture.currentCaptureIntentOption.shortTitle, systemImage: capture.currentCaptureIntentOption.systemImage)
+        }
+        .buttonStyle(.bordered)
+        .disabled(capture.isRecording)
     }
 
     private var recordExportControls: some View {
@@ -1258,6 +1276,13 @@ struct ContentView: View {
         case .outdoor:
             return true
         }
+    }
+
+    private var captureIntentBinding: Binding<String> {
+        Binding(
+            get: { capture.captureIntent },
+            set: { capture.setCaptureIntent($0) }
+        )
     }
 
     private var coveredSectorCount: Int {

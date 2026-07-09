@@ -23,7 +23,12 @@ metadata/
 room_plan/
 ```
 
-Video 3DGS Max is the default capture path. The app records dense, sharp RGB-D keyframes with camera metadata and quality reports; the host pipeline handles COLMAP and VkSplat training.
+Video 3DGS Max is the default capture path. The app records dense, sharp RGB-D
+keyframes with camera metadata and quality reports; the host pipeline handles
+COLMAP and VkSplat training. Use the capture intent menu to tag the pass as
+Desk / Cluster, Room Walkthrough, Object Orbit, Corridor / Passage, Wall /
+Facade, Outdoor Object, RoomPlan + 3DGS, or Detail Repair without changing the
+underlying quality gates.
 
 Supported LiDAR iPhones can open Room Plan review during the same video capture
 workflow and export `room_plan/room.usdz`, `room_plan/room_plan_report.json`,
