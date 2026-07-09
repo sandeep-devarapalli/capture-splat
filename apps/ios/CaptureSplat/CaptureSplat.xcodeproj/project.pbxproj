@@ -13,6 +13,7 @@
 		100000000000000000000104 /* CaptureModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000004 /* CaptureModels.swift */; };
 		100000000000000000000105 /* NPYWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000005 /* NPYWriter.swift */; };
 		100000000000000000000106 /* CaptureController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000006 /* CaptureController.swift */; };
+		100000000000000000000107 /* CaptureVideoRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000009 /* CaptureVideoRecorder.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -24,6 +25,7 @@
 		100000000000000000000006 /* CaptureController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureController.swift; sourceTree = "<group>"; };
 		100000000000000000000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		100000000000000000000008 /* CaptureSplat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CaptureSplat.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		100000000000000000000009 /* CaptureVideoRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureVideoRecorder.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -71,6 +73,7 @@
 				100000000000000000000004 /* CaptureModels.swift */,
 				100000000000000000000005 /* NPYWriter.swift */,
 				100000000000000000000006 /* CaptureController.swift */,
+				100000000000000000000009 /* CaptureVideoRecorder.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -157,6 +160,7 @@
 				100000000000000000000104 /* CaptureModels.swift in Sources */,
 				100000000000000000000105 /* NPYWriter.swift in Sources */,
 				100000000000000000000106 /* CaptureController.swift in Sources */,
+				100000000000000000000107 /* CaptureVideoRecorder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

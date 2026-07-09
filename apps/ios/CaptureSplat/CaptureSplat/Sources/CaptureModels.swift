@@ -90,6 +90,7 @@ struct CaptureManifest: Encodable {
     let videoFrameCount: Int?
     let roomPlanFile: String?
     let roomPlanReportFile: String?
+    let roomPlanSemanticsFile: String?
     let frames: [CapturedFrame]
     let authority: Authority
 
@@ -111,6 +112,7 @@ struct CaptureManifest: Encodable {
         case videoFrameCount = "video_frame_count"
         case roomPlanFile = "room_plan_file"
         case roomPlanReportFile = "room_plan_report_file"
+        case roomPlanSemanticsFile = "room_plan_semantics_file"
     }
 }
 

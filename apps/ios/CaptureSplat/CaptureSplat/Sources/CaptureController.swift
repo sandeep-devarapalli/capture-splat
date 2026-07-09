@@ -196,6 +196,7 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var roomPlanSummaryText = "No RoomPlan export"
     @Published var roomPlanFile: URL?
     @Published var roomPlanReportFile: URL?
+    @Published var roomPlanSemanticsFile: URL?
 
     private let motion = CMMotionManager()
     private let location = CLLocationManager()
@@ -209,9 +210,9 @@ final class CaptureController: NSObject, ObservableObject {
     private var activeResolution = Resolution(w: 0, h: 0)
     private var firstFrameTimestamp: TimeInterval?
     private let minimumKeyframeInterval: TimeInterval = 0.5
-    private let videoMinimumKeyframeInterval: TimeInterval = 0.25
+    private let videoMinimumKeyframeInterval: TimeInterval = 0.2
     private let maxCapturedFrames = 120
-    private let maxVideoCapturedFrames = 240
+    private let maxVideoCapturedFrames = 360
     private var lastScheduledFrameTimestamp: TimeInterval = -.infinity
     private var lastCandidateFrameTimestamp: TimeInterval = -.infinity
     private var lastAcceptedSectorIndex: Int?
@@ -244,6 +245,8 @@ final class CaptureController: NSObject, ObservableObject {
     private let minObjectParallaxMeters = 0.08
     private let minRoomParallaxMeters = 0.12
     private let minVideoParallaxMeters = 0.05
+    private let keyframeScoreThreshold = 0.72
+    private let videoKeyframeScoreThreshold = 0.68
     private let maxRoomConnectedStepMeters = 0.85
     private let maxRoomConnectedSectorJump = 2
     private let minRoomOverlapScore = 0.45
@@ -502,6 +505,7 @@ final class CaptureController: NSObject, ObservableObject {
             pointCloudPreviewFile = directory.appendingPathComponent("pointcloud_preview").appendingPathComponent("preview.json")
             roomPlanFile = nil
             roomPlanReportFile = nil
+            roomPlanSemanticsFile = nil
             rgbRateSamples.removeAll()
             depthRateSamples.removeAll()
             imuRateSamples.removeAll()
@@ -587,6 +591,7 @@ final class CaptureController: NSObject, ObservableObject {
             videoFrameCount: videoRecorder.appendedFrameCount > 0 ? videoRecorder.appendedFrameCount : nil,
             roomPlanFile: roomPlanFile == nil ? nil : "room_plan/room.usdz",
             roomPlanReportFile: roomPlanReportFile == nil ? nil : "room_plan/room_plan_report.json",
+            roomPlanSemanticsFile: roomPlanSemanticsFile == nil ? nil : "room_plan/room_semantics.json",
             frames: frames,
             authority: Authority()
         )
@@ -731,11 +736,15 @@ final class CaptureController: NSObject, ObservableObject {
             let roomPlanDirectory = directory.appendingPathComponent("room_plan", isDirectory: true)
             let usdzURL = roomPlanDirectory.appendingPathComponent("room.usdz")
             let reportURL = roomPlanDirectory.appendingPathComponent("room_plan_report.json")
+            let semanticsURL = roomPlanDirectory.appendingPathComponent("room_semantics.json")
             try room.export(to: usdzURL, exportOptions: .mesh)
             let report = roomPlanReport(room: room)
+            let semantics = roomPlanSemanticsReport(room: room)
             writeJSON(report, to: reportURL)
+            writeJSON(semantics, to: semanticsURL)
             roomPlanFile = usdzURL
             roomPlanReportFile = reportURL
+            roomPlanSemanticsFile = semanticsURL
             if !frames.isEmpty {
                 _ = try? writeCaptureManifest()
             }
@@ -778,6 +787,7 @@ final class CaptureController: NSObject, ObservableObject {
         var report: [String: Any] = [
             "schema": "capture_splat.room_plan_report.v0.1",
             "room_plan_file": "room_plan/room.usdz",
+            "room_semantics_file": "room_plan/room_semantics.json",
             "walls": room.walls.count,
             "doors": room.doors.count,
             "windows": room.windows.count,
@@ -798,6 +808,82 @@ final class CaptureController: NSObject, ObservableObject {
             report["version"] = room.version
         }
         return report
+    }
+
+    @available(iOS 16.0, *)
+    private func roomPlanSemanticsReport(room: CapturedRoom) -> [String: Any] {
+        [
+            "schema": "capture_splat.room_semantics.v0.1",
+            "room_plan_file": "room_plan/room.usdz",
+            "semantic_source": "Apple RoomPlan CapturedRoom",
+            "walls": room.walls.enumerated().map {
+                roomSurfaceSemantic(kind: "wall", index: $0.offset, dimensions: $0.element.dimensions, transform: $0.element.transform)
+            },
+            "doors": room.doors.enumerated().map {
+                roomSurfaceSemantic(kind: "door", index: $0.offset, dimensions: $0.element.dimensions, transform: $0.element.transform)
+            },
+            "windows": room.windows.enumerated().map {
+                roomSurfaceSemantic(kind: "window", index: $0.offset, dimensions: $0.element.dimensions, transform: $0.element.transform)
+            },
+            "openings": room.openings.enumerated().map {
+                roomSurfaceSemantic(kind: "opening", index: $0.offset, dimensions: $0.element.dimensions, transform: $0.element.transform)
+            },
+            "objects": room.objects.enumerated().map {
+                roomObjectSemantic(index: $0.offset, object: $0.element)
+            },
+            "authority": [
+                "capture_guidance_only": true,
+                "room_semantic_proposal": true,
+                "metric_authority": false,
+                "collision_geometry": false,
+                "planning_authority": false,
+                "semantic_authority": false,
+                "quality_proof": false,
+            ],
+        ]
+    }
+
+    private func roomSurfaceSemantic(
+        kind: String,
+        index: Int,
+        dimensions: SIMD3<Float>,
+        transform: simd_float4x4
+    ) -> [String: Any] {
+        [
+            "id": "\(kind)_\(index)",
+            "kind": kind,
+            "dimensions_meters": vectorReport(dimensions),
+            "transform_matrix": transform.rows,
+            "center_meters": vectorReport(SIMD3<Float>(
+                transform.columns.3.x,
+                transform.columns.3.y,
+                transform.columns.3.z
+            )),
+        ]
+    }
+
+    @available(iOS 16.0, *)
+    private func roomObjectSemantic(index: Int, object: CapturedRoom.Object) -> [String: Any] {
+        [
+            "id": "object_\(index)",
+            "kind": "object",
+            "category": String(describing: object.category),
+            "dimensions_meters": vectorReport(object.dimensions),
+            "transform_matrix": object.transform.rows,
+            "center_meters": vectorReport(SIMD3<Float>(
+                object.transform.columns.3.x,
+                object.transform.columns.3.y,
+                object.transform.columns.3.z
+            )),
+        ]
+    }
+
+    private func vectorReport(_ vector: SIMD3<Float>) -> [String: Float] {
+        [
+            "x": vector.x,
+            "y": vector.y,
+            "z": vector.z,
+        ]
     }
 
     @available(iOS 16.0, *)
@@ -842,6 +928,10 @@ final class CaptureController: NSObject, ObservableObject {
         scanTargetMode == "video_3dgs" ? maxVideoCapturedFrames : maxCapturedFrames
     }
 
+    private var activeKeyframeScoreThreshold: Double {
+        scanTargetMode == "video_3dgs" ? videoKeyframeScoreThreshold : keyframeScoreThreshold
+    }
+
     private func captureModeLabel() -> String {
         switch scanTargetMode {
         case "room":
@@ -858,7 +948,7 @@ final class CaptureController: NSObject, ObservableObject {
         case "room":
             return "room_interior"
         case "video_3dgs":
-            return "walkthrough"
+            return "video_3dgs_max"
         default:
             return "object"
         }
@@ -947,8 +1037,8 @@ final class CaptureController: NSObject, ObservableObject {
             captureProfileText = "Room COLMAP keyframes"
             captureProfileDetail = "Strict overlap, parallax, blur, and reconnect guidance for room 3DGS input."
         case "video_3dgs":
-            captureProfileText = "Video to 3DGS"
-            captureProfileDetail = "Denser sharp RGB-D keyframes with ARKit poses for later COLMAP/OpenSplat gates."
+            captureProfileText = "Video 3DGS Max"
+            captureProfileDetail = "Max-density sharp RGB-D keyframes with ARKit poses for later COLMAP/VkSplat gates."
         default:
             captureProfileText = "Object RGB-D keyframes"
             captureProfileDetail = "Object-locked RGB, LiDAR depth, pose, and foreground proposal metadata."
@@ -1557,6 +1647,7 @@ final class CaptureController: NSObject, ObservableObject {
             "capture_model": isSmartAutoCaptureEnabled ? "quality_gated_smart_keyframes" : "fixed_interval_diagnostic",
             "minimum_keyframe_interval_seconds": activeMinimumKeyframeInterval,
             "max_captured_frames": activeMaxCapturedFrames,
+            "keyframe_score_threshold": activeKeyframeScoreThreshold,
             "accepted_keyframes": acceptedKeyframes,
             "skipped_keyframe_candidates": skippedKeyframes,
             "last_keyframe_decision": lastKeyframeDecision,
@@ -1583,8 +1674,8 @@ final class CaptureController: NSObject, ObservableObject {
             profileName = "room_colmap_keyframes"
             profileModel = "room_overlap_blur_parallax_reconnect_gate_v0.2"
         case "video_3dgs":
-            profileName = "video_to_3dgs"
-            profileModel = "video_style_rgbd_keyframe_stream_v0.1"
+            profileName = "video_3dgs_max"
+            profileModel = "video_style_rgbd_max_keyframe_stream_v0.2"
         default:
             profileName = "object_rgbd_keyframes"
             profileModel = "object_lock_extent_foreground_support_v0.1"
@@ -1599,6 +1690,7 @@ final class CaptureController: NSObject, ObservableObject {
             "profile_detail": captureProfileDetail,
             "minimum_keyframe_interval_seconds": activeMinimumKeyframeInterval,
             "max_captured_frames": activeMaxCapturedFrames,
+            "keyframe_score_threshold": activeKeyframeScoreThreshold,
             "accepted_keyframes": acceptedKeyframes,
             "skipped_keyframe_candidates": skippedKeyframes,
             "capture_blocker_status": captureBlockerStatus,
@@ -2035,7 +2127,7 @@ final class CaptureController: NSObject, ObservableObject {
                 roomFragmentRisk: roomFragmentRisk
             )
         }
-        if sectorProgress >= 1, missingSectorCount > 0, moved < 0.18 {
+        if scanTargetMode != "video_3dgs", sectorProgress >= 1, missingSectorCount > 0, moved < 0.18 {
             return KeyframeDecision(
                 shouldCapture: false,
                 reason: "angle_already_covered",
@@ -2047,9 +2139,10 @@ final class CaptureController: NSObject, ObservableObject {
                 roomFragmentRisk: roomFragmentRisk
             )
         }
+        let scoreThreshold = activeKeyframeScoreThreshold
         return KeyframeDecision(
-            shouldCapture: score >= 0.72,
-            reason: score >= 0.72 ? "useful_keyframe" : "score_below_threshold",
+            shouldCapture: score >= scoreThreshold,
+            reason: score >= scoreThreshold ? "useful_keyframe" : "score_below_threshold",
             score: score,
             sectorIndex: boundedSector,
             frameQuality: frameQuality,

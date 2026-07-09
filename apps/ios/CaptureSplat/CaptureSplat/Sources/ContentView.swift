@@ -19,7 +19,7 @@ private enum ScanMode: String, CaseIterable, Identifiable {
     case flipObject = "Flip"
 
     var id: String { rawValue }
-    static let activeCases: [ScanMode] = [.objectOrbit, .roomWalk, .video3DGS]
+    static let activeCases: [ScanMode] = [.video3DGS]
 
     var controllerTargetMode: String {
         switch self {
@@ -54,7 +54,7 @@ private enum ActiveSheet: String, Identifiable {
 struct ContentView: View {
     @EnvironmentObject private var capture: CaptureController
     @State private var selectedTab: WorkspaceTab = .capture
-    @State private var scanMode: ScanMode = .objectOrbit
+    @State private var scanMode: ScanMode = .video3DGS
     @State private var viewMode: ScanViewMode = .scan
     @State private var isCapturePanelExpanded = false
     @State private var activeSheet: ActiveSheet?
@@ -149,8 +149,8 @@ struct ContentView: View {
                         if scanMode == .roomWalk {
                             colmapCoachCard
                             roomQualityCard
-                            roomPlanCard
                         }
+                        roomPlanCard
                         coverageStrip
                         sensorToggles
 
@@ -240,15 +240,13 @@ struct ContentView: View {
                     .accessibilityLabel("Lock object extent")
                 }
 
-                if scanMode == .roomWalk {
-                    Button {
-                        activeSheet = .roomPlan
-                    } label: {
-                        Label("Room Plan", systemImage: "map")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(capture.isRecording)
+                Button {
+                    activeSheet = .roomPlan
+                } label: {
+                    Label("Room Plan", systemImage: "map")
                 }
+                .buttonStyle(.bordered)
+                .disabled(capture.isRecording)
 
                 Button {
                     capture.isRecording ? capture.stopRecording() : capture.startRecording()
@@ -350,15 +348,13 @@ struct ContentView: View {
                     .disabled(capture.isRecording)
             }
 
-            if scanMode == .roomWalk {
-                Button {
-                    activeSheet = .roomPlan
-                } label: {
-                    Label("Room Plan", systemImage: "map")
-                }
-                .buttonStyle(.bordered)
-                .disabled(capture.isRecording)
+            Button {
+                activeSheet = .roomPlan
+            } label: {
+                Label("Room Plan", systemImage: "map")
             }
+            .buttonStyle(.bordered)
+            .disabled(capture.isRecording)
         }
     }
 
