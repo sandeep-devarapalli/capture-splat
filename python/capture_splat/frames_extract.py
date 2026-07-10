@@ -51,6 +51,18 @@ def pick_sharpest_indices(sharpness: list[float], interval: int) -> list[int]:
     return picks
 
 
+def frame_windows(total: int, target: int) -> list[tuple[int, int]]:
+    count = max(1, min(int(target), int(total)))
+    boundaries = np.linspace(0, total, count + 1, dtype=int)
+    return [(int(start), int(end)) for start, end in zip(boundaries[:-1], boundaries[1:]) if end > start]
+
+
+def pick_window_indices(sharpness: list[float], windows: list[tuple[int, int]], pick: str) -> list[int]:
+    if pick == "first":
+        return [start for start, _ in windows]
+    return [start + int(np.argmax(sharpness[start:end])) for start, end in windows]
+
+
 def match_frame_index(picked: list[int], fps: float, frame_index_path: Path) -> tuple[list[dict[str, Any] | None], int]:
     entries: list[dict[str, Any]] = []
     for line in frame_index_path.read_text(encoding="utf-8").splitlines():
@@ -58,11 +70,20 @@ def match_frame_index(picked: list[int], fps: float, frame_index_path: Path) -> 
         if not line:
             continue
         entries.append(json.loads(line))
+    by_frame: dict[int, dict[str, Any]] = {}
+    for entry in entries:
+        value = entry.get("video_frame_idx")
+        if isinstance(value, int) and value not in by_frame:
+            by_frame[value] = entry
     timestamps = np.asarray([float(entry["timestamp"]) for entry in entries])
     tolerance = 0.75 / fps if fps > 0 else 0.05
     matches: list[dict[str, Any] | None] = []
     matched = 0
     for frame_number in picked:
+        if frame_number in by_frame:
+            matches.append(by_frame[frame_number])
+            matched += 1
+            continue
         target = frame_number / fps if fps > 0 else 0.0
         position = int(np.argmin(np.abs(timestamps - target))) if len(timestamps) else -1
         if position >= 0 and abs(float(timestamps[position]) - target) <= tolerance:
@@ -125,11 +146,16 @@ def run_extract_frames(
     out_dir = out_dir.resolve()
     if not video.exists():
         raise FileNotFoundError(f"video missing: {video}")
+    if out_dir.exists() and any(out_dir.iterdir()):
+        raise FileExistsError(f"extract-frames output is not empty: {out_dir}")
     if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
         raise RuntimeError("ffmpeg/ffprobe are required for extract-frames")
     target_frames = max(1, min(int(target_frames), 600))
     total, fps = probe_video(video)
-    interval = max(1, math.ceil(total / target_frames))
+    if total <= 0:
+        raise RuntimeError("capture video contains no frames")
+    windows = frame_windows(total, target_frames)
+    interval = max(1, math.ceil(total / len(windows)))
     sharpness: list[float] = []
     if pick == "sharpest" and interval > 1:
         with tempfile.TemporaryDirectory(prefix="capture_splat_frames_") as temp:
@@ -147,9 +173,9 @@ def run_extract_frames(
             for path in small:
                 with Image.open(path) as image:
                     sharpness.append(laplacian_variance(image))
-        picked = pick_sharpest_indices(sharpness, interval)
+        picked = pick_window_indices(sharpness, windows, "sharpest")
     else:
-        picked = list(range(0, total, interval))
+        picked = pick_window_indices([], windows, "first")
     images_dir = out_dir / "images"
     written = extract_selected_frames(video, picked, images_dir, max_edge)
     if len(written) != len(picked):
@@ -162,6 +188,7 @@ def run_extract_frames(
         "total_video_frames": total,
         "fps": fps,
         "target_frames": target_frames,
+        "window_count": len(windows),
         "interval": interval,
         "pick": pick if interval > 1 else "first",
         "extracted_frames": len(written),
@@ -180,9 +207,18 @@ def run_extract_frames(
     if frame_index is not None:
         matches, matched = match_frame_index(picked, fps, frame_index)
         summary["pose_attachment"] = f"matched_{matched}_of_{len(picked)}"
+        summary["frame_mapping"] = []
         frames: list[dict[str, Any]] = []
         for path, frame_number, entry in zip(written, picked, matches):
+            summary["frame_mapping"].append({
+                "output_image": path.relative_to(out_dir).as_posix(),
+                "source_video_frame": frame_number,
+                "pose_matched": entry is not None,
+                "source_video_timestamp": float(entry["timestamp"]) if entry is not None else frame_number / fps,
+                "source_ar_timestamp": float(entry["ar_timestamp"]) if entry is not None and entry.get("ar_timestamp") is not None else None,
+            })
             if entry is None:
+                path.unlink()
                 continue
             with Image.open(path) as image:
                 width, height = image.size
@@ -194,7 +230,9 @@ def run_extract_frames(
                 "rgb": path.relative_to(out_dir).as_posix(),
                 "transform_matrix": transform,
                 "intrinsics": intrinsics,
-                "timestamp": float(entry["timestamp"]),
+                "timestamp": float(entry.get("ar_timestamp", entry["timestamp"])),
+                "video_timestamp": float(entry["timestamp"]),
+                "timestamp_domain": "ar_session" if entry.get("ar_timestamp") is not None else "video_relative",
                 "accepted": True,
                 "source_video_frame": frame_number,
                 "tracking_state": entry.get("tracking_state"),
@@ -210,6 +248,8 @@ def run_extract_frames(
             write_json_strict(out_dir / "capture.json", manifest)
             summary["capture_manifest"] = "capture.json"
             summary["capture_manifest_frames"] = len(frames)
+        summary["discarded_unmatched_frames"] = len(picked) - matched
+        summary["retained_images"] = matched
     write_json_strict(out_dir / "capture_splat_frames_summary.json", summary)
     return summary
 

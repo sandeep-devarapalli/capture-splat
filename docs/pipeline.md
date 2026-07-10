@@ -26,6 +26,21 @@ Corridor, and Outdoor use 450; Detail Repair uses 180 with exhaustive
 matching. Missing continuous video or its frame index produces `hold` while
 preserving accepted RGB-D keyframes as evidence.
 
+Turn the plan into a reusable, non-destructive frame package with:
+
+```bash
+capture-splat prepare-capture \
+  --capture /path/to/capture \
+  --out runs/scan/prepared
+```
+
+The command writes plan and capture-quality reports beside
+`frames/capture.json` and `frames/images/`. Accepted RGB-D frames take
+precedence over video supplements. New iPhone frame indexes carry both the
+video-relative timestamp and the AR-session timestamp, so cross-source
+duplicates can be removed without guessing clock offsets. Older indexes remain
+readable but report that cross-source deduplication is unavailable.
+
 External Record3D, Roomly-style, or Nerfstudio-style captures can enter at the
 `capture.json` stage when they expose RGB frames and `transforms.json`:
 
@@ -69,10 +84,8 @@ For room interiors, prefer the automated reconstruction path over the raw
 ARKit-pose export:
 
 ```bash
-capture-splat extract-frames --video capture.mov --out runs/scan/frames \
-  --target-frames 300            # sharpest-per-window; add --frame-index when
-                                 # the app exported metadata/frame_index.jsonl
-capture-splat sfm --images runs/scan/frames/images --out runs/scan/colmap_package
+capture-splat prepare-capture --capture /path/to/capture --out runs/scan/prepared
+capture-splat sfm --images runs/scan/prepared/frames/images --out runs/scan/colmap_package
 # or, to keep ARKit poses as the prior:
 capture-splat triangulate --package runs/scan/colmap_package --out runs/scan/triangulate
 capture-splat train-gsplat-ladder ... # bilateral grid + random background are

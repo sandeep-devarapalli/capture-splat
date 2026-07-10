@@ -144,6 +144,7 @@ final class CaptureVideoRecorder {
         var entry: [String: Any] = [
             "video_frame_idx": appendedFrameCount,
             "timestamp": relativeTimestamp,
+            "ar_timestamp": frame.timestamp,
             "camera_to_world": cameraToWorld,
             "intrinsics": [
                 "fl_x": Double(intrinsicsMatrix[0][0]),

@@ -15,6 +15,7 @@ from .colmap_support_delta import compare_colmap_support_delta
 from .colmap_support_repair import build_colmap_support_repair
 from .ingest import ingest_capture
 from .ply_stats import prune_ply_by_alpha, sanitize_ply_drop_non_finite
+from .prepare_capture import prepare_capture
 from .render_source_qa import run_render_source_qa
 from .reconstruction_recipe import RECIPES, plan_reconstruction
 from .scene_transform import write_scene_transform_sidecar
@@ -68,6 +69,13 @@ def main() -> None:
     p_plan.add_argument("--capture", type=Path, required=True)
     p_plan.add_argument("--out", type=Path, required=True)
     p_plan.add_argument("--recipe", choices=["auto", *RECIPES], default="auto")
+    p_prepare = sub.add_parser("prepare-capture", help="Prepare RGB-D-first frames and video supplements for SfM")
+    p_prepare.add_argument("--capture", type=Path, required=True)
+    p_prepare.add_argument("--out", type=Path, required=True)
+    p_prepare.add_argument("--recipe", choices=["auto", *RECIPES], default="auto")
+    p_prepare.add_argument("--target-frames", type=int)
+    p_prepare.add_argument("--max-edge", type=int, default=1920)
+    p_prepare.add_argument("--dedup-tolerance", type=float, default=0.08)
     p_compare = sub.add_parser("compare-app-output", help="Compare observable outputs from iPhone 3DGS apps")
     p_compare.add_argument("--capture-splat", type=Path)
     p_compare.add_argument("--splatking", type=Path)
@@ -295,6 +303,15 @@ def main() -> None:
         )
     elif args.command == "plan-reconstruction":
         payload = plan_reconstruction(args.capture, args.out, recipe=args.recipe)
+    elif args.command == "prepare-capture":
+        payload = prepare_capture(
+            args.capture,
+            args.out,
+            recipe=args.recipe,
+            target_frames=args.target_frames,
+            max_edge=args.max_edge,
+            dedup_tolerance_seconds=args.dedup_tolerance,
+        )
     elif args.command == "compare-app-output":
         payload = compare_app_outputs(
             args.out,

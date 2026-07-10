@@ -49,6 +49,21 @@ The strict plan records frame budget, matching strategy, mask/seed policy,
 training ladder, viewer preset, missing assets, and `ready|hold`. It is an
 execution plan, not a reconstruction-quality claim.
 
+Prepare the actual SfM input before moving it to a GPU host:
+
+```bash
+capture-splat prepare-capture \
+  --capture /path/to/capture_splat_export \
+  --out runs/my_capture/prepared
+```
+
+`prepare-capture` keeps accepted RGB-D keyframes, supplements them with the
+sharpest pose-matched continuous-video frames up to the intent recipe's real
+frame budget, removes shared-clock duplicates within 80 ms, and writes derived
+person/object masks only as proposals. Its strict summary includes capture QA,
+finalization state, and an `sfm_request` resolved from the actual prepared frame
+count. A `hold` preserves usable evidence; it is not a quality claim.
+
 For room scans, the iPhone app also has a Room Plan review path on supported LiDAR iPhones. It can export `room_plan/room.usdz` plus a conservative layout report as capture guidance, not as 3DGS quality proof.
 
 Then run:
@@ -57,8 +72,8 @@ Then run:
 . .venv/bin/activate
 CAPTURE=/path/to/exported/capture_splat_session
 capture-splat doctor --vksplat-root external/vksplat
-capture-splat ingest --capture "$CAPTURE" --out runs/my_scan
-capture-splat colmap-export --capture "$CAPTURE" --out runs/my_scan/colmap_package
+capture-splat prepare-capture --capture "$CAPTURE" --out runs/my_scan/prepared
+capture-splat sfm --images runs/my_scan/prepared/frames/images --out runs/my_scan/colmap_package
 capture-splat train-vksplat-ladder   --package runs/my_scan/colmap_package   --out runs/my_scan/vksplat_ladder   --vksplat-root external/vksplat
 # For long rungs that show late reset instability, record a controlled schedule:
 # capture-splat train-vksplat-ladder --package runs/my_scan/colmap_package --out runs/my_scan/vksplat_ladder_stop9000 --vksplat-root external/vksplat --stop-reset-at 9000
