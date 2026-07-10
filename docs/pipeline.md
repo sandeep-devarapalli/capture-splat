@@ -41,6 +41,29 @@ video-relative timestamp and the AR-session timestamp, so cross-source
 duplicates can be removed without guessing clock offsets. Older indexes remain
 readable but report that cross-source deduplication is unavailable.
 
+For a resumable end-to-end run, use:
+
+```bash
+capture-splat reconstruct \
+  --capture /path/to/capture \
+  --out runs/scan/reconstruction \
+  --backend vksplat \
+  --backend-root external/vksplat
+```
+
+The command writes one strict top-level summary while retaining every stage
+summary under numbered directories. `--dry-run` plans without invoking SfM or
+training, `--stop-after sfm` (or another named stage) bounds a probe, and
+`--resume` reuses completed summaries. A held RGB-D fit continues with the
+unaugmented COLMAP package. Missing fixed-camera raw renders skip QA and keep
+the final decision at `hold`; they are not inferred from full viewer screens.
+Raw-render QA promotion also requires `capture_splat_render_provenance.json`
+beside the renders. Its `gaussian_checksum` must match the selected pruned PLY,
+so images from another rung or reconstruction cannot promote the current run.
+Resume hashes both source and render image sets and verifies every copied file
+declared by the World Studio handoff. A rejected/partially written stage is not
+rewritten in place; fix the blocker and use a new output directory.
+
 External Record3D, Roomly-style, or Nerfstudio-style captures can enter at the
 `capture.json` stage when they expose RGB frames and `transforms.json`:
 
@@ -189,6 +212,18 @@ capture-splat qa-render-source \
 
 The report includes per-frame PSNR, SSIM, MAE, normalized correlation,
 edge-density, and sharpness proxies, plus weak-frame and tail-frame lists.
+When these renders are attached to `capture-splat reconstruct`, add a strict
+provenance sidecar:
+
+```json
+{
+  "schema": "capture_splat.render_provenance.v0.1",
+  "gaussian_checksum": "sha256:<checksum-of-the-rendered-ply>"
+}
+```
+
+This binds the image metrics to one Gaussian artifact. It does not make that
+artifact metric, collision, semantic, or navigation authority.
 
 If the weak frames are not part of the validation split, run an exact-frame
 VkSplat probe. It retrains the configured step count with train renders enabled,

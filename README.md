@@ -123,6 +123,29 @@ leaves the copied package unaugmented. A passing fit writes `metric_seed.ply`
 and adds its finite points to the copied text model; COLMAP-refined cameras
 remain the visual reconstruction baseline.
 
+The same stages can be run through one resumable evidence command:
+
+```bash
+capture-splat reconstruct \
+  --capture /path/to/capture \
+  --out runs/my_scan/reconstruction \
+  --backend vksplat \
+  --backend-root external/vksplat
+```
+
+Use `--dry-run` to inspect the resolved recipe and stage plan, `--stop-after`
+for a bounded probe, and `--resume` to reuse completed strict summaries. The
+command runs preparation, SfM, optional gated RGB-D seeding, the controlled
+training ladder, alpha pruning, optional raw-render QA, and World Studio
+export. Supply `--qa-render-dir` when fixed-camera raw renders exist; without
+that evidence, the final decision remains `hold` rather than claiming quality.
+The render directory must also carry `capture_splat_render_provenance.json`
+with the exact selected PLY's `sha256:` value in `gaussian_checksum`; metrics
+from an unbound or different model are recorded but cannot promote the run.
+Resume revalidates the completed stage configuration plus source/render and
+handoff checksums. Rejected or partially written stages require a new output
+directory rather than an in-place retry over stale artifacts.
+
 If you have raw rendered canvases from a viewer or app, compare them against the
 source images instead of full UI screenshots:
 

@@ -16,6 +16,7 @@ from .colmap_support_repair import build_colmap_support_repair
 from .ingest import ingest_capture
 from .ply_stats import prune_ply_by_alpha, sanitize_ply_drop_non_finite
 from .prepare_capture import prepare_capture
+from .reconstruct import STAGES, reconstruct_capture
 from .render_source_qa import run_render_source_qa
 from .rgbd_seed import build_rgbd_metric_seed
 from .reconstruction_recipe import RECIPES, plan_reconstruction
@@ -88,6 +89,24 @@ def main() -> None:
     p_seed.add_argument("--confidence-minimum", type=int, default=1)
     p_seed.add_argument("--voxel-size", type=float, default=0.02)
     p_seed.add_argument("--max-points", type=int, default=250_000)
+    p_reconstruct = sub.add_parser("reconstruct", help="Run the resumable capture-to-3DGS evidence pipeline")
+    p_reconstruct.add_argument("--capture", type=Path, required=True)
+    p_reconstruct.add_argument("--out", type=Path, required=True)
+    p_reconstruct.add_argument("--backend", choices=["vksplat", "gsplat"], default="vksplat")
+    p_reconstruct.add_argument("--backend-root", type=Path)
+    p_reconstruct.add_argument("--recipe", choices=["auto", *RECIPES], default="auto")
+    p_reconstruct.add_argument("--steps", default="3000,7000,15000,30000")
+    p_reconstruct.add_argument("--qa-render-dir", type=Path)
+    p_reconstruct.add_argument("--qa-pairs-json", type=Path)
+    p_reconstruct.add_argument("--qa-provenance-json", type=Path)
+    p_reconstruct.add_argument("--resume", action="store_true")
+    p_reconstruct.add_argument("--dry-run", action="store_true")
+    p_reconstruct.add_argument("--stop-after", choices=STAGES, default="export")
+    p_reconstruct.add_argument("--allow-cpu-matching", action="store_true")
+    p_reconstruct.add_argument("--retrieval-top-k", type=int, default=32)
+    p_reconstruct.add_argument("--prune-alpha", type=float, default=12.0)
+    p_reconstruct.add_argument("--max-pruned-fraction", type=float, default=0.6)
+    p_reconstruct.add_argument("--stop-reset-at", type=int)
     p_compare = sub.add_parser("compare-app-output", help="Compare observable outputs from iPhone 3DGS apps")
     p_compare.add_argument("--capture-splat", type=Path)
     p_compare.add_argument("--splatking", type=Path)
@@ -337,6 +356,26 @@ def main() -> None:
             confidence_minimum=args.confidence_minimum,
             voxel_size=args.voxel_size,
             max_points=args.max_points,
+        )
+    elif args.command == "reconstruct":
+        payload = reconstruct_capture(
+            args.capture,
+            args.out,
+            backend=args.backend,
+            backend_root=args.backend_root,
+            recipe=args.recipe,
+            steps=parse_steps(args.steps),
+            qa_render_dir=args.qa_render_dir,
+            qa_pairs_json=args.qa_pairs_json,
+            qa_provenance_json=args.qa_provenance_json,
+            resume=args.resume,
+            dry_run=args.dry_run,
+            stop_after=args.stop_after,
+            allow_cpu_matching=args.allow_cpu_matching,
+            retrieval_top_k=args.retrieval_top_k,
+            prune_alpha=args.prune_alpha,
+            max_pruned_fraction=args.max_pruned_fraction,
+            stop_reset_at=args.stop_reset_at,
         )
     elif args.command == "compare-app-output":
         payload = compare_app_outputs(
