@@ -88,6 +88,11 @@ capture-splat prepare-capture --capture /path/to/capture --out runs/scan/prepare
 capture-splat sfm --images runs/scan/prepared/frames/images \
   --out runs/scan/colmap_package --method glomap \
   --features hloc --matcher retrieval
+# Optional metric initialization after refined cameras exist:
+capture-splat build-rgbd-seed \
+  --capture runs/scan/prepared/frames \
+  --package runs/scan/colmap_package \
+  --out runs/scan/rgbd_seed
 # or, to keep ARKit poses as the prior:
 capture-splat triangulate --package runs/scan/colmap_package --out runs/scan/triangulate
 capture-splat train-gsplat-ladder ... # bilateral grid + random background are
@@ -112,6 +117,12 @@ EigenPlaces top-32 retrieval, ALIKED-N16 features, LightGlue matches, and COLMAP
 geometric verification before GLOMAP/COLMAP mapping. Install it through
 `scripts/setup_sfm.sh`; `hloc_missing` blocks that requested route rather than
 silently changing the experiment to exhaustive SIFT.
+`build-rgbd-seed` estimates a Sim(3) from shared ARKit and COLMAP camera
+centers, then transforms confidence-filtered RGB-D points only when median and
+tail residual gates pass. It writes a new package under the requested output
+directory and keeps a backup of the unaugmented sparse model. A failed fit is
+held and training can continue from the original COLMAP package; ARKit depth
+is a metric prior, not a substitute for COLMAP-refined image support.
 `--background-sphere` seeds distant background points for room and outdoor
 scenes. Both trainers write `capture_splat_scene_transform.json` next to the
 PLY so viewers can map package cameras into the trained splat world; these

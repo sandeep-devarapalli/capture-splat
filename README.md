@@ -107,6 +107,22 @@ ALIKED-N16, LightGlue, COLMAP geometric verification, and the requested mapper.
 Missing HLOC is `hloc_missing`; Capture Splat does not silently substitute
 exhaustive matching.
 
+After SfM, an optional RGB-D seed can align confidence-filtered iPhone depth
+to the COLMAP camera frame and augment a copied package:
+
+```bash
+capture-splat build-rgbd-seed \
+  --capture /path/to/capture \
+  --package runs/my_scan/colmap_package \
+  --out runs/my_scan/rgbd_seed
+```
+
+The command requires at least eight shared camera centers and gates the fitted
+Sim(3) residuals against the COLMAP scene radius. A failed fit is `hold` and
+leaves the copied package unaugmented. A passing fit writes `metric_seed.ply`
+and adds its finite points to the copied text model; COLMAP-refined cameras
+remain the visual reconstruction baseline.
+
 If you have raw rendered canvases from a viewer or app, compare them against the
 source images instead of full UI screenshots:
 

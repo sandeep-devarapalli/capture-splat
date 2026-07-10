@@ -17,6 +17,7 @@ from .ingest import ingest_capture
 from .ply_stats import prune_ply_by_alpha, sanitize_ply_drop_non_finite
 from .prepare_capture import prepare_capture
 from .render_source_qa import run_render_source_qa
+from .rgbd_seed import build_rgbd_metric_seed
 from .reconstruction_recipe import RECIPES, plan_reconstruction
 from .scene_transform import write_scene_transform_sidecar
 from .sfm_runner import colmap_has_cuda, run_sfm, run_triangulate
@@ -77,6 +78,16 @@ def main() -> None:
     p_prepare.add_argument("--target-frames", type=int)
     p_prepare.add_argument("--max-edge", type=int, default=1920)
     p_prepare.add_argument("--dedup-tolerance", type=float, default=0.08)
+    p_seed = sub.add_parser("build-rgbd-seed", help="Align ARKit RGB-D to COLMAP and augment a copied package")
+    p_seed.add_argument("--capture", type=Path, required=True)
+    p_seed.add_argument("--package", type=Path, required=True)
+    p_seed.add_argument("--out", type=Path, required=True)
+    p_seed.add_argument("--min-cameras", type=int, default=8)
+    p_seed.add_argument("--max-median-fraction", type=float, default=0.03)
+    p_seed.add_argument("--max-p95-fraction", type=float, default=0.08)
+    p_seed.add_argument("--confidence-minimum", type=int, default=1)
+    p_seed.add_argument("--voxel-size", type=float, default=0.02)
+    p_seed.add_argument("--max-points", type=int, default=250_000)
     p_compare = sub.add_parser("compare-app-output", help="Compare observable outputs from iPhone 3DGS apps")
     p_compare.add_argument("--capture-splat", type=Path)
     p_compare.add_argument("--splatking", type=Path)
@@ -314,6 +325,18 @@ def main() -> None:
             target_frames=args.target_frames,
             max_edge=args.max_edge,
             dedup_tolerance_seconds=args.dedup_tolerance,
+        )
+    elif args.command == "build-rgbd-seed":
+        payload = build_rgbd_metric_seed(
+            args.capture,
+            args.package,
+            args.out,
+            minimum_cameras=args.min_cameras,
+            max_median_fraction=args.max_median_fraction,
+            max_p95_fraction=args.max_p95_fraction,
+            confidence_minimum=args.confidence_minimum,
+            voxel_size=args.voxel_size,
+            max_points=args.max_points,
         )
     elif args.command == "compare-app-output":
         payload = compare_app_outputs(
