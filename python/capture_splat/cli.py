@@ -16,6 +16,7 @@ from .colmap_support_repair import build_colmap_support_repair
 from .ingest import ingest_capture
 from .ply_stats import prune_ply_by_alpha, sanitize_ply_drop_non_finite
 from .render_source_qa import run_render_source_qa
+from .reconstruction_recipe import RECIPES, plan_reconstruction
 from .scene_transform import write_scene_transform_sidecar
 from .sfm_runner import colmap_has_cuda, run_sfm, run_triangulate
 from .transforms_import import import_transforms_package
@@ -63,6 +64,10 @@ def main() -> None:
     p_capture_quality.add_argument("--min-mean-parallax-meters", type=float, default=0.05)
     p_capture_quality.add_argument("--min-mean-overlap-score", type=float, default=0.45)
     p_capture_quality.add_argument("--min-mean-depth-ratio", type=float, default=0.35)
+    p_plan = sub.add_parser("plan-reconstruction", help="Resolve an intent-aware host reconstruction recipe")
+    p_plan.add_argument("--capture", type=Path, required=True)
+    p_plan.add_argument("--out", type=Path, required=True)
+    p_plan.add_argument("--recipe", choices=["auto", *RECIPES], default="auto")
     p_compare = sub.add_parser("compare-app-output", help="Compare observable outputs from iPhone 3DGS apps")
     p_compare.add_argument("--capture-splat", type=Path)
     p_compare.add_argument("--splatking", type=Path)
@@ -288,6 +293,8 @@ def main() -> None:
             min_mean_overlap_score=args.min_mean_overlap_score,
             min_mean_depth_ratio=args.min_mean_depth_ratio,
         )
+    elif args.command == "plan-reconstruction":
+        payload = plan_reconstruction(args.capture, args.out, recipe=args.recipe)
     elif args.command == "compare-app-output":
         payload = compare_app_outputs(
             args.out,

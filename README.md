@@ -36,6 +36,19 @@ scripts/setup_vksplat.sh external/vksplat
 
 Open `apps/ios/CaptureSplat/CaptureSplat.xcodeproj` in Xcode, set your signing team, run on a physical iPhone, choose **Video 3DGS**, record a slow overlapping scan, and export the capture folder to your computer.
 
+Resolve the capture intent into a host-side processing recipe before starting
+SfM or training:
+
+```bash
+capture-splat plan-reconstruction \
+  --capture /path/to/capture_splat_export \
+  --out runs/my_capture/plan
+```
+
+The strict plan records frame budget, matching strategy, mask/seed policy,
+training ladder, viewer preset, missing assets, and `ready|hold`. It is an
+execution plan, not a reconstruction-quality claim.
+
 For room scans, the iPhone app also has a Room Plan review path on supported LiDAR iPhones. It can export `room_plan/room.usdz` plus a conservative layout report as capture guidance, not as 3DGS quality proof.
 
 Then run:

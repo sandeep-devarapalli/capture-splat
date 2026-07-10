@@ -12,6 +12,20 @@ iPhone Video 3DGS capture
   -> standard splat.ply
 ```
 
+Before extracting frames, resolve the iPhone capture intent into one public
+host recipe:
+
+```bash
+capture-splat plan-reconstruction \
+  --capture /path/to/capture \
+  --out runs/scan/plan
+```
+
+Desk/Object use a 300-frame retrieval-SfM target; Room/Semantic Room,
+Corridor, and Outdoor use 450; Detail Repair uses 180 with exhaustive
+matching. Missing continuous video or its frame index produces `hold` while
+preserving accepted RGB-D keyframes as evidence.
+
 External Record3D, Roomly-style, or Nerfstudio-style captures can enter at the
 `capture.json` stage when they expose RGB frames and `transforms.json`:
 
