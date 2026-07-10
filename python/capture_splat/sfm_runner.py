@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .background_sphere import append_background_sphere
+from .hloc_runner import hloc_status, planned_frontend, run_hloc_frontend
 from .json_utils import write_json_strict
 
 SUMMARY_SCHEMA = "capture_splat.sfm_summary.v0.1"
@@ -60,13 +61,17 @@ def build_commands(
 ) -> list[list[str]]:
     database = out_dir / "database.db"
     sparse = out_dir / "sparse"
-    commands: list[list[str]] = [[
-        "colmap", "feature_extractor",
-        "--database_path", str(database),
-        "--image_path", str(images_dir),
-        "--ImageReader.single_camera", "1",
-        "--SiftExtraction.max_num_features", str(int(max_features)),
-    ]]
+    commands: list[list[str]] = []
+    if matcher == "retrieval":
+        commands.extend(planned_frontend(images_dir, out_dir, database, 32))
+    else:
+        commands.append([
+            "colmap", "feature_extractor",
+            "--database_path", str(database),
+            "--image_path", str(images_dir),
+            "--ImageReader.single_camera", "1",
+            "--SiftExtraction.max_num_features", str(int(max_features)),
+        ])
     if matcher == "sequential":
         match_command = [
             "colmap", "sequential_matcher",
@@ -77,8 +82,10 @@ def build_commands(
         if loop_detection and vocab_tree is not None:
             match_command += ["--SequentialMatching.vocab_tree_path", str(vocab_tree)]
         commands.append(match_command)
-    else:
+    elif matcher == "exhaustive":
         commands.append(["colmap", "exhaustive_matcher", "--database_path", str(database)])
+    elif matcher != "retrieval":
+        raise ValueError(f"unsupported matcher: {matcher}")
     if method == "glomap":
         commands.append([
             "glomap", "mapper",
@@ -215,6 +222,8 @@ def run_sfm(
     out_dir: Path,
     method: str = "colmap",
     matcher: str = "exhaustive",
+    features: str = "sift",
+    retrieval_top_k: int = 32,
     overlap: int = 30,
     loop_detection: bool = True,
     vocab_tree: Path | None = None,
@@ -230,9 +239,15 @@ def run_sfm(
     out_dir = out_dir.resolve()
     if not images_dir.is_dir():
         raise FileNotFoundError(f"images directory missing: {images_dir}")
-    if matcher == "retrieval":
-        raise RuntimeError("retrieval matching requires hloc (see scripts/setup_sfm.sh); use sequential or exhaustive")
+    if features not in {"sift", "hloc"}:
+        raise ValueError(f"unsupported features: {features}")
+    if matcher == "retrieval" and features != "hloc":
+        raise ValueError("retrieval matcher requires --features hloc")
+    if features == "hloc" and matcher != "retrieval":
+        raise ValueError("HLOC features require --matcher retrieval")
+    retrieval_top_k = max(1, int(retrieval_top_k))
     blockers: list[str] = []
+    hloc = hloc_status()
     colmap_cuda: bool | None = None
     if find_binary("colmap") is None:
         blockers.append("colmap_binary_missing")
@@ -242,6 +257,8 @@ def run_sfm(
             blockers.append("colmap_cuda_missing")
     if method == "glomap" and find_binary("glomap") is None:
         blockers.append("glomap_binary_missing")
+    if matcher == "retrieval" and not hloc["ready"]:
+        blockers.append("hloc_missing")
     if matcher != "sequential":
         loop_detection = False
     elif loop_detection and vocab_tree is None:
@@ -260,12 +277,17 @@ def run_sfm(
         run_images = images_dir
     total_images = count_images(run_images)
     commands = build_commands(run_images, out_dir, method, matcher, overlap, loop_detection, vocab_tree, max_features)
+    if matcher == "retrieval" and retrieval_top_k != 32:
+        commands[:5] = planned_frontend(run_images, out_dir, out_dir / "database.db", retrieval_top_k)
     summary: dict[str, Any] = {
         "schema": SUMMARY_SCHEMA,
         "images_dir": str(run_images),
         "output_dir": str(out_dir),
         "method": method,
         "matcher": matcher,
+        "features": features,
+        "retrieval_top_k": retrieval_top_k if matcher == "retrieval" else None,
+        "hloc": hloc,
         "overlap": overlap,
         "loop_detection": loop_detection,
         "vocab_tree": str(vocab_tree) if vocab_tree else None,
@@ -285,7 +307,23 @@ def run_sfm(
             raise RuntimeError(f"sfm blocked: {', '.join(blockers)}")
         return summary
     (out_dir / "sparse").mkdir(parents=True, exist_ok=True)
-    for command in commands:
+    mapping_commands = commands
+    if matcher == "retrieval":
+        try:
+            summary["hloc_frontend"] = run_hloc_frontend(
+                run_images,
+                out_dir,
+                out_dir / "database.db",
+                top_k=retrieval_top_k,
+            )
+        except Exception as error:
+            summary["decision"] = "reject"
+            summary["failed_stage"] = "hloc_frontend"
+            summary["error"] = str(error)
+            write_json_strict(out_dir / "capture_splat_sfm_summary.json", summary)
+            raise RuntimeError(f"sfm HLOC frontend failed: {error}") from error
+        mapping_commands = commands[5:]
+    for command in mapping_commands:
         completed = subprocess.run(command, text=True)
         if completed.returncode != 0:
             summary["decision"] = "reject"
@@ -439,6 +477,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--method", choices=["colmap", "glomap"], default="colmap")
     parser.add_argument("--matcher", choices=["sequential", "exhaustive", "retrieval"], default="exhaustive")
+    parser.add_argument("--features", choices=["sift", "hloc"], default="sift")
+    parser.add_argument("--retrieval-top-k", type=int, default=32)
     parser.add_argument("--overlap", type=int, default=30)
     parser.add_argument("--no-loop-detection", action="store_true")
     parser.add_argument("--vocab-tree", type=Path)
@@ -456,6 +496,8 @@ def main(argv: list[str] | None = None) -> None:
         args.out,
         method=args.method,
         matcher=args.matcher,
+        features=args.features,
+        retrieval_top_k=args.retrieval_top_k,
         overlap=args.overlap,
         loop_detection=not args.no_loop_detection,
         vocab_tree=args.vocab_tree,

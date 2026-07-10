@@ -32,6 +32,14 @@ def test_build_commands_glomap_appends_registrator(tmp_path: Path) -> None:
     assert commands[3][1] == "image_registrator"
 
 
+def test_build_commands_retrieval_never_uses_exhaustive_matcher(tmp_path: Path) -> None:
+    commands = build_commands(tmp_path / "images", tmp_path / "out", "glomap", "retrieval", 30, False, None, 8192)
+
+    assert commands[0][0:3] == ["python-hloc", "extract", "eigenplaces"]
+    assert not any("exhaustive_matcher" in command for command in commands)
+    assert commands[-2][0:2] == ["glomap", "mapper"]
+
+
 def test_select_best_sparse_subdir_promotes_largest(tmp_path: Path) -> None:
     sparse = tmp_path / "sparse"
     (sparse / "0").mkdir(parents=True)
@@ -134,11 +142,47 @@ def test_run_sfm_cpu_matching_override_recorded(tmp_path: Path, monkeypatch: pyt
 
 
 def test_run_sfm_retrieval_requires_hloc(tmp_path: Path) -> None:
+    from capture_splat.json_utils import load_json_strict
+
     images = tmp_path / "frames"
     write_image(images / "000001.jpg")
 
-    with pytest.raises(RuntimeError, match="hloc"):
-        run_sfm(images, tmp_path / "out", matcher="retrieval", dry_run=True)
+    with pytest.raises(RuntimeError, match="hloc_missing"):
+        run_sfm(images, tmp_path / "out", matcher="retrieval", features="hloc", dry_run=True)
+    summary = load_json_strict(tmp_path / "out/capture_splat_sfm_summary.json")
+    assert summary["decision"] == "blocked"
+    assert "hloc_missing" in summary["blockers"]
+    assert not any("exhaustive_matcher" in command for command in summary["commands"])
+
+
+def test_run_sfm_retrieval_dry_run_records_hloc_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("capture_splat.sfm_runner.find_binary", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("capture_splat.sfm_runner.colmap_has_cuda", lambda: True)
+    monkeypatch.setattr("capture_splat.sfm_runner.hloc_status", lambda: {"ready": True})
+    images = tmp_path / "frames"
+    write_image(images / "000001.jpg")
+
+    summary = run_sfm(
+        images,
+        tmp_path / "out",
+        method="glomap",
+        matcher="retrieval",
+        features="hloc",
+        retrieval_top_k=24,
+        dry_run=True,
+    )
+
+    assert summary["decision"] == "dry_run"
+    assert summary["retrieval_top_k"] == 24
+    assert summary["commands"][1][-1] == "24"
+
+
+def test_run_sfm_rejects_invalid_feature_matcher_pair(tmp_path: Path) -> None:
+    images = tmp_path / "frames"
+    write_image(images / "000001.jpg")
+
+    with pytest.raises(ValueError, match="requires --features hloc"):
+        run_sfm(images, tmp_path / "out", matcher="retrieval")
 
 
 def test_run_sfm_blocked_without_glomap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -24,6 +24,7 @@ from .transforms_import import import_transforms_package
 from .gsplat_ladder import run_gsplat_ladder
 from .gsplat_runner import doctor as gsplat_doctor
 from .gsplat_runner import run_gsplat
+from .hloc_runner import hloc_status
 from .vksplat_ladder import parse_steps, run_vksplat_ladder
 from .weak_frames_report import run_weak_frames_report
 from .vksplat_runner import doctor as vksplat_doctor
@@ -169,6 +170,8 @@ def main() -> None:
     p_sfm.add_argument("--out", type=Path, required=True)
     p_sfm.add_argument("--method", choices=["colmap", "glomap"], default="colmap")
     p_sfm.add_argument("--matcher", choices=["sequential", "exhaustive", "retrieval"], default="exhaustive")
+    p_sfm.add_argument("--features", choices=["sift", "hloc"], default="sift")
+    p_sfm.add_argument("--retrieval-top-k", type=int, default=32)
     p_sfm.add_argument("--overlap", type=int, default=30)
     p_sfm.add_argument("--no-loop-detection", action="store_true")
     p_sfm.add_argument("--vocab-tree", type=Path)
@@ -410,6 +413,8 @@ def main() -> None:
             args.out,
             method=args.method,
             matcher=args.matcher,
+            features=args.features,
+            retrieval_top_k=args.retrieval_top_k,
             overlap=args.overlap,
             loop_detection=not args.no_loop_detection,
             vocab_tree=args.vocab_tree,
@@ -529,9 +534,10 @@ def main() -> None:
         )
     elif args.command == "doctor":
         payload = {
-            "schema": "capture_splat.doctor.v0.3",
+            "schema": "capture_splat.doctor.v0.4",
             "tools": {name: shutil.which(name) for name in ("colmap", "glomap", "ffmpeg", "ffprobe")},
             "colmap_cuda": colmap_has_cuda(),
+            "hloc": hloc_status(),
             "vksplat": vksplat_doctor(args.vksplat_root),
             "gsplat": gsplat_doctor(args.gsplat_root),
             "three_dgs_cpp": _external_source_status(args.three_dgs_cpp_root, ["CMakeLists.txt"]),

@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+import importlib.util
+import subprocess
+from pathlib import Path
+from typing import Any
+
+RETRIEVAL_CONFIG = "eigenplaces"
+FEATURE_CONFIG = "aliked-n16"
+MATCHER_CONFIG = "aliked+lightglue"
+
+
+def hloc_status() -> dict[str, Any]:
+    hloc_present = importlib.util.find_spec("hloc") is not None
+    pycolmap_present = importlib.util.find_spec("pycolmap") is not None
+    return {
+        "ready": hloc_present and pycolmap_present,
+        "hloc_importable": hloc_present,
+        "pycolmap_importable": pycolmap_present,
+        "retrieval_config": RETRIEVAL_CONFIG,
+        "feature_config": FEATURE_CONFIG,
+        "matcher_config": MATCHER_CONFIG,
+    }
+
+
+def planned_frontend(images_dir: Path, out_dir: Path, database: Path, top_k: int) -> list[list[str]]:
+    hloc_dir = out_dir / "hloc"
+    pairs = hloc_dir / "pairs-eigenplaces.txt"
+    return [
+        ["python-hloc", "extract", RETRIEVAL_CONFIG, str(images_dir), str(hloc_dir)],
+        ["python-hloc", "pairs", str(pairs), "--top-k", str(int(top_k))],
+        ["python-hloc", "extract", FEATURE_CONFIG, str(images_dir), str(hloc_dir)],
+        ["python-hloc", "match", MATCHER_CONFIG, str(pairs), str(hloc_dir)],
+        [
+            "colmap", "matches_importer",
+            "--database_path", str(database),
+            "--match_list_path", str(pairs),
+            "--TwoViewGeometry.min_inlier_ratio", "0.1",
+            "--TwoViewGeometry.max_num_trials", "20000",
+        ],
+    ]
+
+
+def run_hloc_frontend(
+    images_dir: Path,
+    out_dir: Path,
+    database: Path,
+    top_k: int = 32,
+) -> dict[str, Any]:
+    status = hloc_status()
+    if not status["ready"]:
+        raise RuntimeError("hloc_missing")
+    from hloc import extract_features, match_features, pairs_from_retrieval, reconstruction
+    import pycolmap
+
+    images_dir = images_dir.resolve()
+    out_dir = out_dir.resolve()
+    database = database.resolve()
+    hloc_dir = out_dir / "hloc"
+    hloc_dir.mkdir(parents=True, exist_ok=True)
+    pairs = hloc_dir / "pairs-eigenplaces.txt"
+    retrieval_conf = extract_features.confs[RETRIEVAL_CONFIG]
+    feature_conf = extract_features.confs[FEATURE_CONFIG]
+    matcher_conf = match_features.confs[MATCHER_CONFIG]
+
+    retrieval_path = extract_features.main(retrieval_conf, images_dir, hloc_dir)
+    pairs_from_retrieval.main(retrieval_path, pairs, num_matched=int(top_k))
+    feature_path = extract_features.main(feature_conf, images_dir, hloc_dir)
+    match_path = match_features.main(matcher_conf, pairs, feature_conf["output"], hloc_dir)
+
+    reconstruction.create_empty_db(database)
+    pycolmap.import_images(str(database), str(images_dir), pycolmap.CameraMode.SINGLE)
+    image_ids = reconstruction.get_image_ids(database)
+    reconstruction.import_features(image_ids, database, feature_path)
+    reconstruction.import_matches(image_ids, database, pairs, match_path, None, False)
+    verification = planned_frontend(images_dir, out_dir, database, top_k)[-1]
+    completed = subprocess.run(verification, text=True)
+    if completed.returncode != 0:
+        raise RuntimeError(f"HLOC geometric verification failed with exit {completed.returncode}")
+    return {
+        "retrieval_config": RETRIEVAL_CONFIG,
+        "feature_config": FEATURE_CONFIG,
+        "matcher_config": MATCHER_CONFIG,
+        "retrieval_top_k": int(top_k),
+        "pairs": str(pairs),
+        "retrieval_features": str(retrieval_path),
+        "local_features": str(feature_path),
+        "matches": str(match_path),
+        "database": str(database),
+        "geometric_verification_command": verification,
+        "camera_mode": "single",
+    }

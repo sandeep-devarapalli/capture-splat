@@ -73,7 +73,10 @@ Then run:
 CAPTURE=/path/to/exported/capture_splat_session
 capture-splat doctor --vksplat-root external/vksplat
 capture-splat prepare-capture --capture "$CAPTURE" --out runs/my_scan/prepared
-capture-splat sfm --images runs/my_scan/prepared/frames/images --out runs/my_scan/colmap_package
+capture-splat sfm \
+  --images runs/my_scan/prepared/frames/images \
+  --out runs/my_scan/colmap_package \
+  --method glomap --features hloc --matcher retrieval
 capture-splat train-vksplat-ladder   --package runs/my_scan/colmap_package   --out runs/my_scan/vksplat_ladder   --vksplat-root external/vksplat
 # For long rungs that show late reset instability, record a controlled schedule:
 # capture-splat train-vksplat-ladder --package runs/my_scan/colmap_package --out runs/my_scan/vksplat_ladder_stop9000 --vksplat-root external/vksplat --stop-reset-at 9000
@@ -96,6 +99,13 @@ is only validated finite output, not a visual-quality claim. If a trainer writes
 a `.ply` with a few non-finite splats, `capture-splat sanitize-ply` can write a
 strict report and a finite copy that drops only non-finite vertex rows. The
 ladder only uses that repair when `--sanitize-non-finite-ply` is set.
+
+For prepared packages over 250 frames, install the optional HLOC/GLOMAP tools
+with `PYTHON_BIN=.venv/bin/python scripts/setup_sfm.sh external`, then use
+`--features hloc --matcher retrieval`. This runs EigenPlaces top-32 retrieval,
+ALIKED-N16, LightGlue, COLMAP geometric verification, and the requested mapper.
+Missing HLOC is `hloc_missing`; Capture Splat does not silently substitute
+exhaustive matching.
 
 If you have raw rendered canvases from a viewer or app, compare them against the
 source images instead of full UI screenshots:

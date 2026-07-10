@@ -85,7 +85,9 @@ ARKit-pose export:
 
 ```bash
 capture-splat prepare-capture --capture /path/to/capture --out runs/scan/prepared
-capture-splat sfm --images runs/scan/prepared/frames/images --out runs/scan/colmap_package
+capture-splat sfm --images runs/scan/prepared/frames/images \
+  --out runs/scan/colmap_package --method glomap \
+  --features hloc --matcher retrieval
 # or, to keep ARKit poses as the prior:
 capture-splat triangulate --package runs/scan/colmap_package --out runs/scan/triangulate
 capture-splat train-gsplat-ladder ... # bilateral grid + random background are
@@ -105,6 +107,11 @@ reports `without CUDA`. Exhaustive matching recovers revisit pairs that
 sequential matching misses on room orbits, and it is only practical on GPU
 builds. Pass `--allow-cpu-matching` to run a deliberate CPU job; the
 summary records `cpu_matching_override` so the evidence trail shows it.
+Prepared packages above 250 frames request the optional HLOC retrieval frontend:
+EigenPlaces top-32 retrieval, ALIKED-N16 features, LightGlue matches, and COLMAP
+geometric verification before GLOMAP/COLMAP mapping. Install it through
+`scripts/setup_sfm.sh`; `hloc_missing` blocks that requested route rather than
+silently changing the experiment to exhaustive SIFT.
 `--background-sphere` seeds distant background points for room and outdoor
 scenes. Both trainers write `capture_splat_scene_transform.json` next to the
 PLY so viewers can map package cameras into the trained splat world; these
