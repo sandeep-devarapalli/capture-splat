@@ -27,6 +27,13 @@ clipped-shadow fraction using the `clipped_exposure` skip reason. Accepted
 frames record both fractions in `capture_quality`; treat them as capture-guidance
 quality proxies, not image-quality or reconstruction-quality proof.
 
+Each indexed frame also records achieved white-balance gains, lens position,
+exposure/focus/white-balance adjustment states, pixel-buffer color primaries,
+transfer function, YCbCr matrix, pixel format, and projection/calibration
+availability. Preparation preserves these values next to the frame used by
+SfM. They support exposure clustering and camera diagnostics; they do not make
+the camera radiometrically calibrated.
+
 Candidates can also be held with `weak_feature_distribution` when image-detail
 samples are too clustered. Accepted frames record `feature_grid_coverage` as a
 lightweight pre-COLMAP proxy for whether useful texture is spread across the
@@ -89,6 +96,11 @@ capture-splat capture-quality-report \
 Use the report as a pre-training gate. `promote` means the capture is reasonable
 to try with COLMAP; `hold` means inspect weak signals first; `reject` means
 recapture before training.
+
+`prepare-capture` also writes strict camera and photometric evidence reports and
+canonical white-valid masks. ARKit per-frame pinhole intrinsics remain priors;
+Capture Splat records that distortion is unavailable instead of inventing
+coefficients. COLMAP-refined cameras remain the visual reconstruction baseline.
 
 For rooms, move in small connected side steps around the perimeter. Keep the
 previous wall, corner, table edge, shelf, or textured object in view while adding

@@ -25,6 +25,10 @@ def make_transforms_export(root: Path, include_depth: bool = True) -> Path:
         frame["depth_file_path"] = "depth/frame_0001.npy"
     write_json_strict(root / "transforms.json", {
         "camera_model": "OPENCV",
+        "k1": 0.01,
+        "k2": -0.02,
+        "p1": 0.001,
+        "p2": -0.001,
         "fl_x": 6.0,
         "fl_y": 6.0,
         "cx": 4.0,
@@ -48,6 +52,8 @@ def test_import_transforms_writes_capture_package(tmp_path: Path) -> None:
     assert capture["frames"][0]["rgb"] == "rgb/000001.jpg"
     assert capture["frames"][0]["depth"] == "depth/000001.npy"
     assert capture["frames"][0]["capture_quality"]["reason"] == "imported_transforms"
+    assert capture["frames"][0]["intrinsics"]["camera_model"] == "OPENCV"
+    assert capture["frames"][0]["intrinsics"]["k2"] == -0.02
 
 
 def test_import_transforms_feeds_existing_ingest(tmp_path: Path) -> None:

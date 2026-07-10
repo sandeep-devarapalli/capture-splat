@@ -1,7 +1,10 @@
 from pathlib import Path
 
+import pytest
+
 from capture_splat.json_utils import write_json_strict
 from capture_splat.vksplat_ladder import run_vksplat_ladder
+from capture_splat.vksplat_runner import run_vksplat
 
 
 def make_package(root: Path) -> Path:
@@ -18,7 +21,12 @@ def make_package(root: Path) -> Path:
 def make_vksplat_root(root: Path) -> Path:
     vksplat = root / "vksplat"
     vksplat.mkdir()
-    (vksplat / "simple_trainer.py").write_text("class MCMCTrainerConfig: pass\nclass TrainerConfig: pass\ndef train_main(config): pass\n", encoding="utf-8")
+    (vksplat / "simple_trainer.py").write_text(
+        "class MCMCTrainerConfig: mask_dir = None\n"
+        "class TrainerConfig: mask_dir = None\n"
+        "def train_main(config): pass\n",
+        encoding="utf-8",
+    )
     return vksplat
 
 
@@ -133,3 +141,36 @@ def test_ladder_threads_stop_reset_schedule_into_runner(tmp_path: Path) -> None:
     assert summary["vksplat_schedule"] == {"stop_reset_at": 9000}
     assert rung["run_summary"]["stop_reset_at"] == 9000
     assert "config.stop_reset_at = 9000" in runner.read_text(encoding="utf-8")
+
+
+def test_ladder_threads_white_valid_masks_into_vksplat(tmp_path: Path) -> None:
+    package = make_package(tmp_path)
+    masks = package / "masks" / "valid"
+    masks.mkdir(parents=True)
+    (masks / "000001.jpg.png").write_bytes(b"fixture")
+    vksplat = make_vksplat_root(tmp_path)
+
+    summary = run_vksplat_ladder(
+        package,
+        tmp_path / "out",
+        vksplat,
+        steps=[3000],
+        dry_run=True,
+        masks="required",
+    )
+
+    runner = tmp_path / "out" / "step_0003000" / "capture_splat_vksplat_runner.py"
+    assert summary["rungs"][0]["run_summary"]["masks"]["applied"] is True
+    assert "config.mask_dir = 'masks/valid'" in runner.read_text(encoding="utf-8")
+
+
+def test_vksplat_required_masks_block_incomplete_frame_coverage(tmp_path: Path) -> None:
+    package = make_package(tmp_path)
+    (package / "images/000002.tiff").write_bytes(b"fixture")
+    masks = package / "masks" / "valid"
+    masks.mkdir(parents=True)
+    (masks / "000001.jpg.png").write_bytes(b"fixture")
+    vksplat = make_vksplat_root(tmp_path)
+
+    with pytest.raises(RuntimeError, match="required masks"):
+        run_vksplat(package, tmp_path / "out", vksplat, masks="required", dry_run=True)

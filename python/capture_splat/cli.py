@@ -21,7 +21,7 @@ from .render_source_qa import run_render_source_qa
 from .rgbd_seed import build_rgbd_metric_seed
 from .reconstruction_recipe import RECIPES, plan_reconstruction
 from .scene_transform import write_scene_transform_sidecar
-from .sfm_runner import colmap_has_cuda, run_sfm, run_triangulate
+from .sfm_runner import colmap_capabilities, colmap_has_cuda, run_sfm, run_triangulate
 from .transforms_import import import_transforms_package
 from .gsplat_ladder import run_gsplat_ladder
 from .gsplat_runner import doctor as gsplat_doctor
@@ -146,6 +146,7 @@ def main() -> None:
     p_train.add_argument("--steps", type=int, default=30000)
     p_train.add_argument("--save-train-renders", action="store_true")
     p_train.add_argument("--stop-reset-at", type=int, help="Stop VkSplat opacity resets after this step.")
+    p_train.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
     p_train.add_argument("--dry-run", action="store_true")
     p_probe = sub.add_parser("vksplat-render-probe", help="Train VkSplat with train renders enabled and QA exact source-frame cameras")
     p_probe.add_argument("--package", type=Path, required=True)
@@ -166,6 +167,8 @@ def main() -> None:
     p_train_gsplat.add_argument("--image-dir", default="images")
     p_train_gsplat.add_argument("--sparse-dir", default="sparse/0")
     p_train_gsplat.add_argument("--data-factor", type=int, default=1)
+    p_train_gsplat.add_argument("--photometric", choices=["none", "bilateral-grid", "ppisp"])
+    p_train_gsplat.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
     p_train_gsplat.add_argument("--no-bilateral-grid", action="store_true")
     p_train_gsplat.add_argument("--no-random-bkgd", action="store_true")
     p_train_gsplat.add_argument("--max-gaussians", type=int, default=1_000_000)
@@ -198,7 +201,7 @@ def main() -> None:
     p_sfm = sub.add_parser("sfm", help="Run COLMAP/GLOMAP SfM and produce an orientation-aligned package")
     p_sfm.add_argument("--images", type=Path, required=True)
     p_sfm.add_argument("--out", type=Path, required=True)
-    p_sfm.add_argument("--method", choices=["colmap", "glomap"], default="colmap")
+    p_sfm.add_argument("--method", choices=["global", "incremental", "glomap", "colmap"], default="global")
     p_sfm.add_argument("--matcher", choices=["sequential", "exhaustive", "retrieval"], default="exhaustive")
     p_sfm.add_argument("--features", choices=["sift", "hloc"], default="sift")
     p_sfm.add_argument("--retrieval-top-k", type=int, default=32)
@@ -209,6 +212,11 @@ def main() -> None:
     p_sfm.add_argument("--no-copy-images", action="store_true")
     p_sfm.add_argument("--background-sphere", action="store_true")
     p_sfm.add_argument("--allow-cpu-matching", action="store_true", help="Run without CUDA COLMAP; recorded in the summary as cpu_matching_override")
+    p_sfm.add_argument("--camera-policy", choices=["auto", "per-frame", "single"], default="auto")
+    p_sfm.add_argument("--view-graph-calibration", choices=["auto", "on", "off"], default="auto")
+    p_sfm.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
+    p_sfm.add_argument("--post-ba-backend", choices=["none", "ceres", "caspar"], default="none")
+    p_sfm.add_argument("--capture-manifest", type=Path)
     p_sfm.add_argument("--dry-run", action="store_true")
     p_triangulate = sub.add_parser("triangulate", help="Triangulate a device-pose package with COLMAP and align orientation")
     p_triangulate.add_argument("--package", type=Path, required=True)
@@ -285,6 +293,8 @@ def main() -> None:
     p_gsplat_ladder.add_argument("--sparse-dir", default="sparse/0")
     p_gsplat_ladder.add_argument("--strategy", choices=["default", "mcmc"], default="mcmc")
     p_gsplat_ladder.add_argument("--data-factor", type=int, default=1)
+    p_gsplat_ladder.add_argument("--photometric", choices=["none", "bilateral-grid", "ppisp"])
+    p_gsplat_ladder.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
     p_gsplat_ladder.add_argument("--dry-run", action="store_true")
     p_gsplat_ladder.add_argument("--sanitize-non-finite-ply", action="store_true")
     p_gsplat_ladder.add_argument("--max-psnr-drop", type=float, default=0.5)
@@ -303,6 +313,7 @@ def main() -> None:
     p_ladder.add_argument("--dry-run", action="store_true")
     p_ladder.add_argument("--sanitize-non-finite-ply", action="store_true")
     p_ladder.add_argument("--stop-reset-at", type=int, help="Stop VkSplat opacity resets after this step for every rung.")
+    p_ladder.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
     p_ladder.add_argument("--max-psnr-drop", type=float, default=0.5)
     p_ladder.add_argument("--max-ssim-drop", type=float, default=0.02)
     p_ladder.add_argument("--max-mae-increase", type=float, default=0.01)
@@ -416,7 +427,7 @@ def main() -> None:
             capture_profile=args.capture_profile,
         )
     elif args.command == "train-vksplat":
-        payload = run_vksplat(args.package, args.out, args.vksplat_root, steps=args.steps, dry_run=args.dry_run, save_train_renders=args.save_train_renders, stop_reset_at=args.stop_reset_at)
+        payload = run_vksplat(args.package, args.out, args.vksplat_root, steps=args.steps, dry_run=args.dry_run, save_train_renders=args.save_train_renders, stop_reset_at=args.stop_reset_at, masks=args.masks)
     elif args.command == "vksplat-render-probe":
         payload = run_vksplat_render_probe(
             args.package,
@@ -430,6 +441,7 @@ def main() -> None:
             dry_run=args.dry_run,
         )
     elif args.command == "train-gsplat":
+        photometric = "none" if args.no_bilateral_grid else args.photometric
         payload = run_gsplat(
             args.package,
             args.out,
@@ -440,9 +452,10 @@ def main() -> None:
             sparse_dir=args.sparse_dir,
             data_factor=args.data_factor,
             dry_run=args.dry_run,
-            use_bilateral_grid=not args.no_bilateral_grid,
             random_bkgd=not args.no_random_bkgd,
             max_gaussians=args.max_gaussians,
+            photometric=photometric,
+            masks=args.masks,
         )
     elif args.command == "scene-transform":
         payload = write_scene_transform_sidecar(args.ply, args.sparse_dir, args.trainer, normalized=not args.no_normalize)
@@ -485,6 +498,11 @@ def main() -> None:
             background_sphere=args.background_sphere,
             allow_cpu_matching=args.allow_cpu_matching,
             dry_run=args.dry_run,
+            camera_policy=args.camera_policy,
+            view_graph_calibration=args.view_graph_calibration,
+            masks=args.masks,
+            post_ba_backend=args.post_ba_backend,
+            capture_manifest=args.capture_manifest,
         )
     elif args.command == "triangulate":
         payload = run_triangulate(
@@ -575,6 +593,8 @@ def main() -> None:
             max_ssim_drop=args.max_ssim_drop,
             max_mae_increase=args.max_mae_increase,
             max_correlation_drop=args.max_correlation_drop,
+            photometric=args.photometric,
+            masks=args.masks,
         )
     elif args.command == "train-vksplat-ladder":
         payload = run_vksplat_ladder(
@@ -589,6 +609,7 @@ def main() -> None:
             dry_run=args.dry_run,
             sanitize_non_finite_ply=args.sanitize_non_finite_ply,
             stop_reset_at=args.stop_reset_at,
+            masks=args.masks,
             max_psnr_drop=args.max_psnr_drop,
             max_ssim_drop=args.max_ssim_drop,
             max_mae_increase=args.max_mae_increase,
@@ -599,6 +620,7 @@ def main() -> None:
             "schema": "capture_splat.doctor.v0.4",
             "tools": {name: shutil.which(name) for name in ("colmap", "glomap", "ffmpeg", "ffprobe")},
             "colmap_cuda": colmap_has_cuda(),
+            "colmap_capabilities": colmap_capabilities(),
             "hloc": hloc_status(),
             "vksplat": vksplat_doctor(args.vksplat_root),
             "gsplat": gsplat_doctor(args.gsplat_root),

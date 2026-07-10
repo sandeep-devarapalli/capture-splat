@@ -41,6 +41,21 @@ optimization. The exported PLY colors are the splat appearance model, so
 render/source QA still compares fairly, but per-frame scores can shift
 versus non-bilagrid runs; compare ladders with the same recipe.
 
+Photometric correction cannot recover evidence that preparation dropped.
+Capture Splat therefore carries exposure, ISO, white balance, lens state,
+tracking, timestamps, and per-frame intrinsics into the SfM package. Camera and
+photometric reports expose missing or non-finite values before training. These
+reports establish evidence continuity, not reconstruction quality.
+
+White-valid masks are derived proposals. They can prevent people and unsupported
+desk background from contributing features or training loss, but an incomplete
+or dimension-mismatched mask set must not be silently applied. Compare masked
+and unmasked runs on the same fixed cameras before claiming improvement.
+
+Caspar timing, global registration, finite geometry, and render/source QA are
+separate gates. A faster post-global bundle adjustment is useful only if it
+preserves registration and stays within the same render-QA thresholds.
+
 The background sphere and scene-transform sidecar are packaging aids: seeds
 and coordinate metadata, not reconstruction improvements.
 

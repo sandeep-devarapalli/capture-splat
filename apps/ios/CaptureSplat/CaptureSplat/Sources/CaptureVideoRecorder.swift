@@ -1,5 +1,6 @@
 import ARKit
 import AVFoundation
+import CoreVideo
 import Foundation
 
 /// Records the continuous ARKit RGB stream to video/capture.mov and writes
@@ -162,7 +163,47 @@ final class CaptureVideoRecorder {
         }
         if let device = captureDevice {
             entry["iso"] = Double(device.iso)
+            let gains = device.deviceWhiteBalanceGains
+            if gains.redGain.isFinite, gains.greenGain.isFinite, gains.blueGain.isFinite {
+                entry["white_balance_gains"] = [
+                    "red": Double(gains.redGain),
+                    "green": Double(gains.greenGain),
+                    "blue": Double(gains.blueGain),
+                ]
+            }
+            if device.lensPosition.isFinite {
+                entry["lens_position"] = Double(device.lensPosition)
+            }
+            if device.exposureTargetBias.isFinite {
+                entry["exposure_target_bias"] = Double(device.exposureTargetBias)
+            }
+            entry["is_adjusting_exposure"] = device.isAdjustingExposure
+            entry["is_adjusting_white_balance"] = device.isAdjustingWhiteBalance
+            entry["is_adjusting_focus"] = device.isAdjustingFocus
+            entry["exposure_mode"] = String(describing: device.exposureMode)
+            entry["white_balance_mode"] = String(describing: device.whiteBalanceMode)
+            entry["focus_mode"] = String(describing: device.focusMode)
         }
+        let pixelBuffer = frame.capturedImage
+        entry["pixel_format"] = Self.pixelFormatLabel(CVPixelBufferGetPixelFormatType(pixelBuffer))
+        entry["color_primaries"] = Self.attachmentString(pixelBuffer, kCVImageBufferColorPrimariesKey)
+        entry["transfer_function"] = Self.attachmentString(pixelBuffer, kCVImageBufferTransferFunctionKey)
+        entry["ycbcr_matrix"] = Self.attachmentString(pixelBuffer, kCVImageBufferYCbCrMatrixKey)
+        let projection = frame.camera.projectionMatrix
+        let projectionMatrix = (0..<4).map { row in
+            (0..<4).map { column in Double(projection[column][row]) }
+        }
+        let projectionAvailable = projectionMatrix.flatMap { $0 }.allSatisfy(\.isFinite)
+        var projectionReport: [String: Any] = [
+            "model": "arkit_pinhole_intrinsics",
+            "matrix_available": projectionAvailable,
+            "camera_calibration_data_available": frame.capturedDepthData?.cameraCalibrationData != nil,
+            "distortion_coefficients_available": false,
+        ]
+        if projectionAvailable {
+            projectionReport["matrix"] = projectionMatrix
+        }
+        entry["projection"] = projectionReport
         if let light = frame.lightEstimate {
             entry["ambient_intensity"] = light.ambientIntensity
             entry["ambient_color_temperature_k"] = light.ambientColorTemperature
@@ -173,6 +214,21 @@ final class CaptureVideoRecorder {
         }
         indexHandle.write(data)
         indexHandle.write(Data("\n".utf8))
+    }
+
+    private static func attachmentString(_ buffer: CVPixelBuffer, _ key: CFString) -> String? {
+        guard let value = CVBufferCopyAttachment(buffer, key, nil) else { return nil }
+        return value as? String ?? String(describing: value)
+    }
+
+    private static func pixelFormatLabel(_ value: OSType) -> String {
+        let bytes: [UInt8] = [
+            UInt8((value >> 24) & 0xff),
+            UInt8((value >> 16) & 0xff),
+            UInt8((value >> 8) & 0xff),
+            UInt8(value & 0xff),
+        ]
+        return String(bytes: bytes, encoding: .ascii) ?? String(value)
     }
 
     private func trackingStateLabel(_ state: ARCamera.TrackingState) -> String {

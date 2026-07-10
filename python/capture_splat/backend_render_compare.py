@@ -142,9 +142,19 @@ def compare_backend_renders(
     if not image_dir.exists():
         raise FileNotFoundError(f"package image directory missing: {image_dir}")
 
-    frame_ids = _parse_frames(frames, frames_json, image_dir)
+    fixed_set = package / "metadata" / "fixed_camera_evaluation_set.json"
+    if not fixed_set.exists():
+        raise FileNotFoundError(f"fixed-camera evaluation set missing: {fixed_set}")
+    pair_warnings: list[str] = []
+    fixed_frame_ids = _parse_frames(None, fixed_set, image_dir)
+    if frames is not None or frames_json is not None:
+        requested = _parse_frames(frames, frames_json, image_dir)
+        if requested != fixed_frame_ids:
+            raise ValueError("backend comparison frames must match the package fixed-camera evaluation set")
+    frame_ids = fixed_frame_ids
     pairs_path = out_dir / "camera_pairs.json"
-    pairs, pair_warnings = _write_pairs(frame_ids, image_dir, None, pairs_path)
+    pairs, warnings = _write_pairs(frame_ids, image_dir, None, pairs_path)
+    pair_warnings.extend(warnings)
 
     backend_pairs: dict[str, str] = {}
     for label, render_dir in (("gsplat", gsplat_render_dir), ("vksplat", vksplat_render_dir)):
@@ -176,12 +186,14 @@ def compare_backend_renders(
         "camera_pairs": str(pairs_path),
         "frame_count": len(pairs),
         "requested_frame_count": len(frame_ids),
+        "fixed_camera_evaluation_set": str(fixed_set),
         "backends": {"gsplat": gsplat, "vksplat": vksplat},
         "metric_mean_deltas": deltas,
         "warnings": warnings,
         "decision": decision,
         "authority": {
             "same_frame_list": True,
+            "fixed_camera_evaluation_enforced": True,
             "backend_renderers_required_for_quality_claim": True,
             "quality_claim": False,
         },

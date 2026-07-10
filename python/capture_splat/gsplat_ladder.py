@@ -56,7 +56,7 @@ def _regression_reasons(previous: dict[str, Any] | None, current: dict[str, Any]
     return reasons
 
 
-def run_gsplat_ladder(package_dir: Path, out_dir: Path, gsplat_root: Path, steps: list[int] | None = None, qa_summary_dir: Path | None = None, image_dir: str = "images", sparse_dir: str = "sparse/0", strategy: str = "mcmc", data_factor: int = 1, dry_run: bool = False, sanitize_non_finite_ply: bool = False, max_psnr_drop: float = 0.5, max_ssim_drop: float = 0.02, max_mae_increase: float = 0.01, max_correlation_drop: float = 0.03) -> dict[str, Any]:
+def run_gsplat_ladder(package_dir: Path, out_dir: Path, gsplat_root: Path, steps: list[int] | None = None, qa_summary_dir: Path | None = None, image_dir: str = "images", sparse_dir: str = "sparse/0", strategy: str = "mcmc", data_factor: int = 1, dry_run: bool = False, sanitize_non_finite_ply: bool = False, max_psnr_drop: float = 0.5, max_ssim_drop: float = 0.02, max_mae_increase: float = 0.01, max_correlation_drop: float = 0.03, photometric: str | None = None, masks: str = "auto") -> dict[str, Any]:
     package_dir = package_dir.resolve()
     out_dir = out_dir.resolve()
     gsplat_root = gsplat_root.resolve()
@@ -77,7 +77,7 @@ def run_gsplat_ladder(package_dir: Path, out_dir: Path, gsplat_root: Path, steps
             "reasons": [],
         }
         try:
-            run_summary = run_gsplat(package_dir, rung_dir, gsplat_root, steps=step, strategy=strategy, image_dir=image_dir, sparse_dir=sparse_dir, data_factor=data_factor, dry_run=dry_run)
+            run_summary = run_gsplat(package_dir, rung_dir, gsplat_root, steps=step, strategy=strategy, image_dir=image_dir, sparse_dir=sparse_dir, data_factor=data_factor, dry_run=dry_run, photometric=photometric, masks=masks)
             rung["command"] = run_summary.get("command")
             rung["run_summary"] = run_summary
             splat_path = run_summary.get("splat_ply")
@@ -154,6 +154,8 @@ def run_gsplat_ladder(package_dir: Path, out_dir: Path, gsplat_root: Path, steps
         "steps": step_values,
         "strategy": strategy,
         "data_factor": data_factor,
+        "photometric": photometric or "auto",
+        "masks": masks,
         "dry_run": dry_run,
         "sanitize_non_finite_ply": sanitize_non_finite_ply,
         "thresholds": {
@@ -182,6 +184,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--sparse-dir", default="sparse/0")
     parser.add_argument("--strategy", choices=["default", "mcmc"], default="mcmc")
     parser.add_argument("--data-factor", type=int, default=1)
+    parser.add_argument("--photometric", choices=["none", "bilateral-grid", "ppisp"])
+    parser.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--sanitize-non-finite-ply", action="store_true")
     parser.add_argument("--max-psnr-drop", type=float, default=0.5)
@@ -193,7 +197,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
-    summary = run_gsplat_ladder(args.package, args.out, args.gsplat_root, steps=parse_steps(args.steps), qa_summary_dir=args.qa_summary_dir, image_dir=args.image_dir, sparse_dir=args.sparse_dir, strategy=args.strategy, data_factor=args.data_factor, dry_run=args.dry_run, sanitize_non_finite_ply=args.sanitize_non_finite_ply, max_psnr_drop=args.max_psnr_drop, max_ssim_drop=args.max_ssim_drop, max_mae_increase=args.max_mae_increase, max_correlation_drop=args.max_correlation_drop)
+    summary = run_gsplat_ladder(args.package, args.out, args.gsplat_root, steps=parse_steps(args.steps), qa_summary_dir=args.qa_summary_dir, image_dir=args.image_dir, sparse_dir=args.sparse_dir, strategy=args.strategy, data_factor=args.data_factor, dry_run=args.dry_run, sanitize_non_finite_ply=args.sanitize_non_finite_ply, max_psnr_drop=args.max_psnr_drop, max_ssim_drop=args.max_ssim_drop, max_mae_increase=args.max_mae_increase, max_correlation_drop=args.max_correlation_drop, photometric=args.photometric, masks=args.masks)
     print(json.dumps(summary, indent=2))
 
 

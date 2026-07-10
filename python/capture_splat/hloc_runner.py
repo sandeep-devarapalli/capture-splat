@@ -5,6 +5,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .sfm_evidence import apply_camera_priors, filter_hloc_features_by_masks, load_frame_evidence
+
 RETRIEVAL_CONFIG = "eigenplaces"
 FEATURE_CONFIG = "aliked-n16"
 MATCHER_CONFIG = "aliked+lightglue"
@@ -46,6 +48,10 @@ def run_hloc_frontend(
     out_dir: Path,
     database: Path,
     top_k: int = 32,
+    camera_policy: str = "single",
+    capture_manifest: Path | None = None,
+    mask_dir: Path | None = None,
+    masks: str = "auto",
 ) -> dict[str, Any]:
     status = hloc_status()
     if not status["ready"]:
@@ -66,10 +72,21 @@ def run_hloc_frontend(
     retrieval_path = extract_features.main(retrieval_conf, images_dir, hloc_dir)
     pairs_from_retrieval.main(retrieval_path, pairs, num_matched=int(top_k))
     feature_path = extract_features.main(feature_conf, images_dir, hloc_dir)
+    mask_report = None
+    if mask_dir is not None and mask_dir.is_dir():
+        mask_report = filter_hloc_features_by_masks(feature_path, mask_dir)
+        if masks == "required" and (mask_report["missing_masks"] or mask_report["dimension_mismatches"]):
+            raise RuntimeError("required HLOC masks are missing or dimension-mismatched")
+    elif masks == "required":
+        raise RuntimeError("required HLOC mask directory is missing")
     match_path = match_features.main(matcher_conf, pairs, feature_conf["output"], hloc_dir)
 
     reconstruction.create_empty_db(database)
-    pycolmap.import_images(str(database), str(images_dir), pycolmap.CameraMode.SINGLE)
+    camera_mode = pycolmap.CameraMode.PER_IMAGE if camera_policy == "per-frame" else pycolmap.CameraMode.SINGLE
+    pycolmap.import_images(str(database), str(images_dir), camera_mode)
+    camera_report = None
+    if camera_policy == "per-frame":
+        camera_report = apply_camera_priors(database, images_dir, load_frame_evidence(capture_manifest))
     image_ids = reconstruction.get_image_ids(database)
     reconstruction.import_features(image_ids, database, feature_path)
     reconstruction.import_matches(image_ids, database, pairs, match_path, None, False)
@@ -88,5 +105,7 @@ def run_hloc_frontend(
         "matches": str(match_path),
         "database": str(database),
         "geometric_verification_command": verification,
-        "camera_mode": "single",
+        "camera_mode": camera_policy,
+        "camera_evidence": camera_report,
+        "mask_filter": mask_report,
     }

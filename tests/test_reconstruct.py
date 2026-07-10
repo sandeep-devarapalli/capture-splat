@@ -39,6 +39,7 @@ def test_reconstruct_dry_run_writes_explicit_blockers_and_skips(tmp_path: Path) 
     assert summary["decision"] == "dry_run"
     assert summary["recipe"]["name"] == "desk"
     by_name = {stage["name"]: stage for stage in summary["stages"]}
+    assert by_name["sfm"]["method"] == "global"
     assert by_name["train"]["decision"] == "blocked"
     assert by_name["qa"]["decision"] == "blocked"
     saved = load_json_strict(tmp_path / "run/capture_splat_reconstruction_summary.json")

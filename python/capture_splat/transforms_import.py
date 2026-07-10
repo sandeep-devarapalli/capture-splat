@@ -13,6 +13,7 @@ from .json_utils import ensure_finite, load_json_strict, write_json_strict
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 DEPTH_SUFFIXES = {".exr", ".npy", ".png", ".tif", ".tiff"}
 DEPTH_KEYS = ("depth_file_path", "depth_path", "depth", "depth_file")
+DISTORTION_KEYS = ("k1", "k2", "k3", "k4", "p1", "p2")
 
 
 def _resolve(root: Path, value: Any) -> Path | None:
@@ -49,7 +50,7 @@ def _image_size(path: Path) -> tuple[int, int]:
         return image.size
 
 
-def _intrinsics(transforms: dict[str, Any], frame: dict[str, Any], image_path: Path) -> dict[str, float]:
+def _intrinsics(transforms: dict[str, Any], frame: dict[str, Any], image_path: Path) -> dict[str, Any]:
     width, height = _image_size(image_path)
     values = {key: frame.get(key, transforms.get(key)) for key in ("fl_x", "fl_y", "cx", "cy", "w", "h")}
     values["w"] = values["w"] if values["w"] is not None else width
@@ -57,7 +58,7 @@ def _intrinsics(transforms: dict[str, Any], frame: dict[str, Any], image_path: P
     missing = [key for key, value in values.items() if value is None]
     if missing:
         raise ValueError(f"intrinsics missing keys: {missing}")
-    return {
+    intrinsics: dict[str, Any] = {
         "fl_x": float(values["fl_x"]),
         "fl_y": float(values["fl_y"]),
         "cx": float(values["cx"]),
@@ -65,6 +66,14 @@ def _intrinsics(transforms: dict[str, Any], frame: dict[str, Any], image_path: P
         "w": int(values["w"]),
         "h": int(values["h"]),
     }
+    camera_model = frame.get("camera_model", transforms.get("camera_model"))
+    if isinstance(camera_model, str) and camera_model:
+        intrinsics["camera_model"] = camera_model.upper()
+    for key in DISTORTION_KEYS:
+        value = frame.get(key, transforms.get(key))
+        if value is not None:
+            intrinsics[key] = float(value)
+    return intrinsics
 
 
 def _depth_path(root: Path, frame: dict[str, Any]) -> Path | None:
@@ -101,7 +110,7 @@ def import_transforms_package(
     capture_frames: list[dict[str, Any]] = []
     warnings: list[str] = []
     copied_depth_count = 0
-    first_intrinsics: dict[str, float] | None = None
+    first_intrinsics: dict[str, Any] | None = None
 
     for index, frame in enumerate(frames, start=1):
         if not isinstance(frame, dict):

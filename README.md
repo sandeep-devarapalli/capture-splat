@@ -76,7 +76,7 @@ capture-splat prepare-capture --capture "$CAPTURE" --out runs/my_scan/prepared
 capture-splat sfm \
   --images runs/my_scan/prepared/frames/images \
   --out runs/my_scan/colmap_package \
-  --method glomap --features hloc --matcher retrieval
+  --method global --features hloc --matcher retrieval
 capture-splat train-vksplat-ladder   --package runs/my_scan/colmap_package   --out runs/my_scan/vksplat_ladder   --vksplat-root external/vksplat
 # For long rungs that show late reset instability, record a controlled schedule:
 # capture-splat train-vksplat-ladder --package runs/my_scan/colmap_package --out runs/my_scan/vksplat_ladder_stop9000 --vksplat-root external/vksplat --stop-reset-at 9000
@@ -92,6 +92,14 @@ capture-splat import-transforms \
   --out runs/imported_capture
 ```
 
+`sfm` now defaults to COLMAP's integrated `global_mapper`. Prepared Capture
+Splat packages use per-frame ARKit pinhole intrinsics, complete white-valid
+masks, and skip view-graph calibration. Generic image folders retain a
+single-camera fallback; imported OPENCV distortion values are preserved when
+available. `--method colmap` remains a deprecated alias for incremental
+mapping. Caspar is available only as an explicit post-global BA experiment via
+`--post-ba-backend caspar`; it is not the global solver.
+
 The VkSplat ladder runs controlled `3000 -> 7000 -> 15000 -> 30000` rungs and writes
 `capture_splat_vksplat_ladder_summary.json`. The optional `--stop-reset-at` flag records a VkSplat schedule cutoff for opacity resets, useful when longer rungs show late-reset instability; it is a controlled training setting, not a quality claim by itself. On CUDA cloud machines, `capture-splat train-gsplat-ladder` can run the same conservative ladder through gsplat and writes `capture_splat_gsplat_ladder_summary.json`. Single-step training is still
 available with `capture-splat train-vksplat --steps 30000`, but a finite `.ply`
@@ -100,7 +108,7 @@ a `.ply` with a few non-finite splats, `capture-splat sanitize-ply` can write a
 strict report and a finite copy that drops only non-finite vertex rows. The
 ladder only uses that repair when `--sanitize-non-finite-ply` is set.
 
-For prepared packages over 250 frames, install the optional HLOC/GLOMAP tools
+For prepared packages over 250 frames, install the optional HLOC tools
 with `PYTHON_BIN=.venv/bin/python scripts/setup_sfm.sh external`, then use
 `--features hloc --matcher retrieval`. This runs EigenPlaces top-32 retrieval,
 ALIKED-N16, LightGlue, COLMAP geometric verification, and the requested mapper.
@@ -223,13 +231,12 @@ capture-splat colmap-support-delta \
 `proceed_to_training_probe` means the sparse support improved enough to justify
 a short 3000-step probe. It is not a quality claim.
 
-To compare two backend outputs, use one explicit source-frame list and raw
-renders from each backend:
+To compare two backend outputs, use the package's deterministic
+`metadata/fixed_camera_evaluation_set.json` and raw renders from each backend:
 
 ```bash
 capture-splat compare-backend-renders \
   --package runs/my_scan/colmap_package \
-  --frames 000001,000017,000025 \
   --gsplat-ply runs/my_scan/gsplat_ladder/step_0007000/ply/point_cloud_6999.ply \
   --vksplat-ply runs/my_scan/vksplat_ladder/step_0007000/splat.ply \
   --gsplat-render-dir runs/my_scan/renders/gsplat_7000 \
@@ -237,7 +244,8 @@ capture-splat compare-backend-renders \
   --out runs/my_scan/backend_compare_7000
 ```
 
-If render directories are omitted, the command still writes the shared
+If the fixed-camera set is missing, the command blocks. If render directories
+are omitted, the command still writes the shared
 `camera_pairs.json` and reports `renderer_missing`; that is a setup blocker, not
 a quality result.
 
@@ -278,6 +286,11 @@ capture-splat train-gsplat-ladder \
   --out runs/my_scan/gsplat_ladder \
   --gsplat-root external/gsplat
 ```
+
+iPhone packages use `--photometric bilateral-grid` by default on supported
+gsplat trainers. `--photometric ppisp` remains experimental and blocks when
+the trainer strategy or optional dependency is unavailable. `--masks required`
+also blocks rather than silently training without a requested valid mask.
 
 `scripts/setup_external_3dgs_candidates.sh` can clone 3DGS.cpp and AndrewBoessen/3DGS into `external/` for evaluation. 3DGS.cpp is useful for macOS/Vulkan viewer-runtime checks; upstream lists training as TODO. AndrewBoessen/3DGS is a CUDA 13 C++ candidate and is not a default backend.
 

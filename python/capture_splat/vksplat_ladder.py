@@ -88,6 +88,7 @@ def run_vksplat_ladder(
     max_ssim_drop: float = 0.02,
     max_mae_increase: float = 0.01,
     max_correlation_drop: float = 0.03,
+    masks: str = "auto",
 ) -> dict[str, Any]:
     package_dir = package_dir.resolve()
     out_dir = out_dir.resolve()
@@ -119,6 +120,7 @@ def run_vksplat_ladder(
                 strategy=strategy,
                 dry_run=dry_run,
                 stop_reset_at=stop_reset_at,
+                masks=masks,
             )
             rung["command"] = run_summary.get("command")
             rung["run_summary"] = run_summary
@@ -199,6 +201,7 @@ def run_vksplat_ladder(
         "vksplat_schedule": {
             "stop_reset_at": stop_reset_at,
         },
+        "masks": masks,
         "thresholds": {
             "max_psnr_drop": max_psnr_drop,
             "max_ssim_drop": max_ssim_drop,
@@ -227,6 +230,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--sanitize-non-finite-ply", action="store_true")
     parser.add_argument("--stop-reset-at", type=int, help="Stop VkSplat opacity resets after this step; useful for longer quality rungs that otherwise destabilize.")
+    parser.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
     parser.add_argument("--max-psnr-drop", type=float, default=0.5)
     parser.add_argument("--max-ssim-drop", type=float, default=0.02)
     parser.add_argument("--max-mae-increase", type=float, default=0.01)
@@ -248,6 +252,7 @@ def main(argv: list[str] | None = None) -> None:
         dry_run=args.dry_run,
         sanitize_non_finite_ply=args.sanitize_non_finite_ply,
         stop_reset_at=args.stop_reset_at,
+        masks=args.masks,
         max_psnr_drop=args.max_psnr_drop,
         max_ssim_drop=args.max_ssim_drop,
         max_mae_increase=args.max_mae_increase,

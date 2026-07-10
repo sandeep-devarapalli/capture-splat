@@ -10,6 +10,7 @@ def make_package(root: Path) -> Path:
     sparse = package / "sparse" / "0"
     sparse.mkdir(parents=True)
     (package / "images" / "000001.jpg").write_bytes(b"fixture")
+    write_json_strict(package / "capture.json", {"source": "capture_splat.prepare_capture"})
     (sparse / "cameras.txt").write_text("# cameras\n", encoding="utf-8")
     (sparse / "images.txt").write_text("# images\n", encoding="utf-8")
     return package
@@ -19,7 +20,12 @@ def make_gsplat_root(root: Path) -> Path:
     gsplat = root / "gsplat"
     examples = gsplat / "examples"
     examples.mkdir(parents=True)
-    (examples / "simple_trainer.py").write_text("print('fake')\n", encoding="utf-8")
+    (examples / "simple_trainer.py").write_text(
+        "post_processing: str | None = None\n"
+        "steps_scaler = 1.0\nrandom_bkgd = False\ncap_max = 1000000\n"
+        "print('--post-processing {None,bilateral_grid,ppisp} --random-bkgd --steps-scaler --strategy.cap-max')\n",
+        encoding="utf-8",
+    )
     return gsplat
 
 

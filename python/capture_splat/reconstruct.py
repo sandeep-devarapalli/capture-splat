@@ -257,7 +257,7 @@ def _dry_run(
     training_blocked = not _backend_ready(backend, backend_root)
     planned = [
         _stage("prepare", "planned", output=str((out_dir / "01_prepare").resolve())),
-        _stage("sfm", "planned", route="from_prepare_summary", method="glomap"),
+        _stage("sfm", "planned", route="from_prepare_summary", method="global"),
         _stage("seed", "planned", policy="arkit_rgbd_if_sim3_gate_passes"),
         _stage(
             "train",
@@ -451,6 +451,10 @@ def reconstruct_capture(
             retrieval_top_k=retrieval_top_k,
             background_sphere=bool(sfm_request["background_sphere"]),
             allow_cpu_matching=allow_cpu_matching,
+            camera_policy=str(sfm_request.get("camera_policy", "auto")),
+            view_graph_calibration=str(sfm_request.get("view_graph_calibration", "auto")),
+            masks=str(sfm_request.get("masks", "auto")),
+            post_ba_backend=str(sfm_request.get("post_ba_backend", "none")),
         )
     except Exception as error:
         failed = load_json_strict(sfm_path) if sfm_path.exists() else {}

@@ -109,7 +109,7 @@ ARKit-pose export:
 ```bash
 capture-splat prepare-capture --capture /path/to/capture --out runs/scan/prepared
 capture-splat sfm --images runs/scan/prepared/frames/images \
-  --out runs/scan/colmap_package --method glomap \
+  --out runs/scan/colmap_package --method global \
   --features hloc --matcher retrieval
 # Optional metric initialization after refined cameras exist:
 capture-splat build-rgbd-seed \
@@ -119,17 +119,20 @@ capture-splat build-rgbd-seed \
 # or, to keep ARKit poses as the prior:
 capture-splat triangulate --package runs/scan/colmap_package --out runs/scan/triangulate
 capture-splat train-gsplat-ladder ... # bilateral grid + random background are
-                                      # on by default; rungs compress the full
-                                      # schedule via steps_scaler
+                                      # on by default when capabilities pass;
+                                      # rungs compress the full schedule
 capture-splat prune-ply --input .../splat.ply
 capture-splat export-world-studio --package ... --capture-profile room_interior
 ```
 
 `sfm` runs COLMAP feature extraction, exhaustive matching by default
-(`--matcher sequential` with an optional vocab tree remains available),
-mapping, best-model selection, and `model_orientation_aligner`, and gates
-the result on registration ratio (reject below 60%, hold below 85%).
-GLOMAP is used when installed. CUDA COLMAP is required: `sfm` and
+(`--matcher sequential` with an optional vocab tree remains available), the
+integrated `global_mapper`, best-model selection, and
+`model_orientation_aligner`. It gates the result on registration ratio (reject
+below 60%, hold below 85%). Standalone GLOMAP remains available through
+`--method glomap`; incremental COLMAP is `--method incremental`, while the old
+`--method colmap` spelling is a deprecated incremental alias. CUDA COLMAP is
+required: `sfm` and
 `triangulate` block with `colmap_cuda_missing` when the local COLMAP build
 reports `without CUDA`. Exhaustive matching recovers revisit pairs that
 sequential matching misses on room orbits, and it is only practical on GPU
@@ -140,6 +143,26 @@ EigenPlaces top-32 retrieval, ALIKED-N16 features, LightGlue matches, and COLMAP
 geometric verification before GLOMAP/COLMAP mapping. Install it through
 `scripts/setup_sfm.sh`; `hloc_missing` blocks that requested route rather than
 silently changing the experiment to exhaustive SIFT.
+
+Prepared Capture Splat packages carry per-frame ARKit intrinsics into separate
+COLMAP cameras. `--camera-policy auto` selects that path only for a
+`capture_splat.prepare_capture` manifest with complete finite intrinsics;
+generic image folders use the single-camera fallback and report it. Imported
+OPENCV distortion values are passed through explicitly rather than replaced by
+zeros. `--view-graph-calibration auto` skips calibration for complete prepared
+ARKit priors and otherwise modifies a copied database before global mapping.
+
+Canonical feature/training masks are white where pixels are valid. Room masks
+are full-frame minus available people/dynamic evidence. Desk/object masks
+require object support and intersect it with inverse person evidence. Auto mode
+disables an incomplete mask set; `--masks required` blocks. SIFT receives
+COLMAP masks, while HLOC filters keypoints and descriptors before LightGlue
+matching and rejects required masks with missing files or wrong dimensions.
+
+`--post-ba-backend caspar` is an explicit post-global experiment. It blocks
+unless COLMAP exposes the Caspar options and the result uses only `PINHOLE` or
+`SIMPLE_RADIAL`. Caspar is not the global solver and does not use ARKit pose
+priors in this path.
 `build-rgbd-seed` estimates a Sim(3) from shared ARKit and COLMAP camera
 centers, then transforms confidence-filtered RGB-D points only when median and
 tail residual gates pass. It writes a new package under the requested output
@@ -181,6 +204,15 @@ QA if supplied, and a `promote`, `hold`, or `reject` decision. The optional
 CUDA runs and writes `capture_splat_gsplat_ladder_summary.json`. A rung with only
 finite output is held until render/source QA or other quality evidence supports
 promotion.
+
+VkSplat consumes `masks/valid` when its installed trainer exposes `mask_dir`.
+gsplat capability probing accepts modern
+`post_processing=bilateral_grid|ppisp` and the legacy bilateral-grid flag.
+iPhone packages default to bilateral grid; PPISP is experimental. Required
+masks or photometric modes block when unsupported instead of silently changing
+the training recipe. Every completed SfM package writes
+`metadata/fixed_camera_evaluation_set.json`; backend comparisons should render
+that same set.
 
 For any trainer output with isolated non-finite splats, use the explicit repair
 path instead of editing files by hand:
@@ -242,19 +274,20 @@ The probe writes `capture_splat_vksplat_render_probe_summary.json`,
 `render_source_pairs.json`, and a `render_qa/` summary. Treat the result as
 exact-frame diagnostic evidence.
 
-For backend comparisons, first build one shared source-frame list and compare
-raw renders from each backend against that same list:
+For backend comparisons, use the deterministic fixed-camera set emitted by SfM
+and compare raw renders from each backend against that same list:
 
 ```bash
 capture-splat compare-backend-renders \
   --package runs/scan/colmap_package \
-  --frames 000001,000017,000025 \
   --gsplat-render-dir runs/scan/renders/gsplat_7000 \
   --vksplat-render-dir runs/scan/renders/vksplat_7000 \
   --out runs/scan/backend_compare_7000
 ```
 
-If backend render directories are not available, the command writes the shared
+The command blocks if `metadata/fixed_camera_evaluation_set.json` is missing or
+an explicit frame list differs from it. If backend render directories are not
+available, the command writes the shared
 frame contract and reports `renderer_missing`. That is a blocked comparison, not
 visual-quality evidence.
 

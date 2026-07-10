@@ -80,7 +80,7 @@ def plan_reconstruction(capture_dir: Path, out_dir: Path, recipe: str = "auto") 
         "frame_source_policy": "accepted_rgbd_then_continuous_video_supplement",
         "matcher_policy": "retrieval_over_250_else_exhaustive",
         "features": "hloc" if resolved["matcher"] == "retrieval" else "sift",
-        "sfm_method": "glomap",
+        "sfm_method": "global",
         "object_masks": recipe_name in {"desk", "object", "repair"},
         "person_masks": person_present,
         "metric_seed": "arkit_rgbd_if_sim3_gate_passes",

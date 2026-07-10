@@ -95,6 +95,7 @@ def test_prepare_capture_deduplicates_video_on_ar_clock(tmp_path: Path, monkeypa
                 "transform_matrix": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
                 "intrinsics": {"fl_x": 8, "fl_y": 8, "cx": 4, "cy": 3, "w": 8, "h": 6},
                 "accepted": True,
+                "photometric": {"exposure_duration": 0.02, "iso": 100.0, "lens_position": 0.6},
             })
         write_json_strict(out_dir / "capture.json", {"schema": "capture_splat.v0.2", "frames": frames})
         return {"extracted_frames": 2}
@@ -105,6 +106,7 @@ def test_prepare_capture_deduplicates_video_on_ar_clock(tmp_path: Path, monkeypa
 
     assert summary["continuous_video_supplements"] == 1
     assert [frame["timestamp"] for frame in manifest["frames"]] == [101.0, 102.0]
+    assert manifest["frames"][1]["photometric"]["lens_position"] == 0.6
 
 
 def test_prepare_capture_uses_actual_frame_count_for_retrieval(tmp_path: Path) -> None:
@@ -135,4 +137,67 @@ def test_prepare_capture_writes_non_destructive_object_mask(tmp_path: Path) -> N
 
     assert summary["copied_sidecars"]["object_mask"] == 1
     assert manifest["frames"][0]["object_mask"] == "masks/object/000001.png"
+    assert manifest["frames"][0]["valid_mask"] == "masks/valid/000001.jpg.png"
+    valid = np.asarray(Image.open(tmp_path / "prepared/frames/masks/valid/000001.jpg.png"))
+    assert set(np.unique(valid)).issubset({0, 255})
+    assert summary["valid_masks"]["semantics"] == "white_valid_for_features_and_training"
+    assert summary["camera_evidence"]["complete"] is True
     assert (capture / "rgb/frame_000001.jpg").exists()
+
+
+def test_prepare_capture_room_masks_cover_every_frame_with_white_valid_semantics(tmp_path: Path) -> None:
+    capture = _capture(tmp_path / "capture", count=2)
+
+    summary = prepare_capture(capture, tmp_path / "prepared", recipe="room", target_frames=2)
+
+    assert summary["copied_sidecars"]["valid_mask"] == 2
+    for index in (1, 2):
+        valid = np.asarray(Image.open(tmp_path / f"prepared/frames/masks/valid/{index:06d}.jpg.png"))
+        assert np.all(valid == 255)
+
+
+def test_prepare_capture_desk_does_not_claim_object_support_when_it_is_missing(tmp_path: Path) -> None:
+    capture = _capture(tmp_path / "capture", count=1)
+
+    summary = prepare_capture(capture, tmp_path / "prepared", recipe="desk", target_frames=1)
+    manifest = load_json_strict(tmp_path / "prepared/frames/capture.json")
+
+    assert summary["copied_sidecars"]["valid_mask"] == 0
+    assert summary["decision"] == "hold"
+    assert "object_support_masks_incomplete" in summary["warnings"]
+    assert summary["valid_masks"]["missing_frames"] == ["000001.jpg"]
+    assert "valid_mask" not in manifest["frames"][0]
+
+
+def test_prepare_capture_enriches_partial_photometric_metadata(tmp_path: Path) -> None:
+    capture = _capture(tmp_path / "capture", count=1)
+    manifest = load_json_strict(capture / "capture.json")
+    manifest["frames"][0]["photometric"] = {"exposure_duration": 0.02}
+    write_json_strict(capture / "capture.json", manifest)
+    (capture / "metadata").mkdir()
+    (capture / "metadata/frame_index.jsonl").write_text(
+        '{"ar_timestamp":101.0,"exposure_duration":0.03,"iso":125.0,"lens_position":0.7}\n',
+        encoding="utf-8",
+    )
+
+    prepare_capture(capture, tmp_path / "prepared", recipe="room", target_frames=1)
+    prepared = load_json_strict(tmp_path / "prepared/frames/capture.json")
+
+    assert prepared["frames"][0]["photometric"]["exposure_duration"] == 0.02
+    assert prepared["frames"][0]["photometric"]["iso"] == 125.0
+    assert prepared["frames"][0]["photometric"]["lens_position"] == 0.7
+
+
+def test_prepare_capture_reports_person_mask_resizing(tmp_path: Path) -> None:
+    capture = _capture(tmp_path / "capture", count=1)
+    person = capture / "masks/person/frame_000001.png"
+    person.parent.mkdir(parents=True)
+    Image.new("L", (8, 6), 0).save(person)
+    manifest = load_json_strict(capture / "capture.json")
+    manifest["frames"][0]["person_mask"] = "masks/person/frame_000001.png"
+    write_json_strict(capture / "capture.json", manifest)
+
+    summary = prepare_capture(capture, tmp_path / "prepared", recipe="room", target_frames=1)
+
+    resized = summary["valid_masks"]["records"][0]["resized_sources"]
+    assert resized == [{"source": "person", "from": [8, 6], "to": [16, 12]}]

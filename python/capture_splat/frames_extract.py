@@ -13,6 +13,7 @@ import numpy as np
 from PIL import Image
 
 from .json_utils import write_json_strict
+from .sfm_evidence import PHOTOMETRIC_KEYS
 
 SUMMARY_SCHEMA = "capture_splat.frames_extract_summary.v0.1"
 CAPTURE_SCHEMA_V02 = "capture_splat.v0.2"
@@ -116,6 +117,10 @@ def intrinsics_from_entry(entry: dict[str, Any], width: int, height: int) -> dic
         "w": float(width),
         "h": float(height),
     }
+
+
+def photometric_from_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    return {key: entry[key] for key in PHOTOMETRIC_KEYS if key in entry and entry[key] is not None}
 
 
 def extract_selected_frames(video: Path, picked: list[int], out_dir: Path, max_edge: int) -> list[Path]:
@@ -236,6 +241,7 @@ def run_extract_frames(
                 "accepted": True,
                 "source_video_frame": frame_number,
                 "tracking_state": entry.get("tracking_state"),
+                "photometric": photometric_from_entry(entry),
             })
         if frames:
             manifest = {

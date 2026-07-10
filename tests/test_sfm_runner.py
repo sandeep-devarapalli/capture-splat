@@ -3,8 +3,17 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from capture_splat.json_utils import load_json_strict
-from capture_splat.sfm_runner import build_commands, colmap_has_cuda, decide, read_model_stats, run_sfm, select_best_sparse_subdir
+from capture_splat.gsplat_runner import default_photometric_mode
+from capture_splat.json_utils import load_json_strict, write_json_strict
+from capture_splat.sfm_runner import build_commands, colmap_has_cuda, decide, normalize_method, read_model_stats, run_sfm, select_best_sparse_subdir
+
+
+@pytest.fixture(autouse=True)
+def stable_colmap_capabilities(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "capture_splat.sfm_runner.colmap_capabilities",
+        lambda: {"global_mapper": True, "view_graph_calibrator": True, "caspar": False},
+    )
 
 
 def write_image(path: Path) -> None:
@@ -30,6 +39,26 @@ def test_build_commands_glomap_appends_registrator(tmp_path: Path) -> None:
     assert commands[2][0] == "glomap"
     assert "--Thresholds.min_inlier_num=50" in commands[2]
     assert commands[3][1] == "image_registrator"
+
+
+def test_build_commands_global_uses_per_frame_priors_masks_and_calibration(tmp_path: Path) -> None:
+    masks = tmp_path / "masks"
+    commands = build_commands(
+        tmp_path / "images", tmp_path / "out", "global", "exhaustive", 30, False, None, 8192,
+        camera_policy="per-frame", view_graph_calibration=True, mask_dir=masks,
+    )
+
+    assert [command[1] for command in commands] == [
+        "feature_extractor", "exhaustive_matcher", "view_graph_calibrator", "global_mapper"
+    ]
+    assert "--ImageReader.single_camera_per_image" in commands[0]
+    assert commands[0][commands[0].index("--ImageReader.mask_path") + 1] == str(masks)
+    assert commands[-1][commands[-1].index("--database_path") + 1].endswith("database_global.db")
+
+
+def test_method_alias_is_incremental() -> None:
+    assert normalize_method("colmap") == "incremental"
+    assert normalize_method("global") == "global"
 
 
 def test_build_commands_retrieval_never_uses_exhaustive_matcher(tmp_path: Path) -> None:
@@ -108,11 +137,70 @@ def test_run_sfm_dry_run_writes_summary(tmp_path: Path, monkeypatch: pytest.Monk
     assert summary["decision"] == "dry_run"
     assert saved["total_images"] == 3
     assert saved["matcher"] == "exhaustive"
+    assert saved["method"] == "global"
+    assert saved["view_graph_calibration"]["resolved"] is True
     assert saved["loop_detection"] is False
     assert saved["colmap_cuda"] is True
     assert saved["cpu_matching_override"] is False
     assert (tmp_path / "out" / "images" / "000001.jpg").exists()
     assert saved["authority"]["quality_claim"] is False
+
+
+def test_run_sfm_auto_uses_per_frame_cameras_only_for_prepared_capture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("capture_splat.sfm_runner.find_binary", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("capture_splat.sfm_runner.colmap_has_cuda", lambda: True)
+    capture = tmp_path / "capture"
+    images = capture / "images"
+    write_image(images / "000001.jpg")
+    write_json_strict(capture / "capture.json", {
+        "schema": "capture_splat.v0.3",
+        "source": "capture_splat.prepare_capture",
+        "frames": [{
+            "rgb": "images/000001.jpg",
+            "transform_matrix": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+            "intrinsics": {"fl_x": 8, "fl_y": 8, "cx": 4, "cy": 3, "w": 8, "h": 6},
+        }],
+    })
+
+    summary = run_sfm(images, tmp_path / "out", dry_run=True)
+
+    assert summary["camera_policy"]["resolved"] == "per-frame"
+    assert summary["view_graph_calibration"]["resolved"] is False
+    assert "--ImageReader.single_camera_per_image" in summary["commands"][0]
+    assert load_json_strict(tmp_path / "out/capture.json")["source"] == "capture_splat.prepare_capture"
+    assert default_photometric_mode(tmp_path / "out") == "bilateral-grid"
+
+
+def test_run_sfm_generic_external_camera_preserves_distortion_options(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("capture_splat.sfm_runner.find_binary", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("capture_splat.sfm_runner.colmap_has_cuda", lambda: True)
+    capture = tmp_path / "capture"
+    images = capture / "images"
+    write_image(images / "000001.jpg")
+    write_json_strict(capture / "capture.json", {
+        "schema": "capture_splat.v0.3",
+        "source": "transforms_import",
+        "frames": [{
+            "rgb": "images/000001.jpg",
+            "transform_matrix": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+            "intrinsics": {
+                "camera_model": "OPENCV", "fl_x": 8, "fl_y": 8, "cx": 4, "cy": 3,
+                "w": 8, "h": 6, "k1": 0.01, "k2": -0.02, "p1": 0.001, "p2": -0.001,
+            },
+        }],
+    })
+
+    summary = run_sfm(images, tmp_path / "out", dry_run=True)
+    command = summary["commands"][0]
+
+    assert summary["camera_policy"]["resolved"] == "single"
+    assert "generic_images_single_camera_fallback" in summary["warnings"]
+    assert command[command.index("--ImageReader.camera_model") + 1] == "OPENCV"
+    assert command[command.index("--ImageReader.camera_params") + 1].endswith("0.01,-0.02,0.001,-0.001")
+
+    per_frame = run_sfm(images, tmp_path / "out_per_frame", camera_policy="per-frame", dry_run=True)
+    assert per_frame["blockers"] == []
+    assert "--ImageReader.single_camera_per_image" in per_frame["commands"][0]
 
 
 def test_run_sfm_blocked_without_cuda(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -195,3 +283,13 @@ def test_run_sfm_blocked_without_glomap(tmp_path: Path, monkeypatch: pytest.Monk
         run_sfm(images, tmp_path / "out", method="glomap")
     saved = load_json_strict(tmp_path / "out" / "capture_splat_sfm_summary.json")
     assert saved["decision"] == "blocked"
+
+
+def test_run_sfm_blocks_requested_caspar_when_not_compiled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("capture_splat.sfm_runner.find_binary", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("capture_splat.sfm_runner.colmap_has_cuda", lambda: True)
+    images = tmp_path / "frames"
+    write_image(images / "000001.jpg")
+
+    with pytest.raises(RuntimeError, match="colmap_caspar_missing"):
+        run_sfm(images, tmp_path / "out", post_ba_backend="caspar", dry_run=True)

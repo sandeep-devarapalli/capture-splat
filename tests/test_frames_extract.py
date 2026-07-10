@@ -108,7 +108,21 @@ def test_extract_frames_attaches_poses_from_frame_index(tmp_path: Path) -> None:
     index = tmp_path / "frame_index.jsonl"
     identity = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
     entries = [
-        {"video_frame_idx": frame, "timestamp": frame / 12, "ar_timestamp": 100 + frame / 12, "camera_to_world": identity, "intrinsics": {"fx": 100, "fy": 100, "cx": 64, "cy": 48, "w": 128, "h": 96}, "tracking_state": "normal"}
+        {
+            "video_frame_idx": frame,
+            "timestamp": frame / 12,
+            "ar_timestamp": 100 + frame / 12,
+            "camera_to_world": identity,
+            "intrinsics": {"fx": 100, "fy": 100, "cx": 64, "cy": 48, "w": 128, "h": 96},
+            "tracking_state": "normal",
+            "exposure_duration": 0.01,
+            "iso": 80.0,
+            "white_balance_gains": {"red": 1.2, "green": 1.0, "blue": 1.4},
+            "lens_position": 0.7,
+            "is_adjusting_exposure": False,
+            "color_primaries": "ITU_R_709_2",
+            "projection": {"model": "arkit_pinhole_intrinsics", "matrix_available": True},
+        }
         for frame in range(12)
     ]
     index.write_text("\n".join(json.dumps(entry) for entry in entries), encoding="utf-8")
@@ -123,3 +137,8 @@ def test_extract_frames_attaches_poses_from_frame_index(tmp_path: Path) -> None:
     assert capture["frames"][0]["timestamp"] == 100.0
     assert capture["frames"][0]["video_timestamp"] == 0.0
     assert capture["frames"][0]["timestamp_domain"] == "ar_session"
+    photometric = capture["frames"][0]["photometric"]
+    assert photometric["exposure_duration"] == 0.01
+    assert photometric["white_balance_gains"]["blue"] == 1.4
+    assert photometric["is_adjusting_exposure"] is False
+    assert photometric["projection"]["matrix_available"] is True

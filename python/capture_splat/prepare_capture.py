@@ -13,9 +13,10 @@ from PIL import Image
 
 from .capture_quality_report import run_capture_quality_report
 from .capture_schema import iter_frames, load_capture
-from .frames_extract import run_extract_frames
+from .frames_extract import photometric_from_entry, run_extract_frames
 from .json_utils import load_json_strict, write_json_strict
 from .reconstruction_recipe import RECIPES, plan_reconstruction, resolve_recipe
+from .sfm_evidence import camera_evidence_report, load_frame_evidence, photometric_evidence_report
 
 SUMMARY_SCHEMA = "capture_splat.prepare_capture_summary.v0.1"
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
@@ -171,15 +172,61 @@ def _copy(path: Path, destination: Path) -> None:
     shutil.copy2(path, destination)
 
 
+def _write_valid_mask(
+    output_dir: Path,
+    prepared: dict[str, Any],
+    image_size: tuple[int, int],
+    index: int,
+    subject_required: bool,
+) -> dict[str, Any] | None:
+    valid = np.ones((image_size[1], image_size[0]), dtype=bool)
+    sources: list[str] = []
+    resized_sources: list[dict[str, Any]] = []
+    person_relative = prepared.get("person_mask")
+    if isinstance(person_relative, str):
+        with Image.open(output_dir / person_relative) as image:
+            if image.size != image_size:
+                resized_sources.append({"source": "person", "from": list(image.size), "to": list(image_size)})
+            person = np.asarray(image.convert("L").resize(image_size, Image.Resampling.NEAREST)) >= 128
+        valid &= ~person
+        sources.append("inverse_person")
+    object_relative = prepared.get("object_mask")
+    if subject_required and not isinstance(object_relative, str):
+        return None
+    if subject_required:
+        with Image.open(output_dir / object_relative) as image:
+            if image.size != image_size:
+                resized_sources.append({"source": "object", "from": list(image.size), "to": list(image_size)})
+            subject = np.asarray(image.convert("L").resize(image_size, Image.Resampling.NEAREST)) >= 128
+        valid &= subject
+        sources.append("object_support")
+    if not sources:
+        sources.append("full_frame_static_default")
+    relative = Path("masks/valid") / f"{Path(str(prepared['rgb'])).name}.png"
+    destination = output_dir / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(valid.astype(np.uint8) * 255).save(destination)
+    prepared["valid_mask"] = relative.as_posix()
+    return {
+        "frame": index,
+        "path": relative.as_posix(),
+        "sources": sources,
+        "resized_sources": resized_sources,
+        "valid_fraction": float(np.mean(valid)),
+    }
+
+
 def _write_frames(
     candidates: list[Candidate],
     output_dir: Path,
     person_records: list[dict[str, Any]],
     object_records: list[dict[str, Any]],
+    video_records: list[dict[str, Any]],
     object_masks: bool,
-) -> tuple[list[dict[str, Any]], dict[str, int]]:
+) -> tuple[list[dict[str, Any]], dict[str, int], list[dict[str, Any]]]:
     frames: list[dict[str, Any]] = []
-    counts = {"depth": 0, "confidence": 0, "person_mask": 0, "object_mask": 0}
+    counts = {"depth": 0, "confidence": 0, "person_mask": 0, "object_mask": 0, "valid_mask": 0}
+    mask_records: list[dict[str, Any]] = []
     for index, candidate in enumerate(candidates, start=1):
         raw = candidate.frame
         source_image = candidate.root / str(raw["rgb"])
@@ -196,6 +243,12 @@ def _write_frames(
             "source_frame_index": candidate.source_index,
             "timestamp_domain": candidate.timestamp_domain,
         })
+        video_record = _nearest(video_records, candidate.timestamp, 0.12)
+        indexed_photometric = photometric_from_entry(video_record or {})
+        existing_photometric = prepared.get("photometric") if isinstance(prepared.get("photometric"), dict) else {}
+        prepared["photometric"] = {**indexed_photometric, **existing_photometric}
+        if prepared.get("tracking_state") is None and video_record is not None:
+            prepared["tracking_state"] = video_record.get("tracking_state")
         for key in ("depth", "confidence"):
             relative = raw.get(key)
             if not isinstance(relative, str):
@@ -224,8 +277,12 @@ def _write_frames(
             ):
                 prepared["object_mask"] = destination_relative.as_posix()
                 counts["object_mask"] += 1
+        valid_record = _write_valid_mask(output_dir, prepared, image_size, index, object_masks)
+        if valid_record is not None:
+            mask_records.append(valid_record)
+            counts["valid_mask"] += 1
         frames.append(prepared)
-    return frames, counts
+    return frames, counts, mask_records
 
 
 def _finalization_status(capture_dir: Path, capture: dict[str, Any]) -> tuple[str, list[str]]:
@@ -272,6 +329,7 @@ def prepare_capture(
     object_records = _object_records(capture_dir, capture)
     video = capture_dir / str(capture.get("video_file", "video/capture.mov"))
     frame_index = capture_dir / str(capture.get("frame_index_file", "metadata/frame_index.jsonl"))
+    video_records = _load_json_lines(frame_index)
     with tempfile.TemporaryDirectory(prefix="capture_splat_prepare_") as temporary:
         if len(accepted) < target and video.exists() and frame_index.exists():
             extracted_dir = Path(temporary) / "video_frames"
@@ -304,11 +362,12 @@ def prepare_capture(
             item.source_kind,
         ))
         frames_dir = out_dir / "frames"
-        prepared_frames, copied = _write_frames(
+        prepared_frames, copied, mask_records = _write_frames(
             merged[:target],
             frames_dir,
             person_records,
             object_records,
+            video_records,
             recipe_name in {"desk", "object", "repair"},
         )
     prepared_manifest = {
@@ -333,11 +392,38 @@ def prepare_capture(
         },
     }
     write_json_strict(out_dir / "frames/capture.json", prepared_manifest)
+    frame_evidence = load_frame_evidence(out_dir / "frames/capture.json")
+    camera_report = camera_evidence_report(out_dir / "frames/images", frame_evidence)
+    photometric_report = photometric_evidence_report(prepared_frames)
+    object_masks_required = recipe_name in {"desk", "object", "repair"}
+    missing_valid_masks = [
+        Path(str(frame["rgb"])).name for frame in prepared_frames if not isinstance(frame.get("valid_mask"), str)
+    ]
+    mask_report = {
+        "schema": "capture_splat.valid_mask_report.v0.1",
+        "semantics": "white_valid_for_features_and_training",
+        "records": mask_records,
+        "frames_with_masks": len(mask_records),
+        "required_for_recipe": object_masks_required,
+        "missing_frames": missing_valid_masks,
+        "decision": "hold" if object_masks_required and missing_valid_masks else "ready",
+        "authority": {"derived_masks_are_proposals": True, "quality_claim": False},
+    }
+    if object_masks_required and missing_valid_masks:
+        warnings.append("object_support_masks_incomplete")
+    metadata_dir = out_dir / "frames/metadata"
+    write_json_strict(metadata_dir / "camera_evidence.json", camera_report)
+    write_json_strict(metadata_dir / "photometric_evidence.json", photometric_report)
+    write_json_strict(metadata_dir / "valid_mask_report.json", mask_report)
     actual_count = len(prepared_frames)
     matcher = "retrieval" if actual_count > 250 else "exhaustive"
     sfm_request = {
         "images": "frames/images",
-        "method": "glomap",
+        "method": "global",
+        "camera_policy": "auto",
+        "view_graph_calibration": "auto",
+        "masks": "auto",
+        "post_ba_backend": "none",
         "features": "hloc" if matcher == "retrieval" else "sift",
         "matcher": matcher,
         "background_sphere": bool(recipe_config["background_sphere"]),
@@ -358,6 +444,9 @@ def prepare_capture(
         "continuous_video_supplements": len(supplements),
         "prepared_frames": actual_count,
         "copied_sidecars": copied,
+        "camera_evidence": camera_report,
+        "photometric_evidence": photometric_report,
+        "valid_masks": mask_report,
         "finalization_status": finalization_status,
         "quality_decision": quality["decision"],
         "plan_decision": plan["decision"],
