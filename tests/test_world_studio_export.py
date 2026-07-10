@@ -183,3 +183,128 @@ def test_export_world_studio_explicit_gaussian_wins_over_pruned(tmp_path: Path) 
     manifest = load_json_strict(tmp_path / "world_studio" / MANIFEST_NAME)
 
     assert manifest["assets"]["gaussian_ply"]["variant"] == "raw"
+
+
+def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -> None:
+    package = tmp_path / "colmap_package"
+    sparse = package / "sparse" / "0"
+    sparse.mkdir(parents=True)
+    (sparse / "cameras.txt").write_text("1 PINHOLE 8 6 8 6 4 3\n", encoding="utf-8")
+    centers = [
+        (0, 0, 0),
+        (1, 0, 0),
+        (0, 1, 0),
+        (0, 0, 1),
+        (1, 1, 0),
+        (1, 0, 1),
+        (0, 1, 1),
+        (1, 1, 1),
+    ]
+    image_lines = []
+    capture_frames = []
+    for index, center in enumerate(centers, start=1):
+        name = f"{index:06d}.jpg"
+        write_image(package / "images" / name)
+        image_lines.extend([
+            f"{index} 1 0 0 0 {-center[0]} {-center[1]} {-center[2]} 1 {name}",
+            "",
+        ])
+        capture_frames.append({
+            "rgb": f"rgb/{name}",
+            "accepted": True,
+            "transform_matrix": [
+                [1, 0, 0, center[0]],
+                [0, 1, 0, center[1]],
+                [0, 0, 1, center[2]],
+                [0, 0, 0, 1],
+            ],
+        })
+    (sparse / "images.txt").write_text("\n".join(image_lines), encoding="utf-8")
+    (sparse / "points3D.txt").write_text("# empty\n", encoding="utf-8")
+
+    run = tmp_path / "run"
+    write_ascii_ply(run / "splat.ply")
+    write_json_strict(run / "train.json", {
+        "dataparser_transform": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+    })
+    capture = tmp_path / "capture"
+    write_json_strict(capture / "capture.json", {
+        "schema": "capture_splat.v0.3",
+        "intrinsics": {"fl_x": 8, "fl_y": 6, "cx": 4, "cy": 3, "w": 8, "h": 6},
+        "arkit_mesh_file": "geometry/arkit_mesh.ply",
+        "arkit_mesh_report_file": "geometry/arkit_mesh_report.json",
+        "room_plan_semantics_file": "room_plan/room_semantics.json",
+        "frame_index_file": "metadata/frame_index.jsonl",
+        "frames": capture_frames,
+    })
+    write_ascii_ply(capture / "geometry" / "arkit_mesh.ply")
+    write_json_strict(capture / "geometry" / "arkit_mesh_report.json", {"status": "finite_mesh_written"})
+    write_json_strict(capture / "room_plan" / "room_semantics.json", {"schema": "capture_splat.room_semantics.v0.1"})
+    frame_index = capture / "metadata" / "frame_index.jsonl"
+    frame_index.parent.mkdir(parents=True, exist_ok=True)
+    frame_index.write_text('{"video_frame_index":0}\n', encoding="utf-8")
+
+    export_world_studio_handoff(
+        package,
+        tmp_path / "world_studio",
+        gaussian=run / "splat.ply",
+        capture_manifest=capture / "capture.json",
+        copy_files=True,
+    )
+    manifest = load_json_strict(tmp_path / "world_studio" / MANIFEST_NAME)
+
+    assert manifest["assets"]["navigation_mesh"]["path"] == "navigation_mesh.ply"
+    assert manifest["assets"]["navigation_mesh"]["coordinate_frame"] == "arkit_world"
+    assert manifest["assets"]["navigation_mesh"]["units"] == "meters"
+    assert manifest["assets"]["mesh_report"]["path"] == "navigation_mesh_report.json"
+    assert manifest["assets"]["room_semantics"]["coordinate_frame"] == "roomplan_world_unregistered"
+    assert manifest["assets"]["camera_trajectory"]["path"] == "camera_trajectory.jsonl"
+    assert manifest["metric_registration"]["status"] == "accepted"
+    assert manifest["metric_registration"]["matched_cameras"] == 8
+    assert manifest["metric_registration"]["arkit_to_target"] == [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    assert manifest["metric_registration"]["meters_per_target_unit"] == 1.0
+    assert manifest["walk_eligibility"]["status"] == "eligible"
+    assert manifest["authority"]["navigation_authority"] is False
+
+
+def test_export_world_studio_holds_walk_when_metric_registration_is_insufficient(tmp_path: Path) -> None:
+    package = tmp_path / "colmap_package"
+    write_image(package / "images" / "000001.jpg")
+    sparse = package / "sparse" / "0"
+    sparse.mkdir(parents=True)
+    (sparse / "cameras.txt").write_text("1 PINHOLE 8 6 8 6 4 3\n", encoding="utf-8")
+    (sparse / "images.txt").write_text("1 1 0 0 0 0 0 0 1 000001.jpg\n\n", encoding="utf-8")
+    (sparse / "points3D.txt").write_text("# empty\n", encoding="utf-8")
+    capture = tmp_path / "capture"
+    write_json_strict(capture / "capture.json", {
+        "schema": "capture_splat.v0.3",
+        "intrinsics": {"fl_x": 8, "fl_y": 6, "cx": 4, "cy": 3, "w": 8, "h": 6},
+        "arkit_mesh_file": "geometry/arkit_mesh.ply",
+        "frames": [{
+            "rgb": "rgb/000001.jpg",
+            "accepted": True,
+            "transform_matrix": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+        }],
+    })
+    write_ascii_ply(capture / "geometry" / "arkit_mesh.ply")
+
+    export_world_studio_handoff(
+        package,
+        tmp_path / "world_studio",
+        capture_manifest=capture / "capture.json",
+        copy_files=True,
+    )
+    manifest = load_json_strict(tmp_path / "world_studio" / MANIFEST_NAME)
+
+    assert manifest["metric_registration"]["status"] == "held"
+    assert manifest["metric_registration"]["reason"] == "insufficient_matched_cameras"
+    assert manifest["walk_eligibility"] == {
+        "status": "held",
+        "reason": "metric_registration_not_accepted",
+        "authority": "fly_only",
+    }

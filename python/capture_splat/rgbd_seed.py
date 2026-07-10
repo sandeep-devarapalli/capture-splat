@@ -77,9 +77,13 @@ def apply_sim3(points: np.ndarray, scale: float, rotation: np.ndarray, translati
     return scale * (points @ rotation.T) + translation
 
 
-def _matched_centers(capture_dir: Path, package_dir: Path) -> tuple[np.ndarray, np.ndarray, list[str]]:
+def _matched_centers(
+    capture_dir: Path,
+    package_dir: Path,
+    sparse_dir_name: str = "sparse/0",
+) -> tuple[np.ndarray, np.ndarray, list[str]]:
     capture = load_capture(capture_dir)
-    colmap = read_colmap_camera_centers(package_dir / "sparse/0/images.txt")
+    colmap = read_colmap_camera_centers(package_dir / sparse_dir_name / "images.txt")
     source: list[np.ndarray] = []
     target: list[np.ndarray] = []
     names: list[str] = []
@@ -149,6 +153,26 @@ def _alignment_report(
         "p95_residual_scene_fraction": p95_fraction,
     })
     return report, (scale, rotation, translation) if accepted else None
+
+
+def camera_alignment_report(
+    capture_dir: Path,
+    package_dir: Path,
+    sparse_dir_name: str = "sparse/0",
+    minimum_cameras: int = 8,
+    max_median_fraction: float = 0.03,
+    max_p95_fraction: float = 0.08,
+) -> dict[str, Any]:
+    source, target, names = _matched_centers(capture_dir, package_dir, sparse_dir_name)
+    report, _ = _alignment_report(
+        source,
+        target,
+        minimum_cameras,
+        max_median_fraction,
+        max_p95_fraction,
+    )
+    report["matched_frame_names"] = names
+    return report
 
 
 def _frame_points(

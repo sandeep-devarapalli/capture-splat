@@ -300,17 +300,28 @@ opened in World Studio:
 capture-splat export-world-studio \
   --package runs/scan/colmap_package \
   --gaussian runs/scan/vksplat_ladder/step_0007000/splat.ply \
+  --capture-manifest captures/scan/capture.json \
   --transforms runs/scan/ingest/nerfstudio_dataset/transforms.json \
   --out runs/scan/world_studio_package
 ```
 
 The command writes `capture-splat.world-studio.json` with schema
-`capture_splat.world_studio_handoff.v0.1` and relative paths only. It can include
+`capture_splat.world_studio_handoff.v0.2` and relative paths only. It can include
 source frames, ordinary `points.ply`, Gaussian `.ply`, `capture.json`,
 `transforms.json`, COLMAP sparse text files, and optional `.splat`/`.spz`
 references when present. The handoff keeps source frames as visual evidence and
 trained splats as review proposals, not metric, collision, semantic, or
 navigation authority.
+
+When `--capture-manifest` points to an iPhone `capture.json`, the exporter also
+copies the available ARKit navigation mesh, mesh report, RoomPlan semantic
+proposal, and continuous camera trajectory. It estimates an
+`arkit_world -> colmap_world` Sim(3) from matched camera centers and composes it
+with the trainer transform. The strict registration report records matched
+cameras, residuals, units, scale conversion, and `accepted|held|unavailable`.
+Walk is only marked eligible when a navigation mesh exists and registration is
+accepted. This is interaction eligibility from capture evidence, not validated
+collision or navigation authority.
 
 When a rung is finite but render/source QA still holds, diagnose weak and tail
 frames before spending a longer run:

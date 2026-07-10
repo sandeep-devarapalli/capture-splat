@@ -135,6 +135,16 @@ def main() -> None:
     p_world_studio.add_argument("--camera-poses", type=Path)
     p_world_studio.add_argument("--splat", type=Path)
     p_world_studio.add_argument("--spz", type=Path)
+    p_world_studio.add_argument("--navigation-mesh", type=Path)
+    p_world_studio.add_argument("--mesh-report", type=Path)
+    p_world_studio.add_argument("--room-semantics", type=Path)
+    p_world_studio.add_argument("--camera-trajectory", type=Path)
+    p_world_studio.add_argument("--measurement-points", type=Path)
+    p_world_studio.add_argument(
+        "--measurement-points-frame",
+        choices=["arkit_world", "colmap_world", "trainer_world"],
+        default="colmap_world",
+    )
     p_world_studio.add_argument("--image-dir", default="images")
     p_world_studio.add_argument("--sparse-dir", default="sparse/0")
     p_world_studio.add_argument("--copy-files", action="store_true")
@@ -421,6 +431,12 @@ def main() -> None:
             camera_poses=args.camera_poses,
             splat=args.splat,
             spz=args.spz,
+            navigation_mesh=args.navigation_mesh,
+            mesh_report=args.mesh_report,
+            room_semantics=args.room_semantics,
+            camera_trajectory=args.camera_trajectory,
+            measurement_points=args.measurement_points,
+            measurement_points_frame=args.measurement_points_frame,
             image_dir_name=args.image_dir,
             sparse_dir_name=args.sparse_dir,
             copy_files=args.copy_files,

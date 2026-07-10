@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from .json_utils import load_json_strict, write_json_strict
+from .rgbd_seed import camera_alignment_report
 from .scene_transform import SIDECAR_NAME
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
@@ -176,6 +177,100 @@ def _copy_asset(src: Path | None, out_dir: Path, name: str, copy_files: bool) ->
     return dst
 
 
+def _capture_asset(
+    capture_manifest: Path | None,
+    capture: dict[str, Any] | None,
+    key: str,
+    fallback: str,
+) -> Path | None:
+    if capture_manifest is None or capture is None:
+        return None
+    relative = capture.get(key, fallback)
+    if not isinstance(relative, str) or not relative:
+        return None
+    path = capture_manifest.resolve().parent / relative
+    return path if path.exists() else None
+
+
+def _metric_asset_ref(
+    path: Path,
+    root: Path,
+    coordinate_frame: str,
+    authority: str,
+    units: str | None = None,
+) -> dict[str, Any]:
+    ref = _file_ref(path, root)
+    ref.update({"coordinate_frame": coordinate_frame, "authority": authority})
+    if units is not None:
+        ref["units"] = units
+    return ref
+
+
+def _metric_registration(
+    capture_manifest: Path | None,
+    package: Path,
+    sparse_dir_name: str,
+    trainer_transform: list[list[float]] | None,
+) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "schema": "capture_splat.metric_registration.v0.1",
+        "status": "unavailable",
+        "source_coordinate_frame": "arkit_world",
+        "intermediate_coordinate_frame": "colmap_world",
+        "target_coordinate_frame": "trainer_world" if trainer_transform is not None else "colmap_world",
+        "source_units": "meters",
+        "target_units": "normalized_scene_units" if trainer_transform is not None else "colmap_units",
+        "authority": {
+            "camera_center_alignment_evidence": True,
+            "metric_mesh_registration_candidate": False,
+            "collision_authority": False,
+            "navigation_authority": False,
+            "quality_claim": False,
+        },
+    }
+    if capture_manifest is None:
+        return {**base, "reason": "capture_manifest_missing"}
+    if capture_manifest.name != "capture.json":
+        return {**base, "reason": "capture_manifest_must_be_named_capture.json"}
+    if not (package / sparse_dir_name / "images.txt").exists():
+        return {**base, "reason": "colmap_images_missing"}
+    try:
+        alignment = camera_alignment_report(
+            capture_manifest.parent,
+            package,
+            sparse_dir_name=sparse_dir_name,
+        )
+    except (FileNotFoundError, ValueError) as error:
+        return {**base, "reason": str(error)}
+    status = "accepted" if alignment.get("accepted") is True else "held"
+    registration = {**base, **alignment, "status": status}
+    matrix = alignment.get("matrix")
+    if status != "accepted" or not isinstance(matrix, list):
+        registration["authority"] = base["authority"]
+        return registration
+    arkit_to_colmap = np.asarray(matrix, dtype=np.float64)
+    colmap_to_target = np.asarray(trainer_transform or np.eye(4), dtype=np.float64)
+    if arkit_to_colmap.shape != (4, 4) or colmap_to_target.shape != (4, 4):
+        return {**registration, "status": "held", "reason": "invalid_transform_shape"}
+    arkit_to_target = colmap_to_target @ arkit_to_colmap
+    linear = arkit_to_target[:3, :3]
+    units_per_meter = float(abs(np.linalg.det(linear)) ** (1.0 / 3.0))
+    if not np.all(np.isfinite(arkit_to_target)) or not math.isfinite(units_per_meter) or units_per_meter <= 0:
+        return {**registration, "status": "held", "reason": "non_finite_composed_transform"}
+    registration.update({
+        "arkit_to_colmap": arkit_to_colmap.tolist(),
+        "colmap_to_target": colmap_to_target.tolist(),
+        "arkit_to_target": arkit_to_target.tolist(),
+        "target_units_per_meter": units_per_meter,
+        "meters_per_target_unit": 1.0 / units_per_meter,
+        "authority": {
+            **base["authority"],
+            "metric_mesh_registration_candidate": True,
+        },
+    })
+    return registration
+
+
 def _first_existing(root: Path, names: tuple[str, ...]) -> Path | None:
     for name in names:
         path = root / name
@@ -252,6 +347,12 @@ def export_world_studio_handoff(
     camera_poses: Path | None = None,
     splat: Path | None = None,
     spz: Path | None = None,
+    navigation_mesh: Path | None = None,
+    mesh_report: Path | None = None,
+    room_semantics: Path | None = None,
+    camera_trajectory: Path | None = None,
+    measurement_points: Path | None = None,
+    measurement_points_frame: str = "colmap_world",
     image_dir_name: str = "images",
     sparse_dir_name: str = "sparse/0",
     copy_files: bool = False,
@@ -259,6 +360,8 @@ def export_world_studio_handoff(
 ) -> dict[str, Any]:
     package = package.resolve()
     out_dir = out_dir.resolve()
+    if measurement_points_frame not in {"arkit_world", "colmap_world", "trainer_world"}:
+        raise ValueError(f"unsupported measurement points frame: {measurement_points_frame}")
     out_dir.mkdir(parents=True, exist_ok=True)
     images = _find_images(package, image_dir_name)
     if not images:
@@ -279,6 +382,20 @@ def export_world_studio_handoff(
     camera_poses = camera_poses or _first_existing(package, ("camera_poses.json", "camera-poses.json"))
     splat = splat or _first_existing(package, ("scene.splat", "splat.splat"))
     spz = spz or _first_existing(package, ("scene.spz", "splat.spz"))
+    capture_data = load_json_strict(capture_manifest) if capture_manifest and capture_manifest.exists() else None
+    navigation_mesh = navigation_mesh or _capture_asset(
+        capture_manifest, capture_data, "arkit_mesh_file", "geometry/arkit_mesh.ply"
+    )
+    mesh_report = mesh_report or _capture_asset(
+        capture_manifest, capture_data, "arkit_mesh_report_file", "geometry/arkit_mesh_report.json"
+    )
+    room_semantics = room_semantics or _capture_asset(
+        capture_manifest, capture_data, "room_plan_semantics_file", "room_plan/room_semantics.json"
+    )
+    camera_trajectory = camera_trajectory or _capture_asset(
+        capture_manifest, capture_data, "frame_index_file", "metadata/frame_index.jsonl"
+    )
+    measurement_points = measurement_points or _first_existing(package, ("metric_seed.ply",))
 
     copied_images = _copy_images(images, out_dir, copy_files)
     copied_sparse = _copy_sparse_dir(package, out_dir, sparse_dir_name, copy_files)
@@ -290,6 +407,11 @@ def export_world_studio_handoff(
     copied_camera_poses = _copy_asset(camera_poses, out_dir, Path(camera_poses).name if camera_poses else "camera_poses.json", copy_files)
     copied_splat = _copy_asset(splat, out_dir, f"splat{splat.suffix.lower()}" if splat else "splat.splat", copy_files)
     copied_spz = _copy_asset(spz, out_dir, f"scene{spz.suffix.lower()}" if spz else "scene.spz", copy_files)
+    copied_navigation_mesh = _copy_asset(navigation_mesh, out_dir, "navigation_mesh.ply", copy_files)
+    copied_mesh_report = _copy_asset(mesh_report, out_dir, "navigation_mesh_report.json", copy_files)
+    copied_room_semantics = _copy_asset(room_semantics, out_dir, "room_semantics.json", copy_files)
+    copied_camera_trajectory = _copy_asset(camera_trajectory, out_dir, "camera_trajectory.jsonl", copy_files)
+    copied_measurement_points = _copy_asset(measurement_points, out_dir, "measurement_points.ply", copy_files)
 
     assets: dict[str, Any] = {}
     if copied_points:
@@ -318,6 +440,26 @@ def export_world_studio_handoff(
         assets["splat"] = _file_ref(copied_splat, out_dir)
     if copied_spz:
         assets["spz"] = _file_ref(copied_spz, out_dir)
+    if copied_navigation_mesh:
+        assets["navigation_mesh"] = _metric_asset_ref(
+            copied_navigation_mesh, out_dir, "arkit_world", "metric_capture_evidence", "meters"
+        )
+    if copied_mesh_report:
+        assets["mesh_report"] = _metric_asset_ref(
+            copied_mesh_report, out_dir, "arkit_world", "capture_evidence_report", "meters"
+        )
+    if copied_room_semantics:
+        assets["room_semantics"] = _metric_asset_ref(
+            copied_room_semantics, out_dir, "roomplan_world_unregistered", "semantic_proposal", "meters"
+        )
+    if copied_camera_trajectory:
+        assets["camera_trajectory"] = _metric_asset_ref(
+            copied_camera_trajectory, out_dir, "arkit_world", "metric_capture_evidence", "meters"
+        )
+    if copied_measurement_points:
+        assets["measurement_points"] = _metric_asset_ref(
+            copied_measurement_points, out_dir, measurement_points_frame, "metric_seed_proposal"
+        )
 
     manifest = {
         "schema": SCHEMA,
@@ -351,6 +493,31 @@ def export_world_studio_handoff(
         manifest["scene_transform"] = scene_transform
         if dataparser_transform is None and isinstance(scene_transform.get("trainer_transform"), list):
             manifest["dataparser_transform"] = scene_transform["trainer_transform"]
+    registration = _metric_registration(
+        capture_manifest,
+        package,
+        sparse_dir_name,
+        manifest.get("dataparser_transform"),
+    )
+    manifest["metric_registration"] = registration
+    if copied_navigation_mesh and registration["status"] == "accepted":
+        manifest["walk_eligibility"] = {
+            "status": "eligible",
+            "reason": "registered_metric_mesh",
+            "authority": "capture_metric_evidence_not_collision_validation",
+        }
+    elif copied_navigation_mesh:
+        manifest["walk_eligibility"] = {
+            "status": "held",
+            "reason": "metric_registration_not_accepted",
+            "authority": "fly_only",
+        }
+    else:
+        manifest["walk_eligibility"] = {
+            "status": "missing",
+            "reason": "metric_geometry_missing",
+            "authority": "fly_only",
+        }
     extent = _scene_extent(gaussian)
     if extent is not None:
         manifest.update(extent)
