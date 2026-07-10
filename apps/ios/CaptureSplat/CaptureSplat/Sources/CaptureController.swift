@@ -7,6 +7,14 @@ import Foundation
 import RoomPlan
 import UIKit
 
+enum CapturePackageState: String {
+    case idle
+    case recording
+    case finalizing
+    case ready
+    case partial
+}
+
 struct CaptureIntentOption: Identifiable {
     let id: String
     let title: String
@@ -150,6 +158,7 @@ private struct MeshExportResult {
 final class CaptureController: NSObject, ObservableObject {
     @Published var isRecording = false
     @Published var isFinalizing = false
+    @Published private(set) var capturePackageState: CapturePackageState = .idle
     @Published var statusText = "Ready"
     @Published var rgbFrames = 0
     @Published var depthFrames = 0
@@ -160,7 +169,7 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var isDepthEnabled = true
     @Published var isConfidenceEnabled = true
     @Published var isIMUEnabled = true
-    @Published var isGPSEnabled = true
+    @Published var isGPSEnabled = false
     @Published var rgbRate = 0.0
     @Published var depthRate = 0.0
     @Published var imuRate = 0.0
@@ -212,6 +221,7 @@ final class CaptureController: NSObject, ObservableObject {
     private var meshAnchors: [UUID: ARMeshAnchor] = [:]
     private var recordedMeshAnchorIDs: Set<UUID> = []
     @Published var isObjectTargetLocked = false
+    @Published var isSubjectTargetReady = false
     @Published var isRoomTargetLocked = false
     @Published var targetLockStatus = "Lock object before recording"
     @Published var targetLockDetail = "Center the object, then tap Lock Object."
@@ -413,8 +423,6 @@ final class CaptureController: NSObject, ObservableObject {
         UIDevice.current.isBatteryMonitoringEnabled = true
         location.delegate = self
         location.desiredAccuracy = kCLLocationAccuracyBest
-        location.requestWhenInUseAuthorization()
-        location.startUpdatingLocation()
 
         if motion.isDeviceMotionAvailable {
             motion.deviceMotionUpdateInterval = 0.01
@@ -444,6 +452,7 @@ final class CaptureController: NSObject, ObservableObject {
             clearTargetLock()
         }
         captureIntent = intent
+        isGPSEnabled = intent == "outdoor_object"
         updateCaptureProfileText()
         updateGuidance()
     }
@@ -594,6 +603,7 @@ final class CaptureController: NSObject, ObservableObject {
         targetLockSampleCount = 0
         targetLockDepthSpreadMeters = nil
         targetCandidateObservations.removeAll()
+        isSubjectTargetReady = false
         lockedRoomWorldTransform = nil
         roomStartPosition = nil
         roomLastAcceptedPosition = nil
@@ -735,6 +745,7 @@ final class CaptureController: NSObject, ObservableObject {
             imuRateSamples.removeAll()
             gpsRateSamples.removeAll()
             isRecording = true
+            capturePackageState = .recording
             statusText = "Recording"
             appendSessionEvent("capture_started", details: [
                 "capture_intent": captureIntent,
@@ -760,9 +771,11 @@ final class CaptureController: NSObject, ObservableObject {
                 startMotion()
             }
             if isGPSEnabled {
+                location.requestWhenInUseAuthorization()
                 location.startUpdatingLocation()
             }
         } catch {
+            capturePackageState = currentSessionDirectory == nil ? .idle : .partial
             statusText = "Start failed: \(error.localizedDescription)"
         }
     }
@@ -771,6 +784,7 @@ final class CaptureController: NSObject, ObservableObject {
         guard isRecording, !isFinalizing else { return }
         isRecording = false
         isFinalizing = true
+        capturePackageState = .finalizing
         statusText = "Finalizing capture"
         appendSessionEvent("finalization_started", arTimestamp: lastFrameTimestamp)
         motion.stopDeviceMotionUpdates()
@@ -793,6 +807,8 @@ final class CaptureController: NSObject, ObservableObject {
 
     func finalizeSession() {
         guard !isRecording, !isFinalizing else { return }
+        isFinalizing = true
+        capturePackageState = .finalizing
         writeMetadata()
         writeSessionSidecars()
         do {
@@ -805,6 +821,7 @@ final class CaptureController: NSObject, ObservableObject {
                 finalizationError: nil
             )
             statusText = "Finalized \(directory.lastPathComponent)"
+            capturePackageState = .ready
         } catch {
             writeFinalizationReport(
                 status: "failed",
@@ -814,7 +831,9 @@ final class CaptureController: NSObject, ObservableObject {
                 finalizationError: error.localizedDescription
             )
             statusText = "Finalize failed: \(error.localizedDescription)"
+            capturePackageState = .partial
         }
+        isFinalizing = false
     }
 
     private func completeCaptureFinalization(
@@ -846,6 +865,7 @@ final class CaptureController: NSObject, ObservableObject {
             statusText = videoResult.succeeded
                 ? "Stopped and finalized \(directory.lastPathComponent)"
                 : "Finalized with video warning: \(videoResult.error ?? videoResult.status)"
+            capturePackageState = .ready
         } catch {
             appendSessionEvent("finalization_failed", details: ["error": error.localizedDescription])
             writeSessionSidecars()
@@ -857,6 +877,7 @@ final class CaptureController: NSObject, ObservableObject {
                 finalizationError: error.localizedDescription
             )
             statusText = "Stopped. Finalize failed: \(error.localizedDescription)"
+            capturePackageState = .partial
         }
         isFinalizing = false
     }
@@ -1335,6 +1356,7 @@ final class CaptureController: NSObject, ObservableObject {
         } else {
             directory = try makeSessionDirectory()
             currentSessionDirectory = directory
+            capturePackageState = .partial
         }
         try makeExportFolders(in: directory)
         return directory
@@ -1509,6 +1531,14 @@ final class CaptureController: NSObject, ObservableObject {
     var requiresSubjectTarget: Bool {
         guard scanTargetMode == "video_3dgs" else { return false }
         return ["scene_cluster", "object_orbit", "detail_repair"].contains(captureIntent)
+    }
+
+    var isCapturePackageReady: Bool {
+        capturePackageState == .ready
+    }
+
+    var hasRecoverablePartialCapture: Bool {
+        capturePackageState == .partial && currentSessionDirectory != nil
     }
 
     private var usesSubjectTargetGuidance: Bool {
@@ -1879,6 +1909,7 @@ final class CaptureController: NSObject, ObservableObject {
             latestTargetCandidateWorldPosition = nil
             latestTargetCandidateDistance = nil
             targetCandidateObservations.removeAll { frame.timestamp - $0.timestamp > 0.6 }
+            isSubjectTargetReady = false
             latestObjectExtentProposal = nil
             if !isObjectExtentLocked {
                 objectExtentOverlay = nil
@@ -1900,6 +1931,14 @@ final class CaptureController: NSObject, ObservableObject {
             ))
             targetCandidateObservations.removeAll { frame.timestamp - $0.timestamp > 0.6 }
             targetLockDistanceText = String(format: "%.2f m", centerDepth)
+            let distances = targetCandidateObservations.map(\.distanceMeters)
+            let spread = (distances.max() ?? centerDepth) - (distances.min() ?? centerDepth)
+            let mean = distances.isEmpty ? centerDepth : distances.reduce(0, +) / Float(distances.count)
+            isSubjectTargetReady = distances.count >= 3 && spread <= max(0.10, mean * 0.10)
+            if isSubjectTargetReady {
+                targetLockStatus = "Ready to lock"
+                targetLockDetail = "Tap Lock & Record, then begin a slow connected orbit."
+            }
         }
         latestObjectExtentProposal = makeObjectExtentProposal(from: frame, depthMap: depthMap, centerDepth: centerDepth)
         if !isObjectExtentLocked, isObjectMaskEnabled, usesSubjectTargetGuidance {

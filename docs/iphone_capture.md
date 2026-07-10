@@ -33,8 +33,9 @@ lightweight pre-COLMAP proxy for whether useful texture is spread across the
 view.
 
 For Desk / Cluster, Object Orbit, and Detail Repair intents, keep the subject
-centered briefly before pressing Record. The app requires three consistent
-LiDAR center-depth observations within 0.6 seconds, then auto-locks the subject
+centered briefly before pressing **Lock & Record**. The control stays held until
+the app has three consistent LiDAR center-depth observations within 0.6 seconds,
+then auto-locks the subject
 and records target-relative azimuth, elevation, and distance coverage. The
 visible target control can reset a stale lock. This is capture guidance, not
 object identity or metric-geometry authority.
@@ -45,6 +46,12 @@ until the continuous video writer and queued RGB-D files have settled.
 `capture_policy.json` and `sensor_capabilities.json` preserve the active gates
 and supported optional sensors. Partial artifacts are retained when
 finalization fails.
+
+The app labels incomplete folders separately from finalized capture bundles.
+Normal Export/Share becomes available only after `capture.json` is written;
+recoverable partial data is explicitly shared as **Share Partial**. GNSS is off
+for indoor intents and requested only when an Outdoor capture starts, so the
+optional location permission does not cover the first Desk-capture screen.
 
 On supported LiDAR iPhones, the quality-first configuration additionally
 records non-empty ARKit person stencils under `masks/person/` at no more than

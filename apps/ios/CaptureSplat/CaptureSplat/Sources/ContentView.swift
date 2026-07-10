@@ -76,7 +76,9 @@ struct ContentView: View {
                 } else if selectedTab == .projects {
                     projectPanel
                 }
-                capturePanel
+                if selectedTab == .capture {
+                    capturePanel
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 12)
@@ -110,6 +112,7 @@ struct ContentView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .disabled(capture.isRecording || capture.isFinalizing)
 
             Button {
                 activeSheet = .camera
@@ -202,81 +205,33 @@ struct ContentView: View {
 
     private var compactCapturePanel: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Menu {
-                    Picker("Scan Mode", selection: $scanMode) {
-                        ForEach(ScanMode.activeCases) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                } label: {
-                    Label(scanMode.rawValue, systemImage: scanModeIcon)
-                }
-                .buttonStyle(.bordered)
-                .disabled(capture.isRecording)
-
-                captureIntentPicker
-
-                if scanMode != .video3DGS {
-                    Button {
-                        if scanMode == .roomWalk {
-                            capture.lockRoomTarget()
-                        } else {
-                            capture.lockObjectTarget()
-                        }
-                    } label: {
-                        Label(scanMode == .roomWalk ? "Lock Room" : "Lock Object", systemImage: "scope")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(capture.isRecording || scanMode == .outdoor)
-                } else if capture.requiresSubjectTarget {
-                    Button {
-                        if capture.isObjectTargetLocked {
-                            capture.clearTargetLock()
-                        } else {
-                            capture.lockSubjectTargetIfStable()
-                        }
-                    } label: {
-                        Label(
-                            capture.isObjectTargetLocked ? "Reset Target" : "Center Target",
-                            systemImage: capture.isObjectTargetLocked ? "scope" : "viewfinder"
-                        )
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(capture.isRecording || capture.isFinalizing)
-                }
-
-                if scanMode == .objectOrbit {
-                    Button {
-                        capture.lockObjectExtent()
-                    } label: {
-                        Image(systemName: "crop")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(capture.isRecording || !capture.isObjectTargetLocked)
-                    .accessibilityLabel("Lock object extent")
-                }
-
-                Button {
-                    activeSheet = .roomPlan
-                } label: {
-                    Label("Room Plan", systemImage: "map")
-                }
-                .buttonStyle(.bordered)
-                .disabled(capture.isRecording)
-
-                Button {
-                    capture.isRecording ? capture.stopRecording() : capture.startRecording()
-                } label: {
-                    Label(
-                        capture.isFinalizing ? "Finalizing" : (capture.isRecording ? "Stop" : "Record"),
-                        systemImage: capture.isFinalizing ? "hourglass" : (capture.isRecording ? "stop.fill" : "record.circle")
-                    )
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(capture.isFinalizing || !capture.isRGBEnabled || !capture.isDepthEnabled || !canRecordCurrentMode)
+            HStack {
+                Label("Video 3DGS Max", systemImage: "video")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                Spacer()
+                Text(capture.targetLockStatus)
+                    .font(.caption2)
+                    .foregroundStyle(targetLockColor)
+                    .lineLimit(1)
             }
-            .font(.caption)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    compactIntentAndTargetControls
+                    compactRoomPlanButton
+                    compactRecordButton
+                }
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        compactIntentAndTargetControls
+                    }
+                    HStack(spacing: 8) {
+                        compactRoomPlanButton
+                        compactRecordButton
+                    }
+                }
+            }
 
             HStack(spacing: 8) {
                 Label(capture.nextAction, systemImage: readinessIcon)
@@ -330,53 +285,36 @@ struct ContentView: View {
     }
 
     private var scanModeControls: some View {
-        HStack(spacing: 10) {
-            Menu {
-                Picker("Scan Mode", selection: $scanMode) {
-                    ForEach(ScanMode.activeCases) { mode in
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                Label("Video 3DGS Max", systemImage: "video")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                Spacer()
+                captureIntentPicker
+            }
+            HStack(spacing: 10) {
+                Picker("View", selection: $viewMode) {
+                    ForEach(ScanViewMode.allCases) { mode in
                         Text(mode.rawValue).tag(mode)
                     }
                 }
-            } label: {
-                Label(scanMode.rawValue, systemImage: scanModeIcon)
-            }
-            .buttonStyle(.bordered)
-            .disabled(capture.isRecording)
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 160)
 
-            captureIntentPicker
-
-            Picker("View", selection: $viewMode) {
-                ForEach(ScanViewMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 180)
-
-            Toggle("Auto", isOn: $capture.isSmartAutoCaptureEnabled)
-                .toggleStyle(.button)
-                .font(.caption)
-                .disabled(capture.isRecording)
-
-            Toggle("Lock", isOn: $capture.isCaptureLockEnabled)
-                .toggleStyle(.button)
-                .font(.caption)
-                .disabled(capture.isRecording)
-
-            if scanMode == .objectOrbit {
-                Toggle("Mask", isOn: $capture.isObjectMaskEnabled)
+                Toggle("Auto", isOn: $capture.isSmartAutoCaptureEnabled)
                     .toggleStyle(.button)
                     .font(.caption)
                     .disabled(capture.isRecording)
-            }
 
-            Button {
-                activeSheet = .roomPlan
-            } label: {
-                Label("Room Plan", systemImage: "map")
+                Toggle("Lock", isOn: $capture.isCaptureLockEnabled)
+                    .toggleStyle(.button)
+                    .font(.caption)
+                    .disabled(capture.isRecording)
+
+                Spacer()
+                compactRoomPlanButton
             }
-            .buttonStyle(.bordered)
-            .disabled(capture.isRecording)
         }
     }
 
@@ -392,6 +330,62 @@ struct ContentView: View {
         }
         .buttonStyle(.bordered)
         .disabled(capture.isRecording)
+        .accessibilityLabel("Capture intent")
+        .accessibilityValue(capture.currentCaptureIntentOption.title)
+    }
+
+    private var compactIntentAndTargetControls: some View {
+        Group {
+            captureIntentPicker
+            if capture.requiresSubjectTarget {
+                Button {
+                    if capture.isObjectTargetLocked {
+                        capture.clearTargetLock()
+                    } else {
+                        capture.lockSubjectTargetIfStable()
+                    }
+                } label: {
+                    Label(
+                        capture.isObjectTargetLocked ? "Reset" : "Center",
+                        systemImage: capture.isObjectTargetLocked ? "scope" : "viewfinder"
+                    )
+                }
+                .buttonStyle(.bordered)
+                .disabled(
+                    capture.isRecording || capture.isFinalizing
+                        || (!capture.isObjectTargetLocked && !capture.isSubjectTargetReady)
+                )
+                .accessibilityLabel(capture.isObjectTargetLocked ? "Reset subject target" : "Center subject target")
+            }
+        }
+        .font(.caption)
+    }
+
+    private var compactRoomPlanButton: some View {
+        Button {
+            activeSheet = .roomPlan
+        } label: {
+            Image(systemName: "map")
+        }
+        .buttonStyle(.bordered)
+        .disabled(capture.isRecording || capture.isFinalizing)
+        .accessibilityLabel("Open Room Plan")
+    }
+
+    private var compactRecordButton: some View {
+        Button {
+            capture.isRecording ? capture.stopRecording() : capture.startRecording()
+        } label: {
+            Label(recordButtonTitle, systemImage: recordButtonIcon)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(
+            capture.isFinalizing || !capture.isRGBEnabled || !capture.isDepthEnabled
+                || (!capture.isRecording && !canRecordCurrentMode)
+        )
+        .accessibilityHint(capture.requiresSubjectTarget && !capture.isObjectTargetLocked
+            ? "Locks the centered subject and starts capture"
+            : "Starts or stops the Video 3DGS capture")
     }
 
     private var recordExportControls: some View {
@@ -399,13 +393,10 @@ struct ContentView: View {
             Button {
                 capture.isRecording ? capture.stopRecording() : capture.startRecording()
             } label: {
-                Label(
-                    capture.isFinalizing ? "Finalizing" : (capture.isRecording ? "Stop" : "Record"),
-                    systemImage: capture.isFinalizing ? "hourglass" : (capture.isRecording ? "stop.fill" : "record.circle")
-                )
+                Label(recordButtonTitle, systemImage: recordButtonIcon)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(capture.isFinalizing || !capture.isRGBEnabled || !capture.isDepthEnabled || !canRecordCurrentMode)
+            .disabled(capture.isFinalizing || !capture.isRGBEnabled || !capture.isDepthEnabled || (!capture.isRecording && !canRecordCurrentMode))
 
             Button {
                 activeSheet = .export
@@ -413,11 +404,12 @@ struct ContentView: View {
                 Label("Export", systemImage: "square.and.arrow.down")
             }
             .buttonStyle(.bordered)
-            .disabled(capture.isRecording || capture.isFinalizing || capture.currentSessionDirectory == nil)
+            .disabled(capture.isRecording || capture.isFinalizing || !capture.isCapturePackageReady)
 
-            if let directory = capture.currentSessionDirectory {
+            if let directory = capture.currentSessionDirectory,
+               capture.isCapturePackageReady || capture.hasRecoverablePartialCapture {
                 ShareLink(item: directory) {
-                    Label("Share", systemImage: "square.and.arrow.up")
+                    Label(capture.isCapturePackageReady ? "Share" : "Share Partial", systemImage: "square.and.arrow.up")
                 }
                 .buttonStyle(.bordered)
                 .disabled(capture.isRecording || capture.isFinalizing)
@@ -918,7 +910,7 @@ struct ContentView: View {
                 Label("Reconstruction", systemImage: "cube.transparent")
                     .font(.headline)
                 Spacer()
-                Text(capture.currentSessionDirectory == nil ? "No Session" : "Session Ready")
+                Text(capturePackageStatus)
                     .font(.caption)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
@@ -926,7 +918,7 @@ struct ContentView: View {
             }
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                stageCard("Capture Bundle", state: capture.rgbFrames > 0 ? "Ready" : "Waiting", icon: "folder")
+                stageCard("Capture Bundle", state: capture.isCapturePackageReady ? "Ready" : capturePackageStatus, icon: "folder")
                 stageCard("Point Cloud + LAS", state: "Mac Gate", icon: "point.3.connected.trianglepath.dotted")
                 stageCard("COLMAP Bridge", state: "Converter Ready", icon: "camera.metering.matrix")
                 stageCard("Nerfstudio", state: "Parser Gate", icon: "film.stack")
@@ -1033,9 +1025,9 @@ struct ContentView: View {
                         capture.finalizeSession()
                         activeSheet = nil
                     } label: {
-                        exportRow("Capture Bundle", detail: "Raw RGB-D, IMU, GNSS, metadata", icon: "archivebox", enabled: capture.currentSessionDirectory != nil)
+                        exportRow("Capture Bundle", detail: "Raw RGB-D, IMU, GNSS, metadata", icon: "archivebox", enabled: capture.isCapturePackageReady)
                     }
-                    .disabled(capture.currentSessionDirectory == nil || capture.isRecording || capture.isFinalizing)
+                    .disabled(!capture.isCapturePackageReady || capture.isRecording || capture.isFinalizing)
                     exportRow("Room Plan", detail: "RoomPlan USDZ and conservative layout report", icon: "map", enabled: capture.roomPlanFile != nil)
                     exportRow("PLY + LAS", detail: "Mac ingest output", icon: "point.3.connected.trianglepath.dotted", enabled: false)
                     exportRow("Nerfstudio", detail: "Images and transforms.json", icon: "film.stack", enabled: false)
@@ -1252,7 +1244,17 @@ struct ContentView: View {
     }
 
     private var projectState: String {
-        capture.currentSessionDirectory == nil ? "Ready" : "Captured"
+        capturePackageStatus
+    }
+
+    private var capturePackageStatus: String {
+        switch capture.capturePackageState {
+        case .idle: return "No Session"
+        case .recording: return "Recording"
+        case .finalizing: return "Finalizing"
+        case .ready: return "Captured"
+        case .partial: return "Incomplete"
+        }
     }
 
     private var primaryOverlayAction: String {
@@ -1293,7 +1295,7 @@ struct ContentView: View {
         case .roomWalk:
             return capture.isRoomTargetLocked
         case .video3DGS:
-            return true
+            return !capture.requiresSubjectTarget || capture.isObjectTargetLocked || capture.isSubjectTargetReady
         case .outdoor:
             return true
         }
@@ -1311,11 +1313,24 @@ struct ContentView: View {
     }
 
     private var targetLockColor: Color {
-        canRecordCurrentMode ? .green : .yellow
+        capture.isObjectTargetLocked || !capture.requiresSubjectTarget ? .green : .yellow
     }
 
     private var targetLockIcon: String {
-        canRecordCurrentMode ? "checkmark.viewfinder" : "viewfinder"
+        capture.isObjectTargetLocked || !capture.requiresSubjectTarget ? "checkmark.viewfinder" : "viewfinder"
+    }
+
+    private var recordButtonTitle: String {
+        if capture.isFinalizing { return "Finalizing" }
+        if capture.isRecording { return "Stop" }
+        if capture.requiresSubjectTarget && !capture.isObjectTargetLocked { return "Lock & Record" }
+        return "Record"
+    }
+
+    private var recordButtonIcon: String {
+        if capture.isFinalizing { return "hourglass" }
+        if capture.isRecording { return "stop.fill" }
+        return capture.requiresSubjectTarget && !capture.isObjectTargetLocked ? "viewfinder.circle" : "record.circle"
     }
 
     private var readinessColor: Color {
@@ -1558,6 +1573,9 @@ private struct CoverageMiniMap: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Angle coverage")
+        .accessibilityValue("\(scores.filter { $0 >= 1 }.count) of \(scores.count) sectors covered. Current sector \(currentIndex + 1). Target sector \(targetIndex + 1).")
     }
 
     private var items: [CoverageMiniMapItem] {
