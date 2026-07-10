@@ -133,6 +133,20 @@ private struct TargetCandidateObservation {
     let distanceMeters: Float
 }
 
+private struct PersonMaskSnapshot {
+    let bytes: Data
+    let width: Int
+    let height: Int
+    let bytesPerRow: Int
+    let personFraction: Double
+}
+
+private struct MeshExportResult {
+    let plyWritten: Bool
+    let status: String
+    let error: String?
+}
+
 final class CaptureController: NSObject, ObservableObject {
     @Published var isRecording = false
     @Published var isFinalizing = false
@@ -195,6 +209,8 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var isCaptureLockEnabled = true
     private let videoRecorder = CaptureVideoRecorder()
     private var planeAnchors: [UUID: ARPlaneAnchor] = [:]
+    private var meshAnchors: [UUID: ARMeshAnchor] = [:]
+    private var recordedMeshAnchorIDs: Set<UUID> = []
     @Published var isObjectTargetLocked = false
     @Published var isRoomTargetLocked = false
     @Published var targetLockStatus = "Lock object before recording"
@@ -287,6 +303,7 @@ final class CaptureController: NSObject, ObservableObject {
     private let ciContext = CIContext()
     private let acceptedHaptic = UIImpactFeedbackGenerator(style: .light)
     private let writeQueue = DispatchQueue(label: "capture-splat.writer")
+    private let maskWriteQueue = DispatchQueue(label: "capture-splat.person-mask-writer")
     private var frames: [CapturedFrame] = []
     private var session: ARSession?
     private var lastFrameTimestamp: TimeInterval = 0
@@ -371,6 +388,19 @@ final class CaptureController: NSObject, ObservableObject {
     private var targetLockAcquisition = "none"
     private var targetLockSampleCount = 0
     private var targetLockDepthSpreadMeters: Float?
+    private var lastPersonMaskSampleTimestamp: TimeInterval = -.infinity
+    private var personMaskScheduledCount = 0
+    private var personMaskWrittenCount = 0
+    private var personMaskDroppedCount = 0
+    private var isWritingPersonMask = false
+    private var personMaskRecords: [[String: Any]] = []
+    private let personMaskMinimumInterval: TimeInterval = 0.2
+    private let maxPersonMasks = 900
+    private var sessionEvents: [[String: Any]] = []
+    private let maxSessionEvents = 2000
+    private var lastRecordedTrackingState: String?
+    private var lastRecordedThermalState: String?
+    private var arkitMeshAvailable = false
     private var lockedRoomWorldTransform: simd_float4x4?
     private var latestObjectExtentProposal: ObjectExtentProposal?
     private var lockedObjectExtentProposal: ObjectExtentProposal?
@@ -498,6 +528,12 @@ final class CaptureController: NSObject, ObservableObject {
                 proposal.approximateHeightMeters
             )
         }
+        if isRecording {
+            appendSessionEvent("target_locked", arTimestamp: timestamp, details: [
+                "acquisition": acquisition,
+                "sample_count": sampleCount,
+            ])
+        }
         refreshObjectExtentStatus()
         updateGuidance()
     }
@@ -605,6 +641,17 @@ final class CaptureController: NSObject, ObservableObject {
                 "course", "speed",
             ])
             frames.removeAll()
+            personMaskRecords.removeAll()
+            personMaskScheduledCount = 0
+            personMaskWrittenCount = 0
+            personMaskDroppedCount = 0
+            lastPersonMaskSampleTimestamp = -.infinity
+            isWritingPersonMask = false
+            sessionEvents.removeAll()
+            lastRecordedTrackingState = nil
+            lastRecordedThermalState = nil
+            arkitMeshAvailable = false
+            recordedMeshAnchorIDs.removeAll()
             firstFrameTimestamp = nil
             lastFrameTimestamp = 0
             lastScheduledFrameTimestamp = -.infinity
@@ -689,6 +736,22 @@ final class CaptureController: NSObject, ObservableObject {
             gpsRateSamples.removeAll()
             isRecording = true
             statusText = "Recording"
+            appendSessionEvent("capture_started", details: [
+                "capture_intent": captureIntent,
+                "capture_profile": captureProfileLabel(),
+            ])
+            if isObjectTargetLocked {
+                appendSessionEvent("target_locked", details: [
+                    "acquisition": targetLockAcquisition,
+                    "sample_count": targetLockSampleCount,
+                ])
+            }
+            if !ARWorldTrackingConfiguration.supportsFrameSemantics(.personSegmentationWithDepth) {
+                appendSessionEvent("sensor_fallback", details: ["sensor": "person_segmentation_with_depth"])
+            }
+            if !ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+                appendSessionEvent("sensor_fallback", details: ["sensor": "scene_reconstruction_mesh"])
+            }
             guidanceText = scanTargetMode == "video_3dgs"
                 ? currentCaptureIntentOption.guidance
                 : "Move slowly around the subject. Favor side steps over panning."
@@ -709,14 +772,20 @@ final class CaptureController: NSObject, ObservableObject {
         isRecording = false
         isFinalizing = true
         statusText = "Finalizing capture"
+        appendSessionEvent("finalization_started", arTimestamp: lastFrameTimestamp)
         motion.stopDeviceMotionUpdates()
         location.stopUpdatingLocation()
         applyCaptureLocks(false)
+        let meshSnapshot = recordedMeshAnchorIDs.compactMap { meshAnchors[$0] }
         videoRecorder.finish { [weak self] videoResult in
             guard let self else { return }
             self.writeQueue.async { [weak self] in
-                DispatchQueue.main.async {
-                    self?.completeCaptureFinalization(videoResult: videoResult)
+                guard let self else { return }
+                let meshResult = self.writeARKitMesh(anchors: meshSnapshot)
+                self.maskWriteQueue.async { [weak self] in
+                    DispatchQueue.main.async {
+                        self?.completeCaptureFinalization(videoResult: videoResult, meshResult: meshResult)
+                    }
                 }
             }
         }
@@ -725,6 +794,7 @@ final class CaptureController: NSObject, ObservableObject {
     func finalizeSession() {
         guard !isRecording, !isFinalizing else { return }
         writeMetadata()
+        writeSessionSidecars()
         do {
             let directory = try writeCaptureManifest()
             writeFinalizationReport(
@@ -747,10 +817,25 @@ final class CaptureController: NSObject, ObservableObject {
         }
     }
 
-    private func completeCaptureFinalization(videoResult: CaptureVideoRecorder.FinishResult) {
+    private func completeCaptureFinalization(
+        videoResult: CaptureVideoRecorder.FinishResult,
+        meshResult: MeshExportResult
+    ) {
+        arkitMeshAvailable = meshResult.plyWritten
+        appendSessionEvent("arkit_mesh_export", details: [
+            "status": meshResult.status,
+            "ply_written": meshResult.plyWritten,
+            "error": meshResult.error ?? NSNull(),
+        ])
         writeMetadata()
+        writeSessionSidecars()
         do {
             let directory = try writeCaptureManifest()
+            appendSessionEvent("finalization_completed", details: [
+                "video_status": videoResult.status,
+                "mesh_status": meshResult.status,
+            ])
+            writeSessionSidecars()
             writeFinalizationReport(
                 status: videoResult.succeeded ? "finalized" : "finalized_with_video_error",
                 videoStatus: videoResult.status,
@@ -762,6 +847,8 @@ final class CaptureController: NSObject, ObservableObject {
                 ? "Stopped and finalized \(directory.lastPathComponent)"
                 : "Finalized with video warning: \(videoResult.error ?? videoResult.status)"
         } catch {
+            appendSessionEvent("finalization_failed", details: ["error": error.localizedDescription])
+            writeSessionSidecars()
             writeFinalizationReport(
                 status: "failed",
                 videoStatus: videoResult.status,
@@ -810,6 +897,8 @@ final class CaptureController: NSObject, ObservableObject {
                 units: "meters"
             ),
             intrinsics: intrinsics,
+            personMaskIndexFile: personMaskWrittenCount > 0 ? "metadata/person_mask_index.jsonl" : nil,
+            arkitMeshFile: arkitMeshAvailable ? "geometry/arkit_mesh.ply" : nil,
             videoFile: videoRecorder.appendedFrameCount > 0 ? CaptureVideoRecorder.videoRelativePath : nil,
             frameIndexFile: videoRecorder.appendedFrameCount > 0 ? CaptureVideoRecorder.frameIndexRelativePath : nil,
             videoFrameCount: videoRecorder.appendedFrameCount > 0 ? videoRecorder.appendedFrameCount : nil,
@@ -837,7 +926,7 @@ final class CaptureController: NSObject, ObservableObject {
     }
 
     private func makeExportFolders(in directory: URL) throws {
-        for folder in ["rgb", "depth", "confidence", "pointcloud_preview", "room_plan", "metadata"] {
+        for folder in ["rgb", "depth", "confidence", "pointcloud_preview", "room_plan", "metadata", "geometry", "masks/person"] {
             try FileManager.default.createDirectory(
                 at: directory.appendingPathComponent(folder, isDirectory: true),
                 withIntermediateDirectories: true
@@ -898,6 +987,9 @@ final class CaptureController: NSObject, ObservableObject {
             "imu_rows": imuRows,
             "gps_rows": gpsRows,
             "dropped_frames": droppedFrames,
+            "person_masks_written": personMaskWrittenCount,
+            "person_masks_dropped": personMaskDroppedCount,
+            "arkit_mesh_available": arkitMeshAvailable,
             "rgb_rate_hz": rgbRate,
             "depth_rate_hz": depthRate,
             "imu_rate_hz": imuRate,
@@ -943,6 +1035,9 @@ final class CaptureController: NSObject, ObservableObject {
             "video_frame_count": videoRecorder.appendedFrameCount,
             "video_dropped_frame_count": videoRecorder.droppedFrameCount,
             "accepted_keyframe_count": frames.count,
+            "person_mask_written_count": personMaskWrittenCount,
+            "person_mask_dropped_count": personMaskDroppedCount,
+            "arkit_mesh_written": arkitMeshAvailable,
             "manifest_written": manifestWritten,
             "partial_artifacts_preserved": true,
         ]
@@ -956,6 +1051,232 @@ final class CaptureController: NSObject, ObservableObject {
            let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: url, options: .atomic)
         }
+    }
+
+    private func writeJSONLines(_ records: [[String: Any]], to url: URL) {
+        var output = Data()
+        for record in records where JSONSerialization.isValidJSONObject(record) {
+            guard let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) else { continue }
+            output.append(data)
+            output.append(Data("\n".utf8))
+        }
+        try? output.write(to: url, options: .atomic)
+    }
+
+    private func appendSessionEvent(
+        _ event: String,
+        arTimestamp: TimeInterval? = nil,
+        details: [String: Any] = [:]
+    ) {
+        if sessionEvents.count >= maxSessionEvents {
+            sessionEvents.removeFirst(sessionEvents.count - maxSessionEvents + 1)
+        }
+        var record = details
+        record["event"] = event
+        record["wall_time_unix"] = Date().timeIntervalSince1970
+        if let arTimestamp { record["ar_timestamp"] = arTimestamp }
+        sessionEvents.append(record)
+    }
+
+    private func writeSessionSidecars() {
+        guard let directory = currentSessionDirectory else { return }
+        let metadata = directory.appendingPathComponent("metadata", isDirectory: true)
+        writeJSONLines(sessionEvents, to: metadata.appendingPathComponent("session_events.jsonl"))
+        writeJSONLines(personMaskRecords, to: metadata.appendingPathComponent("person_mask_index.jsonl"))
+    }
+
+    private func writeARKitMesh(anchors: [ARMeshAnchor]) -> MeshExportResult {
+        guard let directory = currentSessionDirectory else {
+            return MeshExportResult(plyWritten: false, status: "missing_capture_directory", error: nil)
+        }
+        let reportURL = directory.appendingPathComponent("geometry/arkit_mesh_report.json")
+        let plyURL = directory.appendingPathComponent("geometry/arkit_mesh.ply")
+        let maxVertices = 200_000
+        let maxTriangles = 300_000
+        var vertices: [SIMD3<Float>] = []
+        var faces: [(UInt32, UInt32, UInt32, UInt8)] = []
+        var classificationCounts: [String: Int] = [:]
+        var nonFiniteVertexCount = 0
+        var truncated = false
+
+        for anchor in anchors.sorted(by: { $0.identifier.uuidString < $1.identifier.uuidString }) {
+            if vertices.count >= maxVertices || faces.count >= maxTriangles {
+                truncated = true
+                break
+            }
+            let geometry = anchor.geometry
+            let source = geometry.vertices
+            var localToGlobal = Array(repeating: Int32(-1), count: source.count)
+            for localIndex in 0..<source.count {
+                if vertices.count >= maxVertices {
+                    truncated = true
+                    break
+                }
+                let address = source.buffer.contents().advanced(by: source.offset + localIndex * source.stride)
+                let values = address.assumingMemoryBound(to: Float.self)
+                let local = SIMD3<Float>(values[0], values[1], values[2])
+                let world4 = anchor.transform * SIMD4<Float>(local.x, local.y, local.z, 1)
+                let world = SIMD3<Float>(world4.x, world4.y, world4.z)
+                guard world.x.isFinite, world.y.isFinite, world.z.isFinite else {
+                    nonFiniteVertexCount += 1
+                    continue
+                }
+                localToGlobal[localIndex] = Int32(vertices.count)
+                vertices.append(world)
+            }
+
+            let elements = geometry.faces
+            guard elements.primitiveType == .triangle, elements.indexCountPerPrimitive == 3 else { continue }
+            for faceIndex in 0..<elements.count {
+                if faces.count >= maxTriangles {
+                    truncated = true
+                    break
+                }
+                let baseIndex = faceIndex * elements.indexCountPerPrimitive
+                guard let localA = meshIndex(elements, at: baseIndex),
+                      let localB = meshIndex(elements, at: baseIndex + 1),
+                      let localC = meshIndex(elements, at: baseIndex + 2),
+                      Int(localA) < localToGlobal.count,
+                      Int(localB) < localToGlobal.count,
+                      Int(localC) < localToGlobal.count else {
+                    continue
+                }
+                let globalA = localToGlobal[Int(localA)]
+                let globalB = localToGlobal[Int(localB)]
+                let globalC = localToGlobal[Int(localC)]
+                guard globalA >= 0, globalB >= 0, globalC >= 0 else { continue }
+                let classification = meshClassification(geometry.classification, faceIndex: faceIndex)
+                classificationCounts[meshClassificationLabel(classification), default: 0] += 1
+                faces.append((UInt32(globalA), UInt32(globalB), UInt32(globalC), classification))
+            }
+        }
+
+        guard !vertices.isEmpty, !faces.isEmpty else {
+            writeJSON([
+                "schema": "capture_splat.arkit_mesh_report.v0.1",
+                "status": anchors.isEmpty ? "no_mesh_anchors" : "no_finite_triangles",
+                "anchor_count": anchors.count,
+                "vertex_count": vertices.count,
+                "triangle_count": faces.count,
+                "non_finite_vertex_count": nonFiniteVertexCount,
+                "ply_written": false,
+                "authority": meshAuthorityReport(),
+            ], to: reportURL)
+            return MeshExportResult(
+                plyWritten: false,
+                status: anchors.isEmpty ? "no_mesh_anchors" : "no_finite_triangles",
+                error: nil
+            )
+        }
+
+        var data = Data("""
+        ply
+        format binary_little_endian 1.0
+        comment Capture Splat ARKit mesh sidecar; capture evidence only
+        element vertex \(vertices.count)
+        property float x
+        property float y
+        property float z
+        element face \(faces.count)
+        property list uchar uint vertex_indices
+        property uchar classification
+        end_header
+
+        """.utf8)
+        data.reserveCapacity(data.count + vertices.count * 12 + faces.count * 14)
+        for vertex in vertices {
+            appendLittleEndian(vertex.x, to: &data)
+            appendLittleEndian(vertex.y, to: &data)
+            appendLittleEndian(vertex.z, to: &data)
+        }
+        for face in faces {
+            data.append(3)
+            appendLittleEndian(face.0, to: &data)
+            appendLittleEndian(face.1, to: &data)
+            appendLittleEndian(face.2, to: &data)
+            data.append(face.3)
+        }
+
+        do {
+            try data.write(to: plyURL, options: .atomic)
+            writeJSON([
+                "schema": "capture_splat.arkit_mesh_report.v0.1",
+                "status": "finite_mesh_written",
+                "anchor_count": anchors.count,
+                "vertex_count": vertices.count,
+                "triangle_count": faces.count,
+                "non_finite_vertex_count": nonFiniteVertexCount,
+                "max_vertex_count": maxVertices,
+                "max_triangle_count": maxTriangles,
+                "truncated": truncated,
+                "classification_counts": classificationCounts,
+                "ply_file": "geometry/arkit_mesh.ply",
+                "ply_written": true,
+                "authority": meshAuthorityReport(),
+            ], to: reportURL)
+            return MeshExportResult(plyWritten: true, status: "finite_mesh_written", error: nil)
+        } catch {
+            writeJSON([
+                "schema": "capture_splat.arkit_mesh_report.v0.1",
+                "status": "write_failed",
+                "error": error.localizedDescription,
+                "ply_written": false,
+                "authority": meshAuthorityReport(),
+            ], to: reportURL)
+            return MeshExportResult(plyWritten: false, status: "write_failed", error: error.localizedDescription)
+        }
+    }
+
+    private func meshIndex(_ element: ARGeometryElement, at index: Int) -> UInt32? {
+        let address = element.buffer.contents().advanced(by: index * element.bytesPerIndex)
+        switch element.bytesPerIndex {
+        case 2:
+            return UInt32(address.load(as: UInt16.self))
+        case 4:
+            return address.load(as: UInt32.self)
+        default:
+            return nil
+        }
+    }
+
+    private func meshClassification(_ source: ARGeometrySource?, faceIndex: Int) -> UInt8 {
+        guard let source, faceIndex < source.count else { return 0 }
+        let address = source.buffer.contents().advanced(by: source.offset + faceIndex * source.stride)
+        return address.load(as: UInt8.self)
+    }
+
+    private func meshClassificationLabel(_ value: UInt8) -> String {
+        switch value {
+        case 1: return "wall"
+        case 2: return "floor"
+        case 3: return "ceiling"
+        case 4: return "table"
+        case 5: return "seat"
+        case 6: return "window"
+        case 7: return "door"
+        default: return "none"
+        }
+    }
+
+    private func meshAuthorityReport() -> [String: Bool] {
+        [
+            "capture_guidance_only": true,
+            "metric_authority": false,
+            "collision_geometry": false,
+            "planning_authority": false,
+            "semantic_authority": false,
+            "training_result": false,
+        ]
+    }
+
+    private func appendLittleEndian(_ value: Float, to data: inout Data) {
+        var bits = value.bitPattern.littleEndian
+        withUnsafeBytes(of: &bits) { data.append(contentsOf: $0) }
+    }
+
+    private func appendLittleEndian(_ value: UInt32, to data: inout Data) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
     }
 
     @available(iOS 16.0, *)
@@ -1250,6 +1571,14 @@ final class CaptureController: NSObject, ObservableObject {
                 if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
             }
             device.unlockForConfiguration()
+            if isRecording {
+                appendSessionEvent("camera_controls_changed", details: [
+                    "requested_locked": locked,
+                    "ae_locked": device.exposureMode == .locked,
+                    "awb_locked": device.whiteBalanceMode == .locked,
+                    "focus_locked": device.focusMode == .locked,
+                ])
+            }
         } catch {
             statusText = "Capture lock change failed: \(error.localizedDescription)"
         }
@@ -1309,7 +1638,12 @@ final class CaptureController: NSObject, ObservableObject {
 
     private func refreshHealth() {
         storageFreeText = availableStorageText()
-        thermalStateText = thermalStateLabel(ProcessInfo.processInfo.thermalState)
+        let currentThermalState = thermalStateLabel(ProcessInfo.processInfo.thermalState)
+        thermalStateText = currentThermalState
+        if isRecording, currentThermalState != lastRecordedThermalState {
+            appendSessionEvent("thermal_state_changed", details: ["thermal_state": currentThermalState])
+            lastRecordedThermalState = currentThermalState
+        }
         let battery = UIDevice.current.batteryLevel
         batteryText = battery < 0 ? "--" : "\(Int((battery * 100).rounded()))%"
     }
@@ -2080,14 +2414,22 @@ final class CaptureController: NSObject, ObservableObject {
             ],
             "person_segmentation_with_depth": [
                 "supported": ARWorldTrackingConfiguration.supportsFrameSemantics(.personSegmentationWithDepth),
-                "requested": false,
-                "status": "not_enabled_in_this_release_slice",
+                "requested": true,
+                "status": ARWorldTrackingConfiguration.supportsFrameSemantics(.personSegmentationWithDepth)
+                    ? "enabled_quality_first"
+                    : "unsupported_rgbd_fallback",
+                "sample_rate_cap_hz": 5,
+                "mask_count_cap": maxPersonMasks,
             ],
             "scene_reconstruction": [
                 "mesh_supported": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
                 "mesh_classification_supported": ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification),
-                "requested": false,
-                "status": "not_enabled_in_this_release_slice",
+                "requested": true,
+                "status": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
+                    ? "enabled_quality_first"
+                    : "unsupported_rgbd_fallback",
+                "vertex_count_cap": 200_000,
+                "triangle_count_cap": 300_000,
             ],
             "plane_detection": [
                 "horizontal_requested": true,
@@ -2779,8 +3121,12 @@ final class CaptureController: NSObject, ObservableObject {
         if let start = roomStartPosition {
             let distanceFromStart = Double(simd_distance(position, start))
             roomMaxDistanceFromStartMeters = max(roomMaxDistanceFromStartMeters, distanceFromStart)
-            if roomPathLengthMeters >= 1.5, distanceFromStart <= 0.75 {
+            if !roomLoopClosed, roomPathLengthMeters >= 1.5, distanceFromStart <= 0.75 {
                 roomLoopClosed = true
+                appendSessionEvent("loop_closed", details: [
+                    "path_length_meters": roomPathLengthMeters,
+                    "distance_from_start_meters": distanceFromStart,
+                ])
             }
         }
         updateRoomQualityText()
@@ -3307,6 +3653,117 @@ final class CaptureController: NSObject, ObservableObject {
             objectExtentSizeText = "--"
         }
     }
+
+    private func schedulePersonMask(from frame: ARFrame) {
+        guard isRecording,
+              frame.timestamp - lastPersonMaskSampleTimestamp >= personMaskMinimumInterval,
+              personMaskScheduledCount < maxPersonMasks else {
+            return
+        }
+        lastPersonMaskSampleTimestamp = frame.timestamp
+        guard let buffer = frame.segmentationBuffer,
+              let snapshot = copyPersonMask(buffer),
+              snapshot.personFraction >= 0.001 else {
+            return
+        }
+        guard !isWritingPersonMask, let directory = currentSessionDirectory else {
+            personMaskDroppedCount += 1
+            return
+        }
+        isWritingPersonMask = true
+        personMaskScheduledCount += 1
+        let maskNumber = personMaskScheduledCount
+        let relativePath = String(format: "masks/person/%06d.png", maskNumber)
+        let url = directory.appendingPathComponent(relativePath)
+        let timestamp = frame.timestamp
+        let videoFrameIndex = max(videoRecorder.appendedFrameCount - 1, 0)
+
+        maskWriteQueue.async { [weak self] in
+            guard let self else { return }
+            let pngData = self.personMaskPNGData(snapshot)
+            let wrote = pngData.map { data in
+                (try? data.write(to: url, options: .atomic)) != nil
+            } ?? false
+            DispatchQueue.main.async {
+                self.isWritingPersonMask = false
+                if wrote {
+                    self.personMaskWrittenCount += 1
+                    self.personMaskRecords.append([
+                        "path": relativePath,
+                        "ar_timestamp": timestamp,
+                        "width": snapshot.width,
+                        "height": snapshot.height,
+                        "person_fraction": snapshot.personFraction,
+                        "nearest_video_frame_idx": videoFrameIndex,
+                        "authority": "mask_proposal",
+                    ])
+                } else {
+                    self.personMaskDroppedCount += 1
+                }
+            }
+        }
+    }
+
+    private func copyPersonMask(_ pixelBuffer: CVPixelBuffer) -> PersonMaskSnapshot? {
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        guard width > 0,
+              height > 0,
+              bytesPerRow >= width,
+              let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+            return nil
+        }
+        let bytes = Data(bytes: baseAddress, count: bytesPerRow * height)
+        let pointer = baseAddress.assumingMemoryBound(to: UInt8.self)
+        var personPixels = 0
+        for y in 0..<height {
+            let row = pointer.advanced(by: y * bytesPerRow)
+            for x in 0..<width where row[x] > 0 {
+                personPixels += 1
+            }
+        }
+        return PersonMaskSnapshot(
+            bytes: bytes,
+            width: width,
+            height: height,
+            bytesPerRow: bytesPerRow,
+            personFraction: Double(personPixels) / Double(width * height)
+        )
+    }
+
+    private func personMaskPNGData(_ snapshot: PersonMaskSnapshot) -> Data? {
+        guard let provider = CGDataProvider(data: snapshot.bytes as CFData),
+              let image = CGImage(
+                width: snapshot.width,
+                height: snapshot.height,
+                bitsPerComponent: 8,
+                bitsPerPixel: 8,
+                bytesPerRow: snapshot.bytesPerRow,
+                space: CGColorSpaceCreateDeviceGray(),
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+                provider: provider,
+                decode: nil,
+                shouldInterpolate: false,
+                intent: .defaultIntent
+              ) else {
+            return nil
+        }
+        return UIImage(cgImage: image).pngData()
+    }
+
+    private func nearestPersonMaskPath(to timestamp: TimeInterval) -> String? {
+        for record in personMaskRecords.reversed() {
+            guard let maskTimestamp = record["ar_timestamp"] as? TimeInterval else { continue }
+            if abs(maskTimestamp - timestamp) <= 0.12 {
+                return record["path"] as? String
+            }
+            if timestamp - maskTimestamp > 0.12 { break }
+        }
+        return nil
+    }
 }
 
 extension CaptureController: ARSessionDelegate {
@@ -3314,6 +3771,10 @@ extension CaptureController: ARSessionDelegate {
         for anchor in anchors {
             if let plane = anchor as? ARPlaneAnchor {
                 planeAnchors[plane.identifier] = plane
+            }
+            if let mesh = anchor as? ARMeshAnchor {
+                meshAnchors[mesh.identifier] = mesh
+                if isRecording { recordedMeshAnchorIDs.insert(mesh.identifier) }
             }
         }
     }
@@ -3323,6 +3784,10 @@ extension CaptureController: ARSessionDelegate {
             if let plane = anchor as? ARPlaneAnchor {
                 planeAnchors[plane.identifier] = plane
             }
+            if let mesh = anchor as? ARMeshAnchor {
+                meshAnchors[mesh.identifier] = mesh
+                if isRecording { recordedMeshAnchorIDs.insert(mesh.identifier) }
+            }
         }
     }
 
@@ -3331,15 +3796,27 @@ extension CaptureController: ARSessionDelegate {
             if anchor is ARPlaneAnchor {
                 planeAnchors.removeValue(forKey: anchor.identifier)
             }
+            if anchor is ARMeshAnchor {
+                meshAnchors.removeValue(forKey: anchor.identifier)
+                recordedMeshAnchorIDs.remove(anchor.identifier)
+            }
         }
     }
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        trackingStatus = trackingStateText(frame.camera.trackingState)
+        let currentTrackingState = trackingStateText(frame.camera.trackingState)
+        trackingStatus = currentTrackingState
+        if isRecording, currentTrackingState != lastRecordedTrackingState {
+            appendSessionEvent("tracking_state_changed", arTimestamp: frame.timestamp, details: [
+                "tracking_state": currentTrackingState,
+            ])
+            lastRecordedTrackingState = currentTrackingState
+        }
         latestFeaturePointCount = frame.rawFeaturePoints?.points.count ?? 0
         updateMotionRate(from: frame)
         if isRecording, currentSessionDirectory != nil {
             videoRecorder.append(frame: frame, captureDevice: Self.primaryCaptureDevice)
+            schedulePersonMask(from: frame)
         }
         guard let sceneDepth = frame.sceneDepth else {
             guidancePoints.removeAll()
@@ -3486,7 +3963,8 @@ extension CaptureController: ARSessionDelegate {
                         colmapOverlapScore: keyframeDecision.colmapOverlapScore,
                         validDepthRatio: candidateDepthValidRatio,
                         featurePointCount: self.latestFeaturePointCount
-                    )
+                    ),
+                    personMask: self.nearestPersonMaskPath(to: timestamp)
                 ))
                 self.rgbFrames += 1
                 self.depthFrames += 1

@@ -46,6 +46,15 @@ until the continuous video writer and queued RGB-D files have settled.
 and supported optional sensors. Partial artifacts are retained when
 finalization fails.
 
+On supported LiDAR iPhones, the quality-first configuration additionally
+records non-empty ARKit person stencils under `masks/person/` at no more than
+5 Hz and writes `metadata/person_mask_index.jsonl`. A separate classified ARKit
+mesh is capped at 200,000 vertices and 300,000 triangles and exported as
+`geometry/arkit_mesh.ply` with `arkit_mesh_report.json`. Tracking, thermal,
+camera-lock, loop, fallback, and finalization transitions are written to
+`metadata/session_events.jsonl`. Mask or mesh pressure never relaxes the RGB-D
+quality gate; optional writes are dropped or held and reported instead.
+
 After capture, the Projects tab shows a lightweight review summary with kept and
 held keyframe counts, current coverage sectors, and the latest blocker detail.
 It also opens a native LiDAR preview backed by

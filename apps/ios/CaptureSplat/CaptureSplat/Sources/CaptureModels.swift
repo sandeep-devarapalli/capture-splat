@@ -9,7 +9,7 @@ struct CapturedFrame: Encodable {
     let intrinsics: CameraIntrinsics
     let trackingState: String
     let captureQuality: CaptureFrameQuality
-    let personMask: String? = nil
+    let personMask: String?
 
     enum CodingKeys: String, CodingKey {
         case rgb, depth, confidence, timestamp, intrinsics
@@ -90,7 +90,11 @@ struct CaptureManifest: Encodable {
     let capturePolicyFile = "metadata/capture_policy.json"
     let sensorCapabilitiesFile = "metadata/sensor_capabilities.json"
     let finalizationReportFile = "metadata/finalization_report.json"
+    let sessionEventsFile = "metadata/session_events.jsonl"
     let pointCloudPreviewFile = "pointcloud_preview/preview.json"
+    let personMaskIndexFile: String?
+    let arkitMeshFile: String?
+    let arkitMeshReportFile = "geometry/arkit_mesh_report.json"
     let videoFile: String?
     let frameIndexFile: String?
     let videoFrameCount: Int?
@@ -116,7 +120,11 @@ struct CaptureManifest: Encodable {
         case capturePolicyFile = "capture_policy_file"
         case sensorCapabilitiesFile = "sensor_capabilities_file"
         case finalizationReportFile = "finalization_report_file"
+        case sessionEventsFile = "session_events_file"
         case pointCloudPreviewFile = "pointcloud_preview_file"
+        case personMaskIndexFile = "person_mask_index_file"
+        case arkitMeshFile = "arkit_mesh_file"
+        case arkitMeshReportFile = "arkit_mesh_report_file"
         case videoFile = "video_file"
         case frameIndexFile = "frame_index_file"
         case videoFrameCount = "video_frame_count"
