@@ -6,6 +6,12 @@ import Foundation
 /// metadata/frame_index.jsonl with one line per appended video frame so host
 /// tools can extract hundreds of training frames with device pose priors.
 final class CaptureVideoRecorder {
+    struct FinishResult {
+        let succeeded: Bool
+        let status: String
+        let error: String?
+    }
+
     private var writer: AVAssetWriter?
     private var input: AVAssetWriterInput?
     private var adaptor: AVAssetWriterInputPixelBufferAdaptor?
@@ -26,7 +32,9 @@ final class CaptureVideoRecorder {
     var isActive: Bool { writer != nil }
 
     func start(in directory: URL) throws {
-        finish()
+        guard writer == nil else {
+            throw CocoaError(.fileWriteUnknown)
+        }
         let videoDirectory = directory.appendingPathComponent("video", isDirectory: true)
         try FileManager.default.createDirectory(at: videoDirectory, withIntermediateDirectories: true)
         let indexURL = directory.appendingPathComponent(Self.frameIndexRelativePath)
@@ -78,17 +86,51 @@ final class CaptureVideoRecorder {
         appendedFrameCount += 1
     }
 
-    func finish() {
+    func finish(completion: @escaping (FinishResult) -> Void) {
         try? indexHandle?.close()
         indexHandle = nil
-        if let writer, let input, writer.status == .writing {
-            input.markAsFinished()
-            writer.finishWriting {}
+        guard let writer else {
+            completion(FinishResult(succeeded: true, status: "not_active", error: nil))
+            return
         }
-        writer = nil
-        input = nil
-        adaptor = nil
-        startTimestamp = nil
+
+        let complete: () -> Void = { [weak self] in
+            let succeeded = writer.status == .completed || writer.status == .unknown
+            let result = FinishResult(
+                succeeded: succeeded,
+                status: Self.writerStatusLabel(writer.status),
+                error: writer.error?.localizedDescription
+            )
+            self?.writer = nil
+            self?.input = nil
+            self?.adaptor = nil
+            self?.startTimestamp = nil
+            completion(result)
+        }
+
+        if let input, writer.status == .writing {
+            input.markAsFinished()
+            writer.finishWriting(completionHandler: complete)
+        } else {
+            complete()
+        }
+    }
+
+    private static func writerStatusLabel(_ status: AVAssetWriter.Status) -> String {
+        switch status {
+        case .unknown:
+            return "no_video_frames"
+        case .writing:
+            return "writing"
+        case .completed:
+            return "completed"
+        case .failed:
+            return "failed"
+        case .cancelled:
+            return "cancelled"
+        @unknown default:
+            return "unknown"
+        }
     }
 
     private func writeIndexLine(frame: ARFrame, relativeTimestamp: TimeInterval, captureDevice: AVCaptureDevice?) {

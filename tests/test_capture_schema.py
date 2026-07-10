@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from PIL import Image
 
@@ -26,3 +27,21 @@ def test_load_capture(tmp_path: Path) -> None:
     data = load_capture(capture)
     assert data["schema"] == CAPTURE_SCHEMA
     assert len(data["frames"]) == 1
+
+
+def test_load_capture_v03_with_capture_policy_sidecars(tmp_path: Path) -> None:
+    capture = make_capture(tmp_path)
+    manifest = capture / "capture.json"
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data.update({
+        "schema": "capture_splat.v0.3",
+        "capture_policy_file": "metadata/capture_policy.json",
+        "sensor_capabilities_file": "metadata/sensor_capabilities.json",
+        "finalization_report_file": "metadata/finalization_report.json",
+    })
+    write_json_strict(manifest, data)
+
+    loaded = load_capture(capture)
+
+    assert loaded["schema"] == "capture_splat.v0.3"
+    assert loaded["capture_policy_file"] == "metadata/capture_policy.json"

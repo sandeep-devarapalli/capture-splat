@@ -9,12 +9,14 @@ struct CapturedFrame: Encodable {
     let intrinsics: CameraIntrinsics
     let trackingState: String
     let captureQuality: CaptureFrameQuality
+    let personMask: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case rgb, depth, confidence, timestamp, intrinsics
         case transformMatrix = "transform_matrix"
         case trackingState = "tracking_state"
         case captureQuality = "capture_quality"
+        case personMask = "person_mask"
     }
 }
 
@@ -68,7 +70,7 @@ struct CameraIntrinsics: Encodable {
 }
 
 struct CaptureManifest: Encodable {
-    let schema = "capture_splat.v0.2"
+    let schema = "capture_splat.v0.3"
     let device: DeviceInfo
     let captureMode: String
     let captureProfile: String
@@ -85,6 +87,9 @@ struct CaptureManifest: Encodable {
     let objectMatteFile = "metadata/object_matte_report.json"
     let roomCaptureQualityFile = "metadata/room_capture_quality_report.json"
     let captureProfileFile = "metadata/capture_profile_report.json"
+    let capturePolicyFile = "metadata/capture_policy.json"
+    let sensorCapabilitiesFile = "metadata/sensor_capabilities.json"
+    let finalizationReportFile = "metadata/finalization_report.json"
     let pointCloudPreviewFile = "pointcloud_preview/preview.json"
     let videoFile: String?
     let frameIndexFile: String?
@@ -108,6 +113,9 @@ struct CaptureManifest: Encodable {
         case objectMatteFile = "object_matte_file"
         case roomCaptureQualityFile = "room_capture_quality_file"
         case captureProfileFile = "capture_profile_file"
+        case capturePolicyFile = "capture_policy_file"
+        case sensorCapabilitiesFile = "sensor_capabilities_file"
+        case finalizationReportFile = "finalization_report_file"
         case pointCloudPreviewFile = "pointcloud_preview_file"
         case videoFile = "video_file"
         case frameIndexFile = "frame_index_file"

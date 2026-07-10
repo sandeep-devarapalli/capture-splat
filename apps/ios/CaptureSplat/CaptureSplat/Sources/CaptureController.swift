@@ -127,8 +127,15 @@ private struct ObjectExtentProposal {
     let timestamp: TimeInterval
 }
 
+private struct TargetCandidateObservation {
+    let timestamp: TimeInterval
+    let worldPosition: SIMD3<Float>
+    let distanceMeters: Float
+}
+
 final class CaptureController: NSObject, ObservableObject {
     @Published var isRecording = false
+    @Published var isFinalizing = false
     @Published var statusText = "Ready"
     @Published var rgbFrames = 0
     @Published var depthFrames = 0
@@ -302,6 +309,8 @@ final class CaptureController: NSObject, ObservableObject {
     private var gpsRateSamples: [TimeInterval] = []
     private var healthTimer: Timer?
     private var coverageSectorCounts = Array(repeating: 0, count: 12)
+    private var targetElevationBandCounts = Array(repeating: 0, count: 3)
+    private var targetDistanceBandCounts = Array(repeating: 0, count: 3)
     private let coverageObservationTarget = 5
     private let maxCoverageHistorySamples = 720
     private var coverageHistory: [[String: Any]] = []
@@ -355,7 +364,13 @@ final class CaptureController: NSObject, ObservableObject {
     private var latestCameraTransform: simd_float4x4?
     private var latestTargetCandidateWorldPosition: SIMD3<Float>?
     private var latestTargetCandidateDistance: Float?
+    private var targetCandidateObservations: [TargetCandidateObservation] = []
     private var lockedObjectWorldPosition: SIMD3<Float>?
+    private var lockedObjectDistanceMeters: Float?
+    private var targetLockTimestamp: TimeInterval?
+    private var targetLockAcquisition = "none"
+    private var targetLockSampleCount = 0
+    private var targetLockDepthSpreadMeters: Float?
     private var lockedRoomWorldTransform: simd_float4x4?
     private var latestObjectExtentProposal: ObjectExtentProposal?
     private var lockedObjectExtentProposal: ObjectExtentProposal?
@@ -395,6 +410,9 @@ final class CaptureController: NSObject, ObservableObject {
 
     func setCaptureIntent(_ intent: String) {
         guard Self.captureIntentOptions.contains(where: { $0.id == intent }) else { return }
+        if captureIntent != intent, scanTargetMode == "video_3dgs" {
+            clearTargetLock()
+        }
         captureIntent = intent
         updateCaptureProfileText()
         updateGuidance()
@@ -410,13 +428,76 @@ final class CaptureController: NSObject, ObservableObject {
             targetLockDetail = "Center the object and wait for valid depth."
             return
         }
+        applyObjectTargetLock(
+            position: position,
+            distance: distance,
+            acquisition: "manual_latest_depth",
+            sampleCount: 1,
+            depthSpread: nil,
+            timestamp: targetCandidateObservations.last?.timestamp
+        )
+    }
+
+    @discardableResult
+    func lockSubjectTargetIfStable() -> Bool {
+        let recent = targetCandidateObservations
+        guard recent.count >= 3 else {
+            targetLockStatus = "Center subject"
+            targetLockDetail = "Hold still until three stable LiDAR depth samples are ready."
+            return false
+        }
+        let distances = recent.map(\.distanceMeters)
+        guard let minDistance = distances.min(), let maxDistance = distances.max() else { return false }
+        let meanDistance = distances.reduce(0, +) / Float(distances.count)
+        let spread = maxDistance - minDistance
+        let allowedSpread = max(0.10, meanDistance * 0.10)
+        guard meanDistance.isFinite, meanDistance > 0, spread <= allowedSpread else {
+            targetLockStatus = "Target depth unstable"
+            targetLockDetail = "Hold still with the subject centered before recording."
+            return false
+        }
+        let meanPosition = recent.reduce(SIMD3<Float>.zero) { $0 + $1.worldPosition } / Float(recent.count)
+        applyObjectTargetLock(
+            position: meanPosition,
+            distance: meanDistance,
+            acquisition: "auto_stable_center_depth",
+            sampleCount: recent.count,
+            depthSpread: spread,
+            timestamp: recent.last?.timestamp
+        )
+        return true
+    }
+
+    private func applyObjectTargetLock(
+        position: SIMD3<Float>,
+        distance: Float,
+        acquisition: String,
+        sampleCount: Int,
+        depthSpread: Float?,
+        timestamp: TimeInterval?
+    ) {
         lockedObjectWorldPosition = position
+        lockedObjectDistanceMeters = distance
+        targetLockTimestamp = timestamp
+        targetLockAcquisition = acquisition
+        targetLockSampleCount = sampleCount
+        targetLockDepthSpreadMeters = depthSpread
         isObjectTargetLocked = true
         isObjectExtentLocked = false
         lockedObjectExtentProposal = nil
-        targetLockStatus = "Object locked"
-        targetLockDetail = "Orbit around the locked object center."
+        targetLockStatus = acquisition.hasPrefix("auto") ? "Subject auto-locked" : "Object locked"
+        targetLockDetail = "Orbit around the locked subject center."
         targetLockDistanceText = String(format: "%.2f m", distance)
+        if isObjectMaskEnabled, let proposal = latestObjectExtentProposal {
+            lockedObjectExtentProposal = proposal
+            isObjectExtentLocked = true
+            objectExtentOverlay = proposal.overlay
+            objectExtentSizeText = String(
+                format: "%.2fm x %.2fm",
+                proposal.approximateWidthMeters,
+                proposal.approximateHeightMeters
+            )
+        }
         refreshObjectExtentStatus()
         updateGuidance()
     }
@@ -471,6 +552,12 @@ final class CaptureController: NSObject, ObservableObject {
         isObjectTargetLocked = false
         isRoomTargetLocked = false
         lockedObjectWorldPosition = nil
+        lockedObjectDistanceMeters = nil
+        targetLockTimestamp = nil
+        targetLockAcquisition = "none"
+        targetLockSampleCount = 0
+        targetLockDepthSpreadMeters = nil
+        targetCandidateObservations.removeAll()
         lockedRoomWorldTransform = nil
         roomStartPosition = nil
         roomLastAcceptedPosition = nil
@@ -492,7 +579,11 @@ final class CaptureController: NSObject, ObservableObject {
     }
 
     func startRecording() {
-        guard !isRecording else { return }
+        guard !isRecording, !isFinalizing else { return }
+        if requiresSubjectTarget, !isObjectTargetLocked, !lockSubjectTargetIfStable() {
+            statusText = targetLockDetail
+            return
+        }
         guard canStartForCurrentTargetMode else {
             statusText = targetLockStatus
             return
@@ -535,6 +626,8 @@ final class CaptureController: NSObject, ObservableObject {
             guidancePoints.removeAll()
             coverageSectorCounts = Array(repeating: 0, count: coverageSectorCounts.count)
             coverageSectors = Array(repeating: 0.0, count: coverageSectors.count)
+            targetElevationBandCounts = Array(repeating: 0, count: targetElevationBandCounts.count)
+            targetDistanceBandCounts = Array(repeating: 0, count: targetDistanceBandCounts.count)
             coverageHintText = "Coverage 0/\(coverageSectors.count)"
             readinessState = "Not ready"
             nextAction = "Move slowly around the subject"
@@ -612,27 +705,73 @@ final class CaptureController: NSObject, ObservableObject {
     }
 
     func stopRecording() {
-        guard isRecording else { return }
+        guard isRecording, !isFinalizing else { return }
         isRecording = false
+        isFinalizing = true
+        statusText = "Finalizing capture"
         motion.stopDeviceMotionUpdates()
-        videoRecorder.finish()
+        location.stopUpdatingLocation()
         applyCaptureLocks(false)
-        writeMetadata()
-        do {
-            let directory = try writeCaptureManifest()
-            statusText = "Stopped and finalized \(directory.lastPathComponent)"
-        } catch {
-            statusText = "Stopped. Finalize failed: \(error.localizedDescription)"
+        videoRecorder.finish { [weak self] videoResult in
+            guard let self else { return }
+            self.writeQueue.async { [weak self] in
+                DispatchQueue.main.async {
+                    self?.completeCaptureFinalization(videoResult: videoResult)
+                }
+            }
         }
     }
 
     func finalizeSession() {
+        guard !isRecording, !isFinalizing else { return }
+        writeMetadata()
         do {
             let directory = try writeCaptureManifest()
+            writeFinalizationReport(
+                status: "finalized",
+                videoStatus: "previously_finalized",
+                videoError: nil,
+                manifestWritten: true,
+                finalizationError: nil
+            )
             statusText = "Finalized \(directory.lastPathComponent)"
         } catch {
+            writeFinalizationReport(
+                status: "failed",
+                videoStatus: "previously_finalized",
+                videoError: nil,
+                manifestWritten: false,
+                finalizationError: error.localizedDescription
+            )
             statusText = "Finalize failed: \(error.localizedDescription)"
         }
+    }
+
+    private func completeCaptureFinalization(videoResult: CaptureVideoRecorder.FinishResult) {
+        writeMetadata()
+        do {
+            let directory = try writeCaptureManifest()
+            writeFinalizationReport(
+                status: videoResult.succeeded ? "finalized" : "finalized_with_video_error",
+                videoStatus: videoResult.status,
+                videoError: videoResult.error,
+                manifestWritten: true,
+                finalizationError: nil
+            )
+            statusText = videoResult.succeeded
+                ? "Stopped and finalized \(directory.lastPathComponent)"
+                : "Finalized with video warning: \(videoResult.error ?? videoResult.status)"
+        } catch {
+            writeFinalizationReport(
+                status: "failed",
+                videoStatus: videoResult.status,
+                videoError: videoResult.error,
+                manifestWritten: false,
+                finalizationError: error.localizedDescription
+            )
+            statusText = "Stopped. Finalize failed: \(error.localizedDescription)"
+        }
+        isFinalizing = false
     }
 
     @discardableResult
@@ -785,6 +924,31 @@ final class CaptureController: NSObject, ObservableObject {
         writeJSON(targetLockReport(), to: metadata.appendingPathComponent("target_lock_report.json"))
         writeJSON(objectExtentReport(), to: metadata.appendingPathComponent("object_extent_report.json"))
         writeJSON(objectMatteReport(), to: metadata.appendingPathComponent("object_matte_report.json"))
+        writeJSON(capturePolicyReport(), to: metadata.appendingPathComponent("capture_policy.json"))
+        writeJSON(sensorCapabilitiesReport(), to: metadata.appendingPathComponent("sensor_capabilities.json"))
+    }
+
+    private func writeFinalizationReport(
+        status: String,
+        videoStatus: String,
+        videoError: String?,
+        manifestWritten: Bool,
+        finalizationError: String?
+    ) {
+        guard let directory = currentSessionDirectory else { return }
+        var report: [String: Any] = [
+            "schema": "capture_splat.finalization_report.v0.1",
+            "status": status,
+            "video_writer_status": videoStatus,
+            "video_frame_count": videoRecorder.appendedFrameCount,
+            "video_dropped_frame_count": videoRecorder.droppedFrameCount,
+            "accepted_keyframe_count": frames.count,
+            "manifest_written": manifestWritten,
+            "partial_artifacts_preserved": true,
+        ]
+        if let videoError { report["video_error"] = videoError }
+        if let finalizationError { report["finalization_error"] = finalizationError }
+        writeJSON(report, to: directory.appendingPathComponent("metadata/finalization_report.json"))
     }
 
     private func writeJSON(_ object: [String: Any], to url: URL) {
@@ -1019,6 +1183,15 @@ final class CaptureController: NSObject, ObservableObject {
 
     var currentCaptureIntentOption: CaptureIntentOption {
         Self.captureIntentOptions.first { $0.id == captureIntent } ?? Self.captureIntentOptions[0]
+    }
+
+    var requiresSubjectTarget: Bool {
+        guard scanTargetMode == "video_3dgs" else { return false }
+        return ["scene_cluster", "object_orbit", "detail_repair"].contains(captureIntent)
+    }
+
+    private var usesSubjectTargetGuidance: Bool {
+        scanTargetMode == "object" || requiresSubjectTarget
     }
 
     private func captureModeLabel() -> String {
@@ -1351,8 +1524,15 @@ final class CaptureController: NSObject, ObservableObject {
                 targetLockDetail = "Face the room center, then tap Lock Room."
             }
         case "video_3dgs":
-            targetLockStatus = "Video 3DGS mode"
-            targetLockDetail = "Move slowly like recording video; haptics mark sharp accepted frames."
+            if requiresSubjectTarget {
+                targetLockStatus = isObjectTargetLocked ? "Subject auto-locked" : "Center subject"
+                targetLockDetail = isObjectTargetLocked
+                    ? "Orbit around the locked subject center."
+                    : "Hold the desk or object in the reticle before recording."
+            } else {
+                targetLockStatus = "Video 3DGS mode"
+                targetLockDetail = "Move slowly like recording video; haptics mark sharp accepted frames."
+            }
         default:
             targetLockStatus = "Target lock optional"
             targetLockDetail = "Outdoor/diagnostic modes do not require target lock."
@@ -1364,6 +1544,7 @@ final class CaptureController: NSObject, ObservableObject {
         guard let centerDepth = centerDepthMeters(from: depthMap), centerDepth > 0 else {
             latestTargetCandidateWorldPosition = nil
             latestTargetCandidateDistance = nil
+            targetCandidateObservations.removeAll { frame.timestamp - $0.timestamp > 0.6 }
             latestObjectExtentProposal = nil
             if !isObjectExtentLocked {
                 objectExtentOverlay = nil
@@ -1374,13 +1555,20 @@ final class CaptureController: NSObject, ObservableObject {
         }
         let cameraPosition = cameraPosition(frame.camera.transform)
         let forward = cameraForward(frame.camera.transform)
-        latestTargetCandidateWorldPosition = cameraPosition + forward * centerDepth
+        let candidatePosition = cameraPosition + forward * centerDepth
+        latestTargetCandidateWorldPosition = candidatePosition
         latestTargetCandidateDistance = centerDepth
-        if !isObjectTargetLocked, scanTargetMode == "object" {
+        if !isObjectTargetLocked, usesSubjectTargetGuidance {
+            targetCandidateObservations.append(TargetCandidateObservation(
+                timestamp: frame.timestamp,
+                worldPosition: candidatePosition,
+                distanceMeters: centerDepth
+            ))
+            targetCandidateObservations.removeAll { frame.timestamp - $0.timestamp > 0.6 }
             targetLockDistanceText = String(format: "%.2f m", centerDepth)
         }
         latestObjectExtentProposal = makeObjectExtentProposal(from: frame, depthMap: depthMap, centerDepth: centerDepth)
-        if !isObjectExtentLocked, isObjectMaskEnabled, scanTargetMode == "object" {
+        if !isObjectExtentLocked, isObjectMaskEnabled, usesSubjectTargetGuidance {
             objectExtentOverlay = latestObjectExtentProposal?.overlay
         }
         refreshObjectExtentStatus()
@@ -1421,7 +1609,28 @@ final class CaptureController: NSObject, ObservableObject {
         if coverageSectorCounts[index] != previousCount {
             appendCoverageHistorySample(timestamp: frame.timestamp, sectorIndex: index, guidancePointCount: guidancePoints.count)
         }
+        if let bands = targetCoverageBands(for: frame.camera.transform) {
+            targetElevationBandCounts[bands.elevation] += 1
+            targetDistanceBandCounts[bands.distance] += 1
+        }
         updateCoverageHint()
+    }
+
+    private func targetCoverageBands(for transform: simd_float4x4) -> (elevation: Int, distance: Int)? {
+        guard usesSubjectTargetGuidance,
+              let target = lockedObjectWorldPosition,
+              let lockedDistance = lockedObjectDistanceMeters,
+              lockedDistance > 0 else {
+            return nil
+        }
+        let offset = cameraPosition(transform) - target
+        let distance = simd_length(offset)
+        guard distance.isFinite, distance > 0 else { return nil }
+        let elevationDegrees = abs(asin(Double(offset.y / distance)) * 180 / .pi)
+        let elevationBand = elevationDegrees < 10 ? 0 : (elevationDegrees <= 30 ? 1 : 2)
+        let distanceRatio = distance / lockedDistance
+        let distanceBand = distanceRatio < 0.85 ? 0 : (distanceRatio <= 1.25 ? 1 : 2)
+        return (elevationBand, distanceBand)
     }
 
     private func updateCoverageHint() {
@@ -1498,11 +1707,25 @@ final class CaptureController: NSObject, ObservableObject {
         let target = targetMissingSectorIndex(from: current)
         currentCoverageSector = current
         targetCoverageSector = target
+        let targetBandHint: String
+        if usesSubjectTargetGuidance, isObjectTargetLocked {
+            if targetElevationBandCounts[2] == 0 {
+                targetBandHint = " | add a high angle"
+            } else if targetElevationBandCounts[1] == 0 {
+                targetBandHint = " | add a mid angle"
+            } else if targetDistanceBandCounts[2] == 0 {
+                targetBandHint = " | add a wider view"
+            } else {
+                targetBandHint = ""
+            }
+        } else {
+            targetBandHint = ""
+        }
         guard coverageSectors.indices.contains(target), coverageSectors[target] < 1 else {
-            coverageNavigationText = "All coarse sectors have saved keyframes."
+            coverageNavigationText = "All coarse sectors have saved keyframes.\(targetBandHint)"
             return
         }
-        coverageNavigationText = "Current sector \(current + 1)/\(coverageSectors.count) -> target \(target + 1)/\(coverageSectors.count)"
+        coverageNavigationText = "Current sector \(current + 1)/\(coverageSectors.count) -> target \(target + 1)/\(coverageSectors.count)\(targetBandHint)"
     }
 
     private func updateColmapCoachText() {
@@ -1655,7 +1878,7 @@ final class CaptureController: NSObject, ObservableObject {
 
     private func coverageSectorIndex(for transform: simd_float4x4) -> Int {
         let sectorCount = max(coverageSectorCounts.count, 1)
-        if scanTargetMode == "object", let target = lockedObjectWorldPosition {
+        if usesSubjectTargetGuidance, let target = lockedObjectWorldPosition {
             let fromTarget = cameraPosition(transform) - target
             let yaw = atan2(Double(fromTarget.x), Double(fromTarget.z))
             let normalized = (yaw + .pi) / (2 * .pi)
@@ -1699,8 +1922,8 @@ final class CaptureController: NSObject, ObservableObject {
     private func coverageReport() -> [String: Any] {
         [
             "schema": "capture_splat.coverage_report.v0.1",
-            "coverage_model": scanTargetMode == "object" && isObjectTargetLocked
-                ? "object_relative_orbit_sectors_v0.1"
+            "coverage_model": usesSubjectTargetGuidance && isObjectTargetLocked
+                ? "target_relative_azimuth_elevation_distance_v0.2"
                 : "coarse_yaw_sector_capture_guidance",
             "sector_count": coverageSectors.count,
             "observation_target_per_sector": coverageObservationTarget,
@@ -1718,6 +1941,15 @@ final class CaptureController: NSObject, ObservableObject {
             "coverage_navigation": coverageNavigationText,
             "sector_observation_counts": coverageSectorCounts,
             "sector_progress": coverageSectors,
+            "target_relative_coverage": [
+                "enabled": usesSubjectTargetGuidance && isObjectTargetLocked,
+                "azimuth_sector_count": coverageSectors.count,
+                "elevation_band_labels": ["under_10_deg", "10_to_30_deg", "over_30_deg"],
+                "elevation_band_observations": targetElevationBandCounts,
+                "distance_band_labels": ["close_under_0_85x", "normal_0_85x_to_1_25x", "wide_over_1_25x"],
+                "distance_band_observations": targetDistanceBandCounts,
+                "guidance_only": true,
+            ],
             "history_sample_count": coverageHistory.count,
             "history_truncated": coverageHistoryWasTruncated,
             "history": coverageHistory,
@@ -1811,6 +2043,60 @@ final class CaptureController: NSObject, ObservableObject {
         ]
     }
 
+    private func capturePolicyReport() -> [String: Any] {
+        [
+            "schema": "capture_splat.capture_policy.v0.1",
+            "profile": captureProfileLabel(),
+            "capture_intent": captureIntent,
+            "accepted_frame_target": activeMaxCapturedFrames,
+            "minimum_keyframe_interval_seconds": activeMinimumKeyframeInterval,
+            "quality_gate": [
+                "keyframe_score_threshold": activeKeyframeScoreThreshold,
+                "min_blur_score": minBlurScore,
+                "min_feature_grid_coverage": minFeatureGridCoverage,
+                "min_exposure_mean": minExposureMean,
+                "max_exposure_mean": maxExposureMean,
+                "max_exposure_jump": maxExposureJump,
+                "max_clipped_highlight_fraction": maxClippedHighlightFraction,
+                "max_clipped_shadow_fraction": maxClippedShadowFraction,
+                "max_angular_velocity_deg_s": maxAngularVelocityDegPerSec,
+                "max_translation_speed_m_s": maxTranslationSpeedMetersPerSec,
+            ],
+            "selection_policy": "quality_gated_rgbd_keyframes_plus_continuous_video",
+            "rejected_frames_are_trainer_input": false,
+            "authority": [
+                "capture_guidance_only": true,
+                "quality_claim": false,
+            ],
+        ]
+    }
+
+    private func sensorCapabilitiesReport() -> [String: Any] {
+        [
+            "schema": "capture_splat.sensor_capabilities.v0.1",
+            "scene_depth": [
+                "supported": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
+                "requested": true,
+            ],
+            "person_segmentation_with_depth": [
+                "supported": ARWorldTrackingConfiguration.supportsFrameSemantics(.personSegmentationWithDepth),
+                "requested": false,
+                "status": "not_enabled_in_this_release_slice",
+            ],
+            "scene_reconstruction": [
+                "mesh_supported": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
+                "mesh_classification_supported": ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification),
+                "requested": false,
+                "status": "not_enabled_in_this_release_slice",
+            ],
+            "plane_detection": [
+                "horizontal_requested": true,
+                "vertical_requested": true,
+            ],
+            "fallback_policy": "preserve_rgbd_capture_and_report_unavailable_optional_sensors",
+        ]
+    }
+
     private func roomCaptureQualityReport() -> [String: Any] {
         [
             "schema": "capture_splat.room_quality_report.v0.1",
@@ -1882,6 +2168,9 @@ final class CaptureController: NSObject, ObservableObject {
         if let position = lockedObjectWorldPosition {
             objectPosition = [position.x, position.y, position.z]
         }
+        let lockTimestamp: Any = targetLockTimestamp.map { $0 } ?? NSNull()
+        let depthSpread: Any = targetLockDepthSpreadMeters.map { $0 } ?? NSNull()
+        let lockedDistance: Any = lockedObjectDistanceMeters.map { $0 } ?? NSNull()
         return [
             "schema": "capture_splat.target_lock_report.v0.1",
             "scan_target_mode": scanTargetMode,
@@ -1891,9 +2180,14 @@ final class CaptureController: NSObject, ObservableObject {
             "target_lock_detail": targetLockDetail,
             "target_lock_distance": targetLockDistanceText,
             "object_world_position": objectPosition,
+            "target_lock_acquisition": targetLockAcquisition,
+            "target_lock_timestamp": lockTimestamp,
+            "target_lock_sample_count": targetLockSampleCount,
+            "target_lock_depth_spread_meters": depthSpread,
+            "locked_distance_meters": lockedDistance,
             "object_extent_locked": isObjectExtentLocked,
-            "coverage_model": scanTargetMode == "object" && isObjectTargetLocked
-                ? "object_relative_orbit_sectors_v0.1"
+            "coverage_model": usesSubjectTargetGuidance && isObjectTargetLocked
+                ? "target_relative_azimuth_elevation_distance_v0.2"
                 : "coarse_yaw_sector_capture_guidance",
             "authority": [
                 "capture_guidance_only": true,
@@ -2521,7 +2815,7 @@ final class CaptureController: NSObject, ObservableObject {
         sectorIndex: Int,
         depthValidRatio: Double
     ) -> [String: Any]? {
-        guard scanTargetMode == "object",
+        guard usesSubjectTargetGuidance,
               isObjectTargetLocked,
               isObjectExtentLocked,
               isObjectMaskEnabled,
@@ -2978,9 +3272,9 @@ final class CaptureController: NSObject, ObservableObject {
     }
 
     private func refreshObjectExtentStatus() {
-        guard scanTargetMode == "object" else {
+        guard usesSubjectTargetGuidance else {
             objectExtentStatus = "Extent not used"
-            objectExtentDetail = "Object extent applies to object and flip modes."
+            objectExtentDetail = "Object extent applies to subject-focused captures."
             return
         }
         guard isObjectMaskEnabled else {
@@ -3075,7 +3369,6 @@ extension CaptureController: ARSessionDelegate {
         guard scheduledFrameCount < activeMaxCapturedFrames else {
             DispatchQueue.main.async {
                 self.stopRecording()
-                self.statusText = "Captured \(self.activeMaxCapturedFrames) frames. Tap Finalize."
             }
             return
         }

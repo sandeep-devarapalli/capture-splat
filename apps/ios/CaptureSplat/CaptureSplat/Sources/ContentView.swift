@@ -229,6 +229,21 @@ struct ContentView: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled(capture.isRecording || scanMode == .outdoor)
+                } else if capture.requiresSubjectTarget {
+                    Button {
+                        if capture.isObjectTargetLocked {
+                            capture.clearTargetLock()
+                        } else {
+                            capture.lockSubjectTargetIfStable()
+                        }
+                    } label: {
+                        Label(
+                            capture.isObjectTargetLocked ? "Reset Target" : "Center Target",
+                            systemImage: capture.isObjectTargetLocked ? "scope" : "viewfinder"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(capture.isRecording || capture.isFinalizing)
                 }
 
                 if scanMode == .objectOrbit {
@@ -253,10 +268,13 @@ struct ContentView: View {
                 Button {
                     capture.isRecording ? capture.stopRecording() : capture.startRecording()
                 } label: {
-                    Label(capture.isRecording ? "Stop" : "Record", systemImage: capture.isRecording ? "stop.fill" : "record.circle")
+                    Label(
+                        capture.isFinalizing ? "Finalizing" : (capture.isRecording ? "Stop" : "Record"),
+                        systemImage: capture.isFinalizing ? "hourglass" : (capture.isRecording ? "stop.fill" : "record.circle")
+                    )
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!capture.isRGBEnabled || !capture.isDepthEnabled || !canRecordCurrentMode)
+                .disabled(capture.isFinalizing || !capture.isRGBEnabled || !capture.isDepthEnabled || !canRecordCurrentMode)
             }
             .font(.caption)
 
@@ -381,10 +399,13 @@ struct ContentView: View {
             Button {
                 capture.isRecording ? capture.stopRecording() : capture.startRecording()
             } label: {
-                Label(capture.isRecording ? "Stop" : "Record", systemImage: capture.isRecording ? "stop.fill" : "record.circle")
+                Label(
+                    capture.isFinalizing ? "Finalizing" : (capture.isRecording ? "Stop" : "Record"),
+                    systemImage: capture.isFinalizing ? "hourglass" : (capture.isRecording ? "stop.fill" : "record.circle")
+                )
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!capture.isRGBEnabled || !capture.isDepthEnabled || !canRecordCurrentMode)
+            .disabled(capture.isFinalizing || !capture.isRGBEnabled || !capture.isDepthEnabled || !canRecordCurrentMode)
 
             Button {
                 activeSheet = .export
@@ -392,14 +413,14 @@ struct ContentView: View {
                 Label("Export", systemImage: "square.and.arrow.down")
             }
             .buttonStyle(.bordered)
-            .disabled(capture.isRecording || capture.currentSessionDirectory == nil)
+            .disabled(capture.isRecording || capture.isFinalizing || capture.currentSessionDirectory == nil)
 
             if let directory = capture.currentSessionDirectory {
                 ShareLink(item: directory) {
                     Label("Share", systemImage: "square.and.arrow.up")
                 }
                 .buttonStyle(.bordered)
-                .disabled(capture.isRecording)
+                .disabled(capture.isRecording || capture.isFinalizing)
             }
         }
     }
@@ -1014,7 +1035,7 @@ struct ContentView: View {
                     } label: {
                         exportRow("Capture Bundle", detail: "Raw RGB-D, IMU, GNSS, metadata", icon: "archivebox", enabled: capture.currentSessionDirectory != nil)
                     }
-                    .disabled(capture.currentSessionDirectory == nil || capture.isRecording)
+                    .disabled(capture.currentSessionDirectory == nil || capture.isRecording || capture.isFinalizing)
                     exportRow("Room Plan", detail: "RoomPlan USDZ and conservative layout report", icon: "map", enabled: capture.roomPlanFile != nil)
                     exportRow("PLY + LAS", detail: "Mac ingest output", icon: "point.3.connected.trianglepath.dotted", enabled: false)
                     exportRow("Nerfstudio", detail: "Images and transforms.json", icon: "film.stack", enabled: false)

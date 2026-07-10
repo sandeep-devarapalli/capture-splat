@@ -1,6 +1,6 @@
 # Capture Splat iOS App
 
-Capture Splat is a native iPhone capture app for recording Video 3DGS input. It writes `capture_splat.v0.2` export folders for the host pipeline in this repository.
+Capture Splat is a native iPhone capture app for recording Video 3DGS input. It writes `capture_splat.v0.3` export folders for the host pipeline in this repository.
 
 ## Build
 
@@ -22,6 +22,12 @@ gps.csv
 metadata/
 room_plan/
 ```
+
+Stopping a capture waits for the continuous video and queued RGB-D writes before
+publishing `capture.json`. `metadata/finalization_report.json` records whether
+the bundle finalized cleanly, while `capture_policy.json` and
+`sensor_capabilities.json` preserve the active quality policy and device
+fallback evidence.
 
 Video 3DGS Max is the default capture path. The app records dense, sharp RGB-D
 keyframes with camera metadata and quality reports; the host pipeline handles

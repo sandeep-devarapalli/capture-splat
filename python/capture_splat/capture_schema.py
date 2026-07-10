@@ -7,7 +7,7 @@ from typing import Any, Iterable
 from .json_utils import ensure_finite, load_json_strict
 
 CAPTURE_SCHEMA = "capture_splat.v0.1"
-SUPPORTED_SCHEMAS = {CAPTURE_SCHEMA, "capture_splat.v0.2"}
+SUPPORTED_SCHEMAS = {CAPTURE_SCHEMA, "capture_splat.v0.2", "capture_splat.v0.3"}
 IMAGE_KEYS = ("rgb", "image", "image_path", "file_path")
 
 

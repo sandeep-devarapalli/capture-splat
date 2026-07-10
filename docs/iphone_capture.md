@@ -2,7 +2,9 @@
 
 Capture Splat is designed for physical iPhones. Simulator runs cannot validate camera, LiDAR, motion, or real capture timing.
 
-Use **Video 3DGS** mode for training input. The app records images, timing, camera metadata, optional ARKit pose/depth, and quality reports. It does not train 3DGS on-device.
+Use **Video 3DGS Max** for training input. The app records quality-gated RGB-D
+keyframes plus a continuous HEVC video and timestamped ARKit pose/intrinsics
+index. It does not train 3DGS on-device.
 
 ## Capture-Time Quality Gate
 
@@ -30,6 +32,20 @@ samples are too clustered. Accepted frames record `feature_grid_coverage` as a
 lightweight pre-COLMAP proxy for whether useful texture is spread across the
 view.
 
+For Desk / Cluster, Object Orbit, and Detail Repair intents, keep the subject
+centered briefly before pressing Record. The app requires three consistent
+LiDAR center-depth observations within 0.6 seconds, then auto-locks the subject
+and records target-relative azimuth, elevation, and distance coverage. The
+visible target control can reset a stale lock. This is capture guidance, not
+object identity or metric-geometry authority.
+
+Stopping enters a short Finalizing state. Export and Share remain disabled
+until the continuous video writer and queued RGB-D files have settled.
+`metadata/finalization_report.json` records success or partial failure;
+`capture_policy.json` and `sensor_capabilities.json` preserve the active gates
+and supported optional sensors. Partial artifacts are retained when
+finalization fails.
+
 After capture, the Projects tab shows a lightweight review summary with kept and
 held keyframe counts, current coverage sectors, and the latest blocker detail.
 It also opens a native LiDAR preview backed by
@@ -41,7 +57,8 @@ Room mode also includes a **Room Plan** review surface on supported LiDAR
 iPhones. It opens Apple's RoomPlan scanner so you can inspect wall, opening,
 floor, and large-object layout while capturing a room. Stopping the Room Plan
 scan writes `room_plan/room.usdz` and `room_plan/room_plan_report.json` in the
-current capture folder when available. Treat this as room-layout guidance and
+current capture folder when available. It also writes
+`room_plan/room_semantics.json` with conservative room-element proposals. Treat this as room-layout guidance and
 scale/context evidence only; it is not COLMAP registration proof, collision
 geometry, or a 3DGS quality claim.
 
