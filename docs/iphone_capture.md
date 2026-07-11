@@ -42,13 +42,22 @@ samples are too clustered. Accepted frames record `feature_grid_coverage` as a
 lightweight pre-COLMAP proxy for whether useful texture is spread across the
 view.
 
-For Desk / Cluster, Object Orbit, and Detail Repair intents, keep the subject
-centered briefly before pressing **Lock & Record**. The control stays held until
-the app has three consistent LiDAR center-depth observations within 0.6 seconds,
-then auto-locks the subject
-and records target-relative azimuth, elevation, and distance coverage. The
-visible target control can reset a stale lock. This is capture guidance, not
-object identity or metric-geometry authority.
+Desk / Cluster and Detail Repair are full-scene captures. They start without a
+single-point subject lock so a nearby bottle, keyboard, or other small item does
+not accidentally define the whole reconstruction mask. Preparation keeps the
+full static frame, subtracting a person mask when one is available.
+
+Object Orbit uses the stricter subject flow. Keep the object centered briefly
+before pressing **Lock & Record**. The control stays held until the app has
+three consistent LiDAR center-depth observations within 0.6 seconds, then
+auto-locks the subject and records target-relative azimuth, elevation, and
+distance coverage. The visible target control can reset a stale lock. This is
+capture guidance, not object identity or metric-geometry authority.
+
+The Record control enters a visible **Starting** state before capture resources
+are initialized. `metadata/session_events.jsonl` records
+`startup_latency_seconds` on `capture_started` for device-performance
+diagnostics.
 
 Stopping enters a short Finalizing state. Export and Share remain disabled
 until the continuous video writer and queued RGB-D files have settled.

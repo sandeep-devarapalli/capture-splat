@@ -162,6 +162,7 @@ final class CaptureController: NSObject, ObservableObject {
         category: "arkit-session"
     )
     @Published var isRecording = false
+    @Published var isStarting = false
     @Published var isFinalizing = false
     @Published private(set) var capturePackageState: CapturePackageState = .idle
     @Published var statusText = "Ready"
@@ -632,7 +633,7 @@ final class CaptureController: NSObject, ObservableObject {
     }
 
     func startRecording() {
-        guard !isRecording, !isFinalizing else { return }
+        guard !isRecording, !isStarting, !isFinalizing else { return }
         if requiresSubjectTarget, !isObjectTargetLocked, !lockSubjectTargetIfStable() {
             statusText = targetLockDetail
             return
@@ -641,6 +642,20 @@ final class CaptureController: NSObject, ObservableObject {
             statusText = targetLockStatus
             return
         }
+        isStarting = true
+        statusText = "Starting capture"
+        let requestedAt = ProcessInfo.processInfo.systemUptime
+        DispatchQueue.main.async { [weak self] in
+            self?.beginRecording(requestedAt: requestedAt)
+        }
+    }
+
+    private func beginRecording(requestedAt: TimeInterval) {
+        guard isStarting, !isRecording, !isFinalizing else {
+            isStarting = false
+            return
+        }
+        defer { isStarting = false }
         do {
             let directory = try makeSessionDirectory()
             try makeExportFolders(in: directory)
@@ -754,10 +769,13 @@ final class CaptureController: NSObject, ObservableObject {
             isRecording = true
             capturePackageState = .recording
             statusText = "Recording"
+            let startupLatency = ProcessInfo.processInfo.systemUptime - requestedAt
             appendSessionEvent("capture_started", details: [
                 "capture_intent": captureIntent,
                 "capture_profile": captureProfileLabel(),
+                "startup_latency_seconds": startupLatency,
             ])
+            logger.info("Capture recording started after \(startupLatency, privacy: .public) seconds")
             if isObjectTargetLocked {
                 appendSessionEvent("target_locked", details: [
                     "acquisition": targetLockAcquisition,
@@ -1537,7 +1555,7 @@ final class CaptureController: NSObject, ObservableObject {
 
     var requiresSubjectTarget: Bool {
         guard scanTargetMode == "video_3dgs" else { return false }
-        return ["scene_cluster", "object_orbit", "detail_repair"].contains(captureIntent)
+        return captureIntent == "object_orbit"
     }
 
     var isCapturePackageReady: Bool {

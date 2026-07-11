@@ -112,7 +112,7 @@ struct ContentView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .disabled(capture.isRecording || capture.isFinalizing)
+            .disabled(capture.isRecording || capture.isStarting || capture.isFinalizing)
 
             Button {
                 activeSheet = .camera
@@ -352,7 +352,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(
-                    capture.isRecording || capture.isFinalizing
+                    capture.isRecording || capture.isStarting || capture.isFinalizing
                         || (!capture.isObjectTargetLocked && !capture.isSubjectTargetReady)
                 )
                 .accessibilityLabel(capture.isObjectTargetLocked ? "Reset subject target" : "Center subject target")
@@ -368,7 +368,7 @@ struct ContentView: View {
             Image(systemName: "map")
         }
         .buttonStyle(.bordered)
-        .disabled(capture.isRecording || capture.isFinalizing)
+        .disabled(capture.isRecording || capture.isStarting || capture.isFinalizing)
         .accessibilityLabel("Open Room Plan")
     }
 
@@ -380,7 +380,7 @@ struct ContentView: View {
         }
         .buttonStyle(.borderedProminent)
         .disabled(
-            capture.isFinalizing || !capture.isRGBEnabled || !capture.isDepthEnabled
+            capture.isStarting || capture.isFinalizing || !capture.isRGBEnabled || !capture.isDepthEnabled
                 || (!capture.isRecording && !canRecordCurrentMode)
         )
         .accessibilityHint(capture.requiresSubjectTarget && !capture.isObjectTargetLocked
@@ -396,7 +396,7 @@ struct ContentView: View {
                 Label(recordButtonTitle, systemImage: recordButtonIcon)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(capture.isFinalizing || !capture.isRGBEnabled || !capture.isDepthEnabled || (!capture.isRecording && !canRecordCurrentMode))
+            .disabled(capture.isStarting || capture.isFinalizing || !capture.isRGBEnabled || !capture.isDepthEnabled || (!capture.isRecording && !canRecordCurrentMode))
 
             Button {
                 activeSheet = .export
@@ -404,7 +404,7 @@ struct ContentView: View {
                 Label("Export", systemImage: "square.and.arrow.down")
             }
             .buttonStyle(.bordered)
-            .disabled(capture.isRecording || capture.isFinalizing || !capture.isCapturePackageReady)
+            .disabled(capture.isRecording || capture.isStarting || capture.isFinalizing || !capture.isCapturePackageReady)
 
             if let directory = capture.currentSessionDirectory,
                capture.isCapturePackageReady || capture.hasRecoverablePartialCapture {
@@ -412,7 +412,7 @@ struct ContentView: View {
                     Label(capture.isCapturePackageReady ? "Share" : "Share Partial", systemImage: "square.and.arrow.up")
                 }
                 .buttonStyle(.bordered)
-                .disabled(capture.isRecording || capture.isFinalizing)
+                .disabled(capture.isRecording || capture.isStarting || capture.isFinalizing)
             }
         }
     }
@@ -1321,6 +1321,7 @@ struct ContentView: View {
     }
 
     private var recordButtonTitle: String {
+        if capture.isStarting { return "Starting" }
         if capture.isFinalizing { return "Finalizing" }
         if capture.isRecording { return "Stop" }
         if capture.requiresSubjectTarget && !capture.isObjectTargetLocked { return "Lock & Record" }
@@ -1328,6 +1329,7 @@ struct ContentView: View {
     }
 
     private var recordButtonIcon: String {
+        if capture.isStarting { return "hourglass" }
         if capture.isFinalizing { return "hourglass" }
         if capture.isRecording { return "stop.fill" }
         return capture.requiresSubjectTarget && !capture.isObjectTargetLocked ? "viewfinder.circle" : "record.circle"

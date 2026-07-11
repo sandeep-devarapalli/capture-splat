@@ -75,9 +75,15 @@ final class CaptureVideoRecorder {
                 return
             }
             writer.add(newInput)
+            let bufferAttributes: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: CVPixelBufferGetPixelFormatType(pixelBuffer),
+                kCVPixelBufferWidthKey as String: CVPixelBufferGetWidth(pixelBuffer),
+                kCVPixelBufferHeightKey as String: CVPixelBufferGetHeight(pixelBuffer),
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+            ]
             let newAdaptor = AVAssetWriterInputPixelBufferAdaptor(
                 assetWriterInput: newInput,
-                sourcePixelBufferAttributes: nil
+                sourcePixelBufferAttributes: bufferAttributes
             )
             guard writer.startWriting() else {
                 droppedFrameCount += 1
@@ -97,9 +103,14 @@ final class CaptureVideoRecorder {
             droppedFrameCount += 1
             return
         }
+        guard let detachedBuffer = detachedPixelBuffer(from: pixelBuffer, adaptor: adaptor) else {
+            droppedFrameCount += 1
+            logger.error("Could not detach the video frame from its ARKit pixel buffer")
+            return
+        }
         let relative = timestamp - startTimestamp
         let presentation = CMTime(seconds: relative, preferredTimescale: 600)
-        guard adaptor.append(pixelBuffer, withPresentationTime: presentation) else {
+        guard adaptor.append(detachedBuffer, withPresentationTime: presentation) else {
             droppedFrameCount += 1
             if writer.status == .failed {
                 logger.error("Video append failed: \(writer.error?.localizedDescription ?? "unknown", privacy: .public)")
@@ -109,6 +120,89 @@ final class CaptureVideoRecorder {
         lastAppendedTimestamp = timestamp
         writeIndexLine(frame: frame, relativeTimestamp: relative, captureDevice: captureDevice)
         appendedFrameCount += 1
+    }
+
+    private func detachedPixelBuffer(
+        from source: CVPixelBuffer,
+        adaptor: AVAssetWriterInputPixelBufferAdaptor
+    ) -> CVPixelBuffer? {
+        var destination: CVPixelBuffer?
+        if let pool = adaptor.pixelBufferPool {
+            guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &destination) == kCVReturnSuccess else {
+                return nil
+            }
+        } else {
+            let attributes = [kCVPixelBufferIOSurfacePropertiesKey as String: [:]] as CFDictionary
+            guard CVPixelBufferCreate(
+                nil,
+                CVPixelBufferGetWidth(source),
+                CVPixelBufferGetHeight(source),
+                CVPixelBufferGetPixelFormatType(source),
+                attributes,
+                &destination
+            ) == kCVReturnSuccess else {
+                return nil
+            }
+        }
+        guard let destination,
+              CVPixelBufferGetPlaneCount(source) == CVPixelBufferGetPlaneCount(destination),
+              CVPixelBufferLockBaseAddress(source, .readOnly) == kCVReturnSuccess else {
+            return nil
+        }
+        defer { CVPixelBufferUnlockBaseAddress(source, .readOnly) }
+        guard CVPixelBufferLockBaseAddress(destination, []) == kCVReturnSuccess else { return nil }
+        defer { CVPixelBufferUnlockBaseAddress(destination, []) }
+
+        let planeCount = CVPixelBufferGetPlaneCount(source)
+        if planeCount == 0 {
+            guard let sourceBase = CVPixelBufferGetBaseAddress(source),
+                  let destinationBase = CVPixelBufferGetBaseAddress(destination) else {
+                return nil
+            }
+            copyRows(
+                sourceBase: sourceBase,
+                sourceBytesPerRow: CVPixelBufferGetBytesPerRow(source),
+                destinationBase: destinationBase,
+                destinationBytesPerRow: CVPixelBufferGetBytesPerRow(destination),
+                height: min(CVPixelBufferGetHeight(source), CVPixelBufferGetHeight(destination))
+            )
+        } else {
+            for plane in 0..<planeCount {
+                guard let sourceBase = CVPixelBufferGetBaseAddressOfPlane(source, plane),
+                      let destinationBase = CVPixelBufferGetBaseAddressOfPlane(destination, plane) else {
+                    return nil
+                }
+                copyRows(
+                    sourceBase: sourceBase,
+                    sourceBytesPerRow: CVPixelBufferGetBytesPerRowOfPlane(source, plane),
+                    destinationBase: destinationBase,
+                    destinationBytesPerRow: CVPixelBufferGetBytesPerRowOfPlane(destination, plane),
+                    height: min(
+                        CVPixelBufferGetHeightOfPlane(source, plane),
+                        CVPixelBufferGetHeightOfPlane(destination, plane)
+                    )
+                )
+            }
+        }
+        CVBufferPropagateAttachments(source, destination)
+        return destination
+    }
+
+    private func copyRows(
+        sourceBase: UnsafeMutableRawPointer,
+        sourceBytesPerRow: Int,
+        destinationBase: UnsafeMutableRawPointer,
+        destinationBytesPerRow: Int,
+        height: Int
+    ) {
+        let bytesPerRow = min(sourceBytesPerRow, destinationBytesPerRow)
+        for row in 0..<height {
+            memcpy(
+                destinationBase.advanced(by: row * destinationBytesPerRow),
+                sourceBase.advanced(by: row * sourceBytesPerRow),
+                bytesPerRow
+            )
+        }
     }
 
     func finish(completion: @escaping (FinishResult) -> Void) {

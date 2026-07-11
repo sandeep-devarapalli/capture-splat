@@ -40,10 +40,15 @@ Treat these as app-owned and actionable:
 - `arkit-session` failure or interruption messages;
 - invalid SF Symbol warnings emitted by Capture Splat;
 - repeated session-enable warnings caused by app session configuration.
+- retained-`ARFrame` warnings, especially when the count rises across frames.
 
 The video writer adaptor must be created before its input starts writing.
 Creating it after `AVAssetWriter.startWriting()` raises an Objective-C
 exception instead of a recoverable Swift error.
+
+Continuous video must append app-owned pixel buffers. Passing ARKit's
+`capturedImage` directly to an asynchronous encoder can retain enough camera
+buffers to stop frame delivery even when the writer itself reports no drops.
 
 The following messages can occur inside Apple frameworks and are not alone
 evidence of a Capture Splat bug:
