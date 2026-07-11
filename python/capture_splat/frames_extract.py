@@ -124,18 +124,31 @@ def photometric_from_entry(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def extract_selected_frames(video: Path, picked: list[int], out_dir: Path, max_edge: int) -> list[Path]:
-    select_expr = "+".join(f"eq(n\\,{frame})" for frame in picked)
+    if picked != sorted(set(picked)):
+        raise ValueError("picked video frames must be sorted and unique")
     scale = f"scale=w='min({max_edge},iw)':h='min({max_edge},ih)':force_original_aspect_ratio=decrease"
     out_dir.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [
-            "ffmpeg", "-y", "-v", "error", "-i", str(video),
-            "-vf", f"select='{select_expr}',{scale}", "-vsync", "vfr",
-            "-q:v", "2", str(out_dir / "%06d.jpg"),
-        ],
-        check=True,
-        text=True,
-    )
+    next_output = 1
+    for offset in range(0, len(picked), 80):
+        chunk = picked[offset:offset + 80]
+        select_expr = "+".join(f"eq(n\\,{frame})" for frame in chunk)
+        with tempfile.TemporaryDirectory(prefix="capture_splat_extract_", dir=out_dir.parent) as temp:
+            temp_dir = Path(temp)
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-v", "error", "-i", str(video),
+                    "-vf", f"select='{select_expr}',{scale}", "-vsync", "vfr",
+                    "-q:v", "2", str(temp_dir / "%06d.jpg"),
+                ],
+                check=True,
+                text=True,
+            )
+            written = sorted(temp_dir.glob("*.jpg"))
+            if len(written) != len(chunk):
+                raise RuntimeError(f"expected {len(chunk)} chunk frames, ffmpeg wrote {len(written)}")
+            for source in written:
+                source.replace(out_dir / f"{next_output:06d}.jpg")
+                next_output += 1
     return sorted(out_dir.glob("*.jpg"))
 
 

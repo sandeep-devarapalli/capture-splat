@@ -102,6 +102,18 @@ def test_extract_frames_sharpest_pick_records_scores(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg not available")
+def test_extract_frames_chunks_large_selection(tmp_path: Path) -> None:
+    video = tmp_path / "clip.mp4"
+    make_video(video, frames=180, rate=30)
+
+    summary = run_extract_frames(video, tmp_path / "out", target_frames=180, pick="first")
+
+    assert summary["extracted_frames"] == 180
+    assert summary["picked_video_frames"] == list(range(180))
+    assert (tmp_path / "out" / "images" / "000180.jpg").exists()
+
+
+@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg not available")
 def test_extract_frames_attaches_poses_from_frame_index(tmp_path: Path) -> None:
     video = tmp_path / "clip.mp4"
     make_video(video, frames=12, rate=12)

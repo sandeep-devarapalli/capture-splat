@@ -314,6 +314,7 @@ def prepare_capture(
     quality = run_capture_quality_report(capture_dir, out_dir / "capture_quality")
     recipe_name, recipe_source = resolve_recipe(capture, recipe)
     recipe_config = deepcopy(RECIPES[recipe_name])
+    subject_masks_required = recipe_name == "object"
     target = max(1, min(int(target_frames or recipe_config["target_frames"]), 600))
     accepted = _candidates(capture_dir, capture, "accepted_rgbd")
     if not accepted:
@@ -368,7 +369,7 @@ def prepare_capture(
             person_records,
             object_records,
             video_records,
-            recipe_name in {"desk", "object", "repair"},
+            subject_masks_required,
         )
     prepared_manifest = {
         "schema": "capture_splat.v0.3",
@@ -395,7 +396,7 @@ def prepare_capture(
     frame_evidence = load_frame_evidence(out_dir / "frames/capture.json")
     camera_report = camera_evidence_report(out_dir / "frames/images", frame_evidence)
     photometric_report = photometric_evidence_report(prepared_frames)
-    object_masks_required = recipe_name in {"desk", "object", "repair"}
+    object_masks_required = subject_masks_required
     missing_valid_masks = [
         Path(str(frame["rgb"])).name for frame in prepared_frames if not isinstance(frame.get("valid_mask"), str)
     ]

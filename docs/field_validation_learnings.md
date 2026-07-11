@@ -124,3 +124,36 @@ Every serious training run should record and reject on these before claiming pro
 5. Investigate why non-target frames can regress after weak-frame weighting.
 6. Improve the iPhone app guidance around object/room lock, keyframe acceptance, haptics, and low-intrusion UI.
 7. Publish example reports that separate startup success, alignment success, and actual visual quality.
+
+## Physical Desk Capture (2026-07-11)
+
+A physical Desk / Cluster capture closed the earlier video-writer crash gate
+and exposed the next two operational issues:
+
+- The finalized bundle contained 6,179 HEVC frames, 93 accepted RGB-D
+  keyframes, 132 person masks, and a finite ARKit mesh. The video writer
+  completed with zero reported drops.
+- Capture QA returned `promote`: accepted-frame blur, parallax, overlap, and
+  depth proxies cleared their configured thresholds. This is safe-to-try-SfM
+  evidence, not a reconstruction-quality claim.
+- Xcode reported that the ARSession delegate retained 11-12 `ARFrame` objects.
+  The continuous recorder had passed ARKit-owned pixel buffers directly to the
+  encoder. The recorder now copies each frame into an app-owned buffer before
+  append.
+- The device reached a `serious` thermal state during the roughly 226-second
+  pass. Shorter connected passes and a cool starting device remain preferable;
+  quality gates are not relaxed under thermal pressure.
+- The Desk intent locked a nearby point at about 0.37 m and only one of 93
+  keyframes retained strong support for that small extent. Desk / Cluster is
+  now a full-scene recipe; strict target locking and object masks are reserved
+  for Object Orbit.
+- The first 300-frame preparation attempt exceeded FFmpeg's practical
+  expression size. Chunked extraction now preserves the exact frame mapping
+  while avoiding one unbounded selector.
+- The corrected full-resolution package reached `ready` with 300 frames:
+  93 accepted RGB-D frames plus 207 sharp continuous-video supplements. All
+  393 extraction candidates matched timestamped camera metadata; camera,
+  photometric, and valid-mask reports passed with no warnings.
+
+The next evidence gate is global SfM registration on this prepared package,
+followed by the 3000-step VkSplat rung and fixed-camera render/source QA.

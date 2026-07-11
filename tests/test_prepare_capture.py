@@ -132,7 +132,7 @@ def test_prepare_capture_writes_non_destructive_object_mask(tmp_path: Path) -> N
         }],
     })
 
-    summary = prepare_capture(capture, tmp_path / "prepared", target_frames=1)
+    summary = prepare_capture(capture, tmp_path / "prepared", recipe="object", target_frames=1)
     manifest = load_json_strict(tmp_path / "prepared/frames/capture.json")
 
     assert summary["copied_sidecars"]["object_mask"] == 1
@@ -156,17 +156,17 @@ def test_prepare_capture_room_masks_cover_every_frame_with_white_valid_semantics
         assert np.all(valid == 255)
 
 
-def test_prepare_capture_desk_does_not_claim_object_support_when_it_is_missing(tmp_path: Path) -> None:
+def test_prepare_capture_desk_uses_full_scene_when_object_support_is_missing(tmp_path: Path) -> None:
     capture = _capture(tmp_path / "capture", count=1)
 
     summary = prepare_capture(capture, tmp_path / "prepared", recipe="desk", target_frames=1)
     manifest = load_json_strict(tmp_path / "prepared/frames/capture.json")
 
-    assert summary["copied_sidecars"]["valid_mask"] == 0
+    assert summary["copied_sidecars"]["valid_mask"] == 1
     assert summary["decision"] == "hold"
-    assert "object_support_masks_incomplete" in summary["warnings"]
-    assert summary["valid_masks"]["missing_frames"] == ["000001.jpg"]
-    assert "valid_mask" not in manifest["frames"][0]
+    assert "object_support_masks_incomplete" not in summary["warnings"]
+    assert summary["valid_masks"]["missing_frames"] == []
+    assert manifest["frames"][0]["valid_mask"] == "masks/valid/000001.jpg.png"
 
 
 def test_prepare_capture_enriches_partial_photometric_metadata(tmp_path: Path) -> None:
