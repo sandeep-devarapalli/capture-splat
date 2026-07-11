@@ -346,7 +346,7 @@ struct ContentView: View {
                     }
                 } label: {
                     Label(
-                        capture.isObjectTargetLocked ? "Reset" : "Center",
+                        capture.isObjectTargetLocked ? "Reset" : "Lock Subject",
                         systemImage: capture.isObjectTargetLocked ? "scope" : "viewfinder"
                     )
                 }
@@ -355,7 +355,7 @@ struct ContentView: View {
                     capture.isRecording || capture.isStarting || capture.isFinalizing
                         || (!capture.isObjectTargetLocked && !capture.isSubjectTargetReady)
                 )
-                .accessibilityLabel(capture.isObjectTargetLocked ? "Reset subject target" : "Center subject target")
+                .accessibilityLabel(capture.isObjectTargetLocked ? "Reset subject target" : "Lock subject target")
             }
         }
         .font(.caption)
@@ -384,7 +384,7 @@ struct ContentView: View {
                 || (!capture.isRecording && !canRecordCurrentMode)
         )
         .accessibilityHint(capture.requiresSubjectTarget && !capture.isObjectTargetLocked
-            ? "Locks the centered subject and starts capture"
+            ? "Lock the centered subject before starting Object Orbit capture"
             : "Starts or stops the Video 3DGS capture")
     }
 
@@ -1295,7 +1295,7 @@ struct ContentView: View {
         case .roomWalk:
             return capture.isRoomTargetLocked
         case .video3DGS:
-            return !capture.requiresSubjectTarget || capture.isObjectTargetLocked || capture.isSubjectTargetReady
+            return !capture.requiresSubjectTarget || capture.isObjectTargetLocked
         case .outdoor:
             return true
         }
@@ -1324,7 +1324,7 @@ struct ContentView: View {
         if capture.isStarting { return "Starting" }
         if capture.isFinalizing { return "Finalizing" }
         if capture.isRecording { return "Stop" }
-        if capture.requiresSubjectTarget && !capture.isObjectTargetLocked { return "Lock & Record" }
+        if capture.requiresSubjectTarget && !capture.isObjectTargetLocked { return "Lock Subject First" }
         return "Record"
     }
 

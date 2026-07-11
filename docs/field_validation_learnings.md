@@ -146,7 +146,8 @@ and exposed the next two operational issues:
 - The Desk intent locked a nearby point at about 0.37 m and only one of 93
   keyframes retained strong support for that small extent. Desk / Cluster is
   now a full-scene recipe; strict target locking and object masks are reserved
-  for Object Orbit.
+  for Object Orbit. Record never acquires a target lock in any intent; Object
+  Orbit requires a separate, explicit **Lock Subject** action.
 - The first 300-frame preparation attempt exceeded FFmpeg's practical
   expression size. Chunked extraction now preserves the exact frame mapping
   while avoiding one unbounded selector.

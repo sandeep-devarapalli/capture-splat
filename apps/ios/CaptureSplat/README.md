@@ -48,6 +48,11 @@ Desk / Cluster, Room Walkthrough, Object Orbit, Corridor / Passage, Wall /
 Facade, Outdoor Object, RoomPlan + 3DGS, or Detail Repair without changing the
 underlying quality gates.
 
+Only Object Orbit uses a subject target. The user must tap **Lock Subject**
+after the app reports stable center depth, and Record remains disabled until
+that explicit lock succeeds. Record never locks a subject automatically. All
+other capture intents remain full-scene passes.
+
 Supported LiDAR iPhones can open Room Plan review during the same video capture
 workflow and export `room_plan/room.usdz`, `room_plan/room_plan_report.json`,
 and `room_plan/room_semantics.json`. This is capture guidance and semantic

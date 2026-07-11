@@ -23,6 +23,7 @@ struct CaptureIntentOption: Identifiable {
     let detail: String
     let guidance: String
     let systemImage: String
+    let requiresSubjectLock: Bool
 }
 
 struct ScanGuidancePoint: Identifiable {
@@ -254,7 +255,8 @@ final class CaptureController: NSObject, ObservableObject {
             shortTitle: "Desk",
             detail: "For a work desk, shelf, bed/table area, or kitchen counter. Stay close, use side steps, and cover the cluster from 2-3 heights.",
             guidance: "Circle the desk cluster slowly. Add side angles, top-down angles, and close texture passes.",
-            systemImage: "rectangle.3.group"
+            systemImage: "rectangle.3.group",
+            requiresSubjectLock: false
         ),
         CaptureIntentOption(
             id: "room_walkthrough",
@@ -262,7 +264,8 @@ final class CaptureController: NSObject, ObservableObject {
             shortTitle: "Room",
             detail: "For bedrooms, offices, and halls. Walk a connected perimeter, add cross-room passes, and revisit corners/doorways.",
             guidance: "Walk the room perimeter slowly. Keep corners, doors, and furniture edges overlapping.",
-            systemImage: "door.left.hand.open"
+            systemImage: "door.left.hand.open",
+            requiresSubjectLock: false
         ),
         CaptureIntentOption(
             id: "object_orbit",
@@ -270,7 +273,8 @@ final class CaptureController: NSObject, ObservableObject {
             shortTitle: "Object",
             detail: "For a single object. Orbit around it at low, middle, and high angles with the subject centered.",
             guidance: "Orbit the object at 2-3 heights. Keep the object centered and avoid fast pans.",
-            systemImage: "cube.transparent"
+            systemImage: "cube.transparent",
+            requiresSubjectLock: true
         ),
         CaptureIntentOption(
             id: "corridor_passage",
@@ -278,7 +282,8 @@ final class CaptureController: NSObject, ObservableObject {
             shortTitle: "Corridor",
             detail: "For hallways and narrow paths. Move forward with side glances and return along the path if possible.",
             guidance: "Move forward slowly, add side glances, and return along the path for overlap.",
-            systemImage: "arrow.forward.to.line"
+            systemImage: "arrow.forward.to.line",
+            requiresSubjectLock: false
         ),
         CaptureIntentOption(
             id: "facade_wall",
@@ -286,7 +291,8 @@ final class CaptureController: NSObject, ObservableObject {
             shortTitle: "Wall",
             detail: "For flat walls, posters, cabinets, doors, and windows. Use sideways sweeps plus oblique angles.",
             guidance: "Side-step along the wall. Add oblique angles; do not just stand still and pan.",
-            systemImage: "rectangle.split.3x1"
+            systemImage: "rectangle.split.3x1",
+            requiresSubjectLock: false
         ),
         CaptureIntentOption(
             id: "outdoor_object",
@@ -294,7 +300,8 @@ final class CaptureController: NSObject, ObservableObject {
             shortTitle: "Outdoor",
             detail: "For gardens, vehicles, planters, and statues. Orbit the subject and watch sunlight, wind, and moving shadows.",
             guidance: "Orbit slowly and add wider establishing views. Avoid moving leaves and harsh exposure jumps.",
-            systemImage: "sun.max"
+            systemImage: "sun.max",
+            requiresSubjectLock: false
         ),
         CaptureIntentOption(
             id: "full_room_semantic",
@@ -302,7 +309,8 @@ final class CaptureController: NSObject, ObservableObject {
             shortTitle: "Semantic",
             detail: "For VR room review. Capture appearance with Video 3DGS and export RoomPlan for walls, doors, windows, and furniture proposals.",
             guidance: "Capture the room, then run RoomPlan so layout semantics travel with the 3DGS evidence.",
-            systemImage: "map"
+            systemImage: "map",
+            requiresSubjectLock: false
         ),
         CaptureIntentOption(
             id: "detail_repair",
@@ -310,7 +318,8 @@ final class CaptureController: NSObject, ObservableObject {
             shortTitle: "Repair",
             detail: "For a weak corner, shiny table, window, shelf, bed edge, or dark area. Make a short focused follow-up pass.",
             guidance: "Focus on the weak area. Move slowly with close, overlapping side steps.",
-            systemImage: "wrench.and.screwdriver"
+            systemImage: "wrench.and.screwdriver",
+            requiresSubjectLock: false
         ),
     ]
 
@@ -487,6 +496,11 @@ final class CaptureController: NSObject, ObservableObject {
 
     @discardableResult
     func lockSubjectTargetIfStable() -> Bool {
+        guard requiresSubjectTarget else {
+            targetLockStatus = "Subject lock unavailable"
+            targetLockDetail = "Subject locking is only used for Object Orbit."
+            return false
+        }
         let recent = targetCandidateObservations
         guard recent.count >= 3 else {
             targetLockStatus = "Center subject"
@@ -507,7 +521,7 @@ final class CaptureController: NSObject, ObservableObject {
         applyObjectTargetLock(
             position: meanPosition,
             distance: meanDistance,
-            acquisition: "auto_stable_center_depth",
+            acquisition: "manual_stable_center_depth",
             sampleCount: recent.count,
             depthSpread: spread,
             timestamp: recent.last?.timestamp
@@ -532,7 +546,7 @@ final class CaptureController: NSObject, ObservableObject {
         isObjectTargetLocked = true
         isObjectExtentLocked = false
         lockedObjectExtentProposal = nil
-        targetLockStatus = acquisition.hasPrefix("auto") ? "Subject auto-locked" : "Object locked"
+        targetLockStatus = scanTargetMode == "video_3dgs" ? "Subject locked" : "Object locked"
         targetLockDetail = "Orbit around the locked subject center."
         targetLockDistanceText = String(format: "%.2f m", distance)
         if isObjectMaskEnabled, let proposal = latestObjectExtentProposal {
@@ -634,8 +648,8 @@ final class CaptureController: NSObject, ObservableObject {
 
     func startRecording() {
         guard !isRecording, !isStarting, !isFinalizing else { return }
-        if requiresSubjectTarget, !isObjectTargetLocked, !lockSubjectTargetIfStable() {
-            statusText = targetLockDetail
+        if requiresSubjectTarget, !isObjectTargetLocked {
+            statusText = "Lock the subject before recording."
             return
         }
         guard canStartForCurrentTargetMode else {
@@ -1555,7 +1569,7 @@ final class CaptureController: NSObject, ObservableObject {
 
     var requiresSubjectTarget: Bool {
         guard scanTargetMode == "video_3dgs" else { return false }
-        return captureIntent == "object_orbit"
+        return currentCaptureIntentOption.requiresSubjectLock
     }
 
     var isCapturePackageReady: Bool {
@@ -1886,7 +1900,7 @@ final class CaptureController: NSObject, ObservableObject {
         case "room":
             return isRoomTargetLocked
         case "video_3dgs":
-            return true
+            return !requiresSubjectTarget || isObjectTargetLocked
         default:
             return true
         }
@@ -1914,10 +1928,10 @@ final class CaptureController: NSObject, ObservableObject {
             }
         case "video_3dgs":
             if requiresSubjectTarget {
-                targetLockStatus = isObjectTargetLocked ? "Subject auto-locked" : "Center subject"
+                targetLockStatus = isObjectTargetLocked ? "Subject locked" : "Center subject"
                 targetLockDetail = isObjectTargetLocked
                     ? "Orbit around the locked subject center."
-                    : "Hold the desk or object in the reticle before recording."
+                    : "Hold the object in the reticle, then tap Lock Subject."
             } else {
                 targetLockStatus = "Video 3DGS mode"
                 targetLockDetail = "Move slowly like recording video; haptics mark sharp accepted frames."
@@ -1962,7 +1976,7 @@ final class CaptureController: NSObject, ObservableObject {
             isSubjectTargetReady = distances.count >= 3 && spread <= max(0.10, mean * 0.10)
             if isSubjectTargetReady {
                 targetLockStatus = "Ready to lock"
-                targetLockDetail = "Tap Lock & Record, then begin a slow connected orbit."
+                targetLockDetail = "Tap Lock Subject, then Record to begin a slow connected orbit."
             }
         }
         latestObjectExtentProposal = makeObjectExtentProposal(from: frame, depthMap: depthMap, centerDepth: centerDepth)
