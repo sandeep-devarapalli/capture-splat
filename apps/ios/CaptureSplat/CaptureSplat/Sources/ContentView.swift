@@ -1317,7 +1317,7 @@ struct ContentView: View {
     }
 
     private var targetLockIcon: String {
-        capture.isObjectTargetLocked || !capture.requiresSubjectTarget ? "checkmark.viewfinder" : "viewfinder"
+        capture.isObjectTargetLocked || !capture.requiresSubjectTarget ? "checkmark.circle.fill" : "viewfinder"
     }
 
     private var recordButtonTitle: String {

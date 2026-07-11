@@ -2,6 +2,9 @@
 
 Capture Splat is designed for physical iPhones. Simulator runs cannot validate camera, LiDAR, motion, or real capture timing.
 
+For Xcode breakpoints, log classification, and the required two-cycle
+record/finalize smoke, see [iPhone Xcode Diagnostics](iphone_xcode_diagnostics.md).
+
 Use **Video 3DGS Max** for training input. The app records quality-gated RGB-D
 keyframes plus a continuous HEVC video and timestamped ARKit pose/intrinsics
 index. It does not train 3DGS on-device.

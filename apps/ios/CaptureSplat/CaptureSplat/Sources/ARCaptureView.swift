@@ -6,10 +6,11 @@ struct ARCaptureView: UIViewRepresentable {
     @EnvironmentObject private var capture: CaptureController
 
     func makeUIView(context: Context) -> ARView {
-        let view = ARView(frame: .zero)
+        let view = ARView(frame: .zero, cameraMode: .ar, automaticallyConfigureSession: false)
         capture.attach(session: view.session)
 
         let configuration = ARWorldTrackingConfiguration()
+        configuration.worldAlignment = .gravity
         if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
             configuration.frameSemantics.insert(.sceneDepth)
         }
@@ -27,4 +28,8 @@ struct ARCaptureView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: ARView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: ARView, coordinator: Void) {
+        uiView.session.pause()
+    }
 }

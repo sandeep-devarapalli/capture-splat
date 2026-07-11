@@ -4,6 +4,7 @@ import CoreImage
 import CoreLocation
 import CoreMotion
 import Foundation
+import OSLog
 import RoomPlan
 import UIKit
 
@@ -156,6 +157,10 @@ private struct MeshExportResult {
 }
 
 final class CaptureController: NSObject, ObservableObject {
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "capture_splat",
+        category: "arkit-session"
+    )
     @Published var isRecording = false
     @Published var isFinalizing = false
     @Published private(set) var capturePackageState: CapturePackageState = .idle
@@ -437,6 +442,8 @@ final class CaptureController: NSObject, ObservableObject {
     func attach(session: ARSession) {
         self.session = session
         session.delegate = self
+        session.delegateQueue = .main
+        logger.info("Attached configured AR session on the main delegate queue")
     }
 
     func setScanTargetMode(_ mode: String) {
@@ -3806,6 +3813,35 @@ final class CaptureController: NSObject, ObservableObject {
 }
 
 extension CaptureController: ARSessionDelegate {
+    func session(_ session: ARSession, didFailWithError error: Error) {
+        logger.error("AR session failed: \(error.localizedDescription, privacy: .public)")
+        appendSessionEvent("arkit_session_failed", details: [
+            "error": error.localizedDescription,
+        ])
+        statusText = "AR session failed. Finalizing available capture evidence."
+        if isRecording {
+            stopRecording()
+        }
+    }
+
+    func sessionWasInterrupted(_ session: ARSession) {
+        logger.notice("AR session interrupted")
+        appendSessionEvent("arkit_session_interrupted", arTimestamp: lastFrameTimestamp)
+        if isRecording {
+            captureBlockerStatus = "Hold"
+            captureBlockerDetail = "AR tracking was interrupted. Hold still while tracking recovers."
+        }
+    }
+
+    func sessionInterruptionEnded(_ session: ARSession) {
+        logger.notice("AR session interruption ended; waiting for tracking recovery")
+        appendSessionEvent("arkit_session_interruption_ended", arTimestamp: lastFrameTimestamp)
+        if isRecording {
+            captureBlockerStatus = "Hold"
+            captureBlockerDetail = "Tracking is recovering. Keep the phone still until guidance clears."
+        }
+    }
+
     func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
         for anchor in anchors {
             if let plane = anchor as? ARPlaneAnchor {

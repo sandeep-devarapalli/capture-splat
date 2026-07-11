@@ -2,6 +2,7 @@ import ARKit
 import AVFoundation
 import CoreVideo
 import Foundation
+import OSLog
 
 /// Records the continuous ARKit RGB stream to video/capture.mov and writes
 /// metadata/frame_index.jsonl with one line per appended video frame so host
@@ -20,6 +21,10 @@ final class CaptureVideoRecorder {
     private var startTimestamp: TimeInterval?
     private var lastAppendedTimestamp: TimeInterval = -.infinity
     private let minimumFrameInterval: TimeInterval
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "capture_splat",
+        category: "video-recorder"
+    )
     private(set) var appendedFrameCount = 0
     private(set) var droppedFrameCount = 0
 
@@ -48,6 +53,7 @@ final class CaptureVideoRecorder {
         lastAppendedTimestamp = -.infinity
         appendedFrameCount = 0
         droppedFrameCount = 0
+        logger.info("Video recorder prepared")
     }
 
     func append(frame: ARFrame, captureDevice: AVCaptureDevice?) {
@@ -63,13 +69,28 @@ final class CaptureVideoRecorder {
             ]
             let newInput = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
             newInput.expectsMediaDataInRealTime = true
-            guard writer.canAdd(newInput) else { return }
+            guard writer.canAdd(newInput) else {
+                droppedFrameCount += 1
+                logger.error("Asset writer rejected the video input")
+                return
+            }
             writer.add(newInput)
-            guard writer.startWriting() else { return }
+            let newAdaptor = AVAssetWriterInputPixelBufferAdaptor(
+                assetWriterInput: newInput,
+                sourcePixelBufferAttributes: nil
+            )
+            guard writer.startWriting() else {
+                droppedFrameCount += 1
+                logger.error("Asset writer failed to start: \(writer.error?.localizedDescription ?? "unknown", privacy: .public)")
+                return
+            }
             writer.startSession(atSourceTime: .zero)
             input = newInput
-            adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: newInput, sourcePixelBufferAttributes: nil)
+            adaptor = newAdaptor
             startTimestamp = timestamp
+            logger.info(
+                "Video writer started at \(CVPixelBufferGetWidth(pixelBuffer))x\(CVPixelBufferGetHeight(pixelBuffer))"
+            )
         }
         guard let input, let adaptor, let startTimestamp else { return }
         guard input.isReadyForMoreMediaData else {
@@ -80,6 +101,9 @@ final class CaptureVideoRecorder {
         let presentation = CMTime(seconds: relative, preferredTimescale: 600)
         guard adaptor.append(pixelBuffer, withPresentationTime: presentation) else {
             droppedFrameCount += 1
+            if writer.status == .failed {
+                logger.error("Video append failed: \(writer.error?.localizedDescription ?? "unknown", privacy: .public)")
+            }
             return
         }
         lastAppendedTimestamp = timestamp
@@ -106,6 +130,9 @@ final class CaptureVideoRecorder {
             self?.input = nil
             self?.adaptor = nil
             self?.startTimestamp = nil
+            self?.logger.info(
+                "Video writer finished with status \(result.status, privacy: .public), appended \(self?.appendedFrameCount ?? 0), dropped \(self?.droppedFrameCount ?? 0)"
+            )
             completion(result)
         }
 
