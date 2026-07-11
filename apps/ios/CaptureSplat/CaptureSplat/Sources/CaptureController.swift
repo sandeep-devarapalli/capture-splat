@@ -196,7 +196,6 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var missingSectorCount = 12
     @Published var backgroundWarning = "Depth dots show samples, not scan quality."
     @Published var guidanceArrowSystemImage = "arrow.up.circle"
-    @Published var isSmartAutoCaptureEnabled = true
     @Published var acceptedKeyframes = 0
     @Published var skippedKeyframes = 0
     @Published var lastKeyframeDecision = "Waiting"
@@ -1849,6 +1848,23 @@ final class CaptureController: NSObject, ObservableObject {
             backgroundWarning = "Dots mean depth samples only. Keep orbiting until more sectors turn green."
             guidanceArrowSystemImage = missingDirectionArrow()
             guidanceText = "\(nextAction). \(missing) angles still missing."
+        } else if requiresSubjectTarget, let missingBand = missingTargetElevationBand() {
+            readinessState = "Almost"
+            switch missingBand {
+            case 0:
+                nextAction = "Add an object-level pass"
+                guidanceArrowSystemImage = "arrow.down.circle"
+                guidanceText = "Lower the phone near the object height and continue the orbit."
+            case 1:
+                nextAction = "Add a mid-angle pass"
+                guidanceArrowSystemImage = "arrow.left.and.right.circle"
+                guidanceText = "Orbit at a moderate angle before returning overhead."
+            default:
+                nextAction = "Add a high-angle pass"
+                guidanceArrowSystemImage = "arrow.up.circle"
+                guidanceText = "Raise the phone for an overhead view while keeping the object centered."
+            }
+            backgroundWarning = "Object Orbit needs low, middle, and high views before it is ready."
         } else if rgbFrames < 8 {
             readinessState = "Not ready"
             nextAction = "Begin a wider side-step arc"
@@ -2045,6 +2061,10 @@ final class CaptureController: NSObject, ObservableObject {
         return (elevationBand, distanceBand)
     }
 
+    private func missingTargetElevationBand() -> Int? {
+        targetElevationBandCounts.firstIndex(where: { $0 == 0 })
+    }
+
     private func updateCoverageHint() {
         let covered = coveredSectorCount()
         let partial = partialSectorCount()
@@ -2121,10 +2141,12 @@ final class CaptureController: NSObject, ObservableObject {
         targetCoverageSector = target
         let targetBandHint: String
         if usesSubjectTargetGuidance, isObjectTargetLocked {
-            if targetElevationBandCounts[2] == 0 {
-                targetBandHint = " | add a high angle"
+            if targetElevationBandCounts[0] == 0 {
+                targetBandHint = " | add an object-level angle"
             } else if targetElevationBandCounts[1] == 0 {
                 targetBandHint = " | add a mid angle"
+            } else if targetElevationBandCounts[2] == 0 {
+                targetBandHint = " | add a high angle"
             } else if targetDistanceBandCounts[2] == 0 {
                 targetBandHint = " | add a wider view"
             } else {
@@ -2379,7 +2401,7 @@ final class CaptureController: NSObject, ObservableObject {
     private func keyframeReport() -> [String: Any] {
         [
             "schema": "capture_splat.keyframe_report.v0.1",
-            "capture_model": isSmartAutoCaptureEnabled ? "quality_gated_smart_keyframes" : "fixed_interval_diagnostic",
+            "capture_model": "quality_gated_smart_keyframes",
             "minimum_keyframe_interval_seconds": activeMinimumKeyframeInterval,
             "max_captured_frames": activeMaxCapturedFrames,
             "keyframe_score_threshold": activeKeyframeScoreThreshold,
@@ -2682,7 +2704,7 @@ final class CaptureController: NSObject, ObservableObject {
         }
         var report: [String: Any] = [
             "schema": "capture_splat.object_matte_report.v0.1",
-            "matte_model": "locked_object_extent_depth_band_pose_support_v0.1",
+            "matte_model": "pose_adjusted_object_extent_depth_band_v0.2",
             "scan_target_mode": scanTargetMode,
             "object_locked": isObjectTargetLocked,
             "object_extent_locked": isObjectExtentLocked,
@@ -2736,15 +2758,6 @@ final class CaptureController: NSObject, ObservableObject {
         sectorIndex: Int,
         frameQuality: FrameQualityEstimate
     ) -> KeyframeDecision {
-        guard isSmartAutoCaptureEnabled else {
-            return KeyframeDecision(
-                shouldCapture: true,
-                reason: "fixed_interval",
-                score: 1.0,
-                sectorIndex: sectorIndex,
-                frameQuality: frameQuality
-            )
-        }
         guard trackingStatus == "normal" else {
             return KeyframeDecision(
                 shouldCapture: false,
@@ -3382,8 +3395,13 @@ final class CaptureController: NSObject, ObservableObject {
         let x1 = max(x0 + 1, min(width, Int(ceil(centerX + Double(boxWidth) * 0.5))))
         let y1 = max(y0 + 1, min(height, Int(ceil(centerY + Double(boxHeight) * 0.5))))
         let depthMargin = max(0.03, (extent.depthMaxMeters - extent.depthMinMeters) * 0.10)
-        let minDepth = max(0.01, extent.depthMinMeters - depthMargin)
-        let maxDepth = extent.depthMaxMeters + depthMargin
+        let projectedDepth = projection["optical_depth_meters"] as? Double
+        let currentCenterDepth = projectedDepth.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+            ?? extent.centerDepthMeters
+        let nearRadius = max(0.01, extent.centerDepthMeters - extent.depthMinMeters)
+        let farRadius = max(0.01, extent.depthMaxMeters - extent.centerDepthMeters)
+        let minDepth = max(0.01, currentCenterDepth - nearRadius - depthMargin)
+        let maxDepth = currentCenterDepth + farRadius + depthMargin
         let sampleStride = 2
         var validSamples = 0
         var confidenceSamples = 0
@@ -3421,6 +3439,9 @@ final class CaptureController: NSObject, ObservableObject {
         }
         return [
             "support_status": supportStatus,
+            "depth_band_model": projectedDepth == nil
+                ? "locked_center_fallback"
+                : "pose_adjusted_projected_center",
             "depth_bbox_px": ["x0": x0, "y0": y0, "x1": x1, "y1": y1, "w": width, "h": height],
             "depth_band_meters": ["min": minDepth, "max": maxDepth],
             "valid_sample_count": validSamples,

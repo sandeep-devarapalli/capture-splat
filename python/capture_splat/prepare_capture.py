@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import tempfile
 from copy import deepcopy
@@ -136,6 +137,17 @@ def _derive_object_mask(
     y1 = max(y0, min(height, int(bbox.get("y1", height))))
     minimum = float(band.get("min", 0.0))
     maximum = float(band.get("max", 0.0))
+    projection = record.get("projection")
+    projected_depth = projection.get("optical_depth_meters") if isinstance(projection, dict) else None
+    if (
+        isinstance(projected_depth, (int, float))
+        and math.isfinite(float(projected_depth))
+        and float(projected_depth) > 0
+        and maximum > minimum
+    ):
+        locked_center = (minimum + maximum) * 0.5
+        minimum = max(0.01, float(projected_depth) - (locked_center - minimum))
+        maximum = float(projected_depth) + (maximum - locked_center)
     if x1 <= x0 or y1 <= y0 or maximum <= minimum:
         return False
     region = depth[y0:y1, x0:x1]
@@ -163,6 +175,33 @@ def _duplicate(candidate: Candidate, prior: list[Candidate], tolerance: float) -
         and abs(item.timestamp - candidate.timestamp) <= tolerance
         for item in prior
     )
+
+
+def _candidate_quality(candidate: Candidate) -> tuple[float, float, float]:
+    quality = candidate.frame.get("capture_quality") or candidate.frame.get("quality") or {}
+    if not isinstance(quality, dict):
+        return (0.0, 0.0, 0.0)
+
+    def finite_value(name: str) -> float:
+        value = quality.get(name, 0.0)
+        return float(value) if isinstance(value, (int, float)) and math.isfinite(float(value)) else 0.0
+
+    return (
+        finite_value("parallax_meters"),
+        finite_value("blur_score"),
+        finite_value("feature_grid_coverage"),
+    )
+
+
+def _downselect_candidates(candidates: list[Candidate], target: int) -> list[Candidate]:
+    if len(candidates) <= target:
+        return candidates
+    selected: list[Candidate] = []
+    for index in range(target):
+        start = index * len(candidates) // target
+        end = (index + 1) * len(candidates) // target
+        selected.append(max(candidates[start:end], key=_candidate_quality))
+    return selected
 
 
 def _copy(path: Path, destination: Path) -> None:
@@ -315,10 +354,11 @@ def prepare_capture(
     recipe_name, recipe_source = resolve_recipe(capture, recipe)
     recipe_config = deepcopy(RECIPES[recipe_name])
     subject_masks_required = recipe_name == "object"
-    target = max(1, min(int(target_frames or recipe_config["target_frames"]), 600))
+    requested_target = max(1, min(int(target_frames or recipe_config["target_frames"]), 600))
     accepted = _candidates(capture_dir, capture, "accepted_rgbd")
     if not accepted:
         raise ValueError("capture has no accepted RGB-D frames")
+    target = min(requested_target, len(accepted)) if subject_masks_required else requested_target
     warnings: list[str] = []
     finalization_status, finalization_warnings = _finalization_status(capture_dir, capture)
     warnings.extend(finalization_warnings)
@@ -332,7 +372,7 @@ def prepare_capture(
     frame_index = capture_dir / str(capture.get("frame_index_file", "metadata/frame_index.jsonl"))
     video_records = _load_json_lines(frame_index)
     with tempfile.TemporaryDirectory(prefix="capture_splat_prepare_") as temporary:
-        if len(accepted) < target and video.exists() and frame_index.exists():
+        if not subject_masks_required and len(accepted) < target and video.exists() and frame_index.exists():
             extracted_dir = Path(temporary) / "video_frames"
             extraction_summary = run_extract_frames(
                 video,
@@ -354,7 +394,7 @@ def prepare_capture(
                         supplements.append(item)
             else:
                 warnings.append("video_frame_pose_attachment_empty")
-        elif len(accepted) < target:
+        elif not subject_masks_required and len(accepted) < target:
             warnings.append("continuous_video_or_frame_index_missing")
         merged = accepted + supplements
         merged.sort(key=lambda item: (
@@ -363,8 +403,9 @@ def prepare_capture(
             item.source_kind,
         ))
         frames_dir = out_dir / "frames"
+        selected = _downselect_candidates(merged, target)
         prepared_frames, copied, mask_records = _write_frames(
-            merged[:target],
+            selected,
             frames_dir,
             person_records,
             object_records,
@@ -440,9 +481,11 @@ def prepare_capture(
         "capture_dir": str(capture_dir),
         "output_dir": str(out_dir),
         "recipe": {"name": recipe_name, "source": recipe_source},
+        "requested_target_frames": requested_target,
         "target_frames": target,
         "accepted_rgbd_frames": len(accepted),
         "continuous_video_supplements": len(supplements),
+        "selection": "temporal_bins_ranked_by_parallax_blur_features",
         "prepared_frames": actual_count,
         "copied_sidecars": copied,
         "camera_evidence": camera_report,

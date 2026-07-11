@@ -158,3 +158,34 @@ and exposed the next two operational issues:
 
 The next evidence gate is global SfM registration on this prepared package,
 followed by the 3000-step VkSplat rung and fixed-camera render/source QA.
+
+## Corrected Desk and Object Orbit Captures (2026-07-11)
+
+Two fresh physical captures finalized without the previous recorder crash and
+preserved zero-drop full-resolution HEVC streams. Both reached a `serious`
+thermal state, so shorter connected passes and a cool starting device remain
+important.
+
+- The 91-second Desk / Cluster pass saved 360 RGB-D frames, but the removable
+  Auto control had been disabled and produced fixed-interval diagnostic frames.
+  Capture QA correctly held on mean parallax (`0.036 m`). Quality-ranked
+  temporal preparation raised the selected 120-frame mean to about `0.049 m`,
+  still just below the gate. Video 3DGS Max now makes Smart quality-gated
+  keyframes mandatory instead of exposing a timed fallback.
+- The 167-second Object Orbit pass saved 75 accepted RGB-D frames and promoted
+  at the capture gate, with mean parallax around `0.120 m`. It covered 8 of 12
+  azimuth sectors but was heavily biased toward high views: only two mid-angle
+  frames and no low-angle frame were recorded. Object readiness now requires
+  low, middle, and high-angle support.
+- The object was explicitly locked at about `0.374 m`, but its projected depth
+  later moved beyond the original static depth band. Pose-adjusted depth bands
+  now follow per-frame optical depth. Re-preparing the real export produced 75
+  of 75 white-valid masks with no missing frames.
+- Strict Object Orbit preparation now caps itself at accepted RGB-D evidence
+  and never fills a masked package with unmasked continuous-video frames. The
+  repaired real package contains 75 prepared frames, zero video supplements,
+  complete camera/depth/confidence/object-mask sidecars, and a `ready` decision.
+
+These are capture and preparation results. They do not establish COLMAP
+registration or 3DGS appearance quality. The next reconstruction gate remains
+global SfM, then the 3000-step VkSplat rung and fixed-camera render/source QA.

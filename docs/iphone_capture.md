@@ -42,6 +42,11 @@ samples are too clustered. Accepted frames record `feature_grid_coverage` as a
 lightweight pre-COLMAP proxy for whether useful texture is spread across the
 view.
 
+Smart quality-gated keyframes are mandatory in Video 3DGS Max. The app does
+not expose a timed/fixed-interval fallback: more frames are useful only when
+they retain blur, exposure, tracking, overlap, parallax, and feature-support
+evidence. Rejected candidates remain telemetry and are not trainer input.
+
 Desk / Cluster and Detail Repair are full-scene captures. They start without a
 single-point subject lock so a nearby bottle, keyboard, or other small item does
 not accidentally define the whole reconstruction mask. Preparation keeps the
@@ -52,8 +57,10 @@ until **Lock Subject** becomes available, tap it explicitly, and then press
 **Record**. Record never acquires a target lock. The lock action requires three
 consistent LiDAR center-depth observations within 0.6 seconds and records
 target-relative azimuth, elevation, and distance coverage. The visible target
-control can reset a stale lock. This is capture guidance, not object identity
-or metric-geometry authority.
+control can reset a stale lock. Readiness requires low, middle, and high-angle
+support. The saved object depth band follows the target's projected optical
+depth per frame instead of remaining fixed at the initial lock distance. This
+is capture guidance, not object identity or metric-geometry authority.
 
 Room, Desk / Cluster, Corridor, Wall / Facade, Outdoor Object, RoomPlan +
 3DGS, and Detail Repair never acquire or require a single-point subject lock.
@@ -119,6 +126,10 @@ recapture before training.
 canonical white-valid masks. ARKit per-frame pinhole intrinsics remain priors;
 Capture Splat records that distortion is unavailable instead of inventing
 coefficients. COLMAP-refined cameras remain the visual reconstruction baseline.
+Object Orbit preparation never pads a strict masked package with unmasked
+continuous-video frames. For other intents, temporal downselection ranks
+candidates by parallax, blur, and distributed feature support while preserving
+coverage across the full capture duration.
 
 For rooms, move in small connected side steps around the perimeter. Keep the
 previous wall, corner, table edge, shelf, or textured object in view while adding

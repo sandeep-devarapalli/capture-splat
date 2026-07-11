@@ -51,7 +51,10 @@ underlying quality gates.
 Only Object Orbit uses a subject target. The user must tap **Lock Subject**
 after the app reports stable center depth, and Record remains disabled until
 that explicit lock succeeds. Record never locks a subject automatically. All
-other capture intents remain full-scene passes.
+other capture intents remain full-scene passes. Video 3DGS Max always uses
+Smart quality-gated keyframes; there is no timed capture fallback. Object Orbit
+readiness requires low, middle, and high-angle support, and its per-frame mask
+follows the projected target depth as the camera moves.
 
 Supported LiDAR iPhones can open Room Plan review during the same video capture
 workflow and export `room_plan/room.usdz`, `room_plan/room_plan_report.json`,

@@ -145,6 +145,71 @@ def test_prepare_capture_writes_non_destructive_object_mask(tmp_path: Path) -> N
     assert (capture / "rgb/frame_000001.jpg").exists()
 
 
+def test_prepare_capture_recenters_legacy_object_depth_band_from_projection(tmp_path: Path) -> None:
+    capture = _capture(tmp_path / "capture", count=1)
+    np.save(capture / "depth/depth_000001.npy", np.full((6, 8), 2.0, dtype=np.float32), allow_pickle=False)
+    (capture / "metadata").mkdir()
+    write_json_strict(capture / "metadata/object_matte_report.json", {
+        "frame_records": [{
+            "rgb": "rgb/frame_000001.jpg",
+            "timestamp": 101.0,
+            "projection": {"optical_depth_meters": 2.0},
+            "depth_support": {
+                "depth_bbox_px": {"x0": 1, "y0": 1, "x1": 7, "y1": 5},
+                "depth_band_meters": {"min": 0.8, "max": 1.2},
+            },
+        }],
+    })
+
+    summary = prepare_capture(capture, tmp_path / "prepared", recipe="object", target_frames=1)
+
+    assert summary["copied_sidecars"]["object_mask"] == 1
+    assert summary["valid_masks"]["missing_frames"] == []
+
+
+def test_prepare_capture_does_not_pad_object_recipe_with_unmasked_video(tmp_path: Path, monkeypatch) -> None:
+    capture = _capture(tmp_path / "capture", count=1)
+    (capture / "video").mkdir()
+    (capture / "video/capture.mov").write_bytes(b"video")
+    (capture / "metadata").mkdir()
+    (capture / "metadata/frame_index.jsonl").write_text("{}\n", encoding="utf-8")
+    write_json_strict(capture / "metadata/object_matte_report.json", {
+        "frame_records": [{
+            "rgb": "rgb/frame_000001.jpg",
+            "timestamp": 101.0,
+            "depth_support": {
+                "depth_bbox_px": {"x0": 1, "y0": 1, "x1": 7, "y1": 5},
+                "depth_band_meters": {"min": 0.8, "max": 1.2},
+            },
+        }],
+    })
+
+    def unexpected_extract(*args, **kwargs):
+        raise AssertionError("strict object preparation must not extract unmasked video supplements")
+
+    monkeypatch.setattr("capture_splat.prepare_capture.run_extract_frames", unexpected_extract)
+    summary = prepare_capture(capture, tmp_path / "prepared", recipe="object", target_frames=3)
+
+    assert summary["requested_target_frames"] == 3
+    assert summary["target_frames"] == 1
+    assert summary["continuous_video_supplements"] == 0
+    assert summary["prepared_frames"] == 1
+
+
+def test_prepare_capture_downselects_temporal_bins_by_parallax(tmp_path: Path) -> None:
+    capture = _capture(tmp_path / "capture", count=6)
+    manifest = load_json_strict(capture / "capture.json")
+    for frame, parallax in zip(manifest["frames"], (0.01, 0.08, 0.02, 0.09, 0.01, 0.10), strict=True):
+        frame["capture_quality"]["parallax_meters"] = parallax
+    write_json_strict(capture / "capture.json", manifest)
+
+    summary = prepare_capture(capture, tmp_path / "prepared", recipe="desk", target_frames=3)
+    prepared = load_json_strict(tmp_path / "prepared/frames/capture.json")
+
+    assert summary["selection"] == "temporal_bins_ranked_by_parallax_blur_features"
+    assert [frame["source_frame_index"] for frame in prepared["frames"]] == [2, 4, 6]
+
+
 def test_prepare_capture_room_masks_cover_every_frame_with_white_valid_semantics(tmp_path: Path) -> None:
     capture = _capture(tmp_path / "capture", count=2)
 

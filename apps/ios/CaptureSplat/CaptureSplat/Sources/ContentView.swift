@@ -302,11 +302,6 @@ struct ContentView: View {
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 160)
 
-                Toggle("Auto", isOn: $capture.isSmartAutoCaptureEnabled)
-                    .toggleStyle(.button)
-                    .font(.caption)
-                    .disabled(capture.isRecording)
-
                 Toggle("Lock", isOn: $capture.isCaptureLockEnabled)
                     .toggleStyle(.button)
                     .font(.caption)
@@ -599,7 +594,7 @@ struct ContentView: View {
     private var keyframeStatusCard: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Label("Smart Keyframes", systemImage: capture.isSmartAutoCaptureEnabled ? "camera.metering.center.weighted" : "timer")
+                Label("Smart Keyframes", systemImage: "camera.metering.center.weighted")
                     .font(.caption)
                     .fontWeight(.semibold)
                 Spacer()
@@ -1102,7 +1097,7 @@ struct ContentView: View {
         NavigationStack {
             Form {
                 Section("Capture") {
-                    Toggle("Smart Auto Capture", isOn: $capture.isSmartAutoCaptureEnabled)
+                    LabeledContent("Keyframes", value: "Smart quality-gated")
                     Toggle("Subject Mask", isOn: $capture.isObjectMaskEnabled)
                 }
             }
@@ -1231,7 +1226,7 @@ struct ContentView: View {
     private var scanModeStatus: String {
         switch scanMode {
         case .objectOrbit:
-            return capture.isSmartAutoCaptureEnabled ? "Smart orbit" : "Timed orbit"
+            return "Smart orbit"
         case .roomWalk:
             return "Room path"
         case .video3DGS:
