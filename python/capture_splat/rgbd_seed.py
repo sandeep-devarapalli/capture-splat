@@ -88,6 +88,10 @@ def _matched_centers(
     target: list[np.ndarray] = []
     names: list[str] = []
     for frame in iter_frames(capture, accepted_only=True):
+        raw = capture["frames"][frame.source_index - 1]
+        depth_relative = raw.get("depth") if isinstance(raw, dict) else None
+        if not isinstance(depth_relative, str) or not (capture_dir / depth_relative).exists():
+            continue
         name = Path(frame.image_path).name
         center = colmap.get(name, colmap.get(Path(name).stem))
         if center is None:

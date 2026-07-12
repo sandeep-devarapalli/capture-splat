@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
 from capture_splat.json_utils import load_json_strict, write_json_strict
@@ -211,6 +212,7 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
         ])
         capture_frames.append({
             "rgb": f"rgb/{name}",
+            "depth": f"depth/{index:06d}.npy",
             "accepted": True,
             "transform_matrix": [
                 [1, 0, 0, center[0]],
@@ -228,6 +230,9 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
         "dataparser_transform": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
     })
     capture = tmp_path / "capture"
+    (capture / "depth").mkdir(parents=True)
+    for index in range(1, len(capture_frames) + 1):
+        np.save(capture / f"depth/{index:06d}.npy", np.ones((3, 4), dtype=np.float32))
     write_json_strict(capture / "capture.json", {
         "schema": "capture_splat.v0.3",
         "intrinsics": {"fl_x": 8, "fl_y": 6, "cx": 4, "cy": 3, "w": 8, "h": 6},

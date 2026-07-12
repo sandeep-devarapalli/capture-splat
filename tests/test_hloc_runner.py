@@ -21,7 +21,7 @@ def test_hloc_frontend_uses_expected_configs_and_single_camera(tmp_path: Path, m
 
     extract_features = SimpleNamespace(
         confs={
-            "eigenplaces": {"name": "eigenplaces", "output": "global"},
+            "netvlad": {"name": "netvlad", "output": "global"},
             "aliked-n16": {"name": "aliked-n16", "output": "aliked"},
         },
         main=extract_main,
@@ -49,6 +49,16 @@ def test_hloc_frontend_uses_expected_configs_and_single_camera(tmp_path: Path, m
     pycolmap = ModuleType("pycolmap")
     pycolmap.CameraMode = SimpleNamespace(SINGLE="single")
     pycolmap.import_images = lambda database, image_dir, mode: calls.append(("import_images", mode))
+    database_handle = SimpleNamespace(name="database-handle")
+
+    class DatabaseContext:
+        def __enter__(self):
+            return database_handle
+
+        def __exit__(self, exc_type, exc, traceback):
+            return None
+
+    pycolmap.Database = SimpleNamespace(open=lambda database: DatabaseContext())
     monkeypatch.setitem(sys.modules, "hloc", hloc)
     monkeypatch.setitem(sys.modules, "pycolmap", pycolmap)
     monkeypatch.setattr("capture_splat.hloc_runner.hloc_status", lambda: {"ready": True})
@@ -60,12 +70,13 @@ def test_hloc_frontend_uses_expected_configs_and_single_camera(tmp_path: Path, m
     summary = run_hloc_frontend(images, tmp_path / "out", tmp_path / "out/database.db", top_k=32)
 
     assert calls[:4] == [
-        ("extract", "eigenplaces"),
+        ("extract", "netvlad"),
         ("pairs", 32),
         ("extract", "aliked-n16"),
         ("match", "lightglue", "aliked"),
     ]
     assert ("import_images", "single") in calls
+    assert ("import_features", "aliked-n16.h5") in calls
     assert ("verify", "matches_importer") in calls
     assert summary["retrieval_top_k"] == 32
     assert summary["camera_mode"] == "single"

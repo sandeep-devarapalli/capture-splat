@@ -20,4 +20,23 @@ capture-splat train-gsplat-ladder \
   --gsplat-root external/gsplat
 ```
 
+Before compiling gsplat, compare `nvcc --version` with
+`python -c 'import torch; print(torch.version.cuda)'`. They must use the same
+CUDA major/minor version. Ubuntu images also need the GLM headers, typically
+from `apt-get install libglm-dev`. Images whose base Python leaks a different
+Torch into PEP 517 build isolation can use the already-verified active
+environment explicitly:
+
+```bash
+python -m pip install --upgrade pip ninja jaxtyping nvtx
+BUILD_3DGUT=0 BUILD_2DGS=0 BUILD_3DGS=1 \
+  CAPTURE_SPLAT_GSPLAT_NO_BUILD_ISOLATION=1 \
+  scripts/setup_gsplat.sh external/gsplat
+```
+
+Do this only after the active Torch build matches `nvcc`; disabling build
+isolation does not repair a CUDA mismatch. The build flags compile only the
+3DGS kernels used by this backend and avoid spending cloud time on unused 2DGS
+and 3DGUT extensions.
+
 This is a fallback training path, not a quality claim. Run finite PLY checks, render/source QA, and weak-frame diagnostics before promoting a rung.

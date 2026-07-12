@@ -9,6 +9,10 @@ fi
 git -C "$ROOT" fetch --depth 1 origin "$REF"
 git -C "$ROOT" checkout --detach "$REF"
 if [ "${CAPTURE_SPLAT_SKIP_GSPLAT_INSTALL:-0}" != "1" ]; then
-  python -m pip install -e "$ROOT"
+  INSTALL_ARGS=(-e "$ROOT")
+  if [ "${CAPTURE_SPLAT_GSPLAT_NO_BUILD_ISOLATION:-0}" = "1" ]; then
+    INSTALL_ARGS+=(--no-build-isolation)
+  fi
+  python -m pip install "${INSTALL_ARGS[@]}"
 fi
 printf 'gsplat source ready at %s (%s).\n' "$ROOT" "$REF"

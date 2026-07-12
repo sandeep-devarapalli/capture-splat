@@ -139,7 +139,7 @@ sequential matching misses on room orbits, and it is only practical on GPU
 builds. Pass `--allow-cpu-matching` to run a deliberate CPU job; the
 summary records `cpu_matching_override` so the evidence trail shows it.
 Prepared packages above 250 frames request the optional HLOC retrieval frontend:
-EigenPlaces top-32 retrieval, ALIKED-N16 features, LightGlue matches, and COLMAP
+NetVLAD top-32 retrieval, ALIKED-N16 features, LightGlue matches, and COLMAP
 geometric verification before GLOMAP/COLMAP mapping. Install it through
 `scripts/setup_sfm.sh`; `hloc_missing` blocks that requested route rather than
 silently changing the experiment to exhaustive SIFT.

@@ -7,9 +7,10 @@ from typing import Any
 
 from .sfm_evidence import apply_camera_priors, filter_hloc_features_by_masks, load_frame_evidence
 
-RETRIEVAL_CONFIG = "eigenplaces"
+RETRIEVAL_CONFIG = "netvlad"
 FEATURE_CONFIG = "aliked-n16"
 MATCHER_CONFIG = "aliked+lightglue"
+PAIRS_FILENAME = f"pairs-{RETRIEVAL_CONFIG}.txt"
 
 
 def hloc_status() -> dict[str, Any]:
@@ -27,7 +28,7 @@ def hloc_status() -> dict[str, Any]:
 
 def planned_frontend(images_dir: Path, out_dir: Path, database: Path, top_k: int) -> list[list[str]]:
     hloc_dir = out_dir / "hloc"
-    pairs = hloc_dir / "pairs-eigenplaces.txt"
+    pairs = hloc_dir / PAIRS_FILENAME
     return [
         ["python-hloc", "extract", RETRIEVAL_CONFIG, str(images_dir), str(hloc_dir)],
         ["python-hloc", "pairs", str(pairs), "--top-k", str(int(top_k))],
@@ -64,7 +65,7 @@ def run_hloc_frontend(
     database = database.resolve()
     hloc_dir = out_dir / "hloc"
     hloc_dir.mkdir(parents=True, exist_ok=True)
-    pairs = hloc_dir / "pairs-eigenplaces.txt"
+    pairs = hloc_dir / PAIRS_FILENAME
     retrieval_conf = extract_features.confs[RETRIEVAL_CONFIG]
     feature_conf = extract_features.confs[FEATURE_CONFIG]
     matcher_conf = match_features.confs[MATCHER_CONFIG]
@@ -88,8 +89,9 @@ def run_hloc_frontend(
     if camera_policy == "per-frame":
         camera_report = apply_camera_priors(database, images_dir, load_frame_evidence(capture_manifest))
     image_ids = reconstruction.get_image_ids(database)
-    reconstruction.import_features(image_ids, database, feature_path)
-    reconstruction.import_matches(image_ids, database, pairs, match_path, None, False)
+    with pycolmap.Database.open(database) as database_handle:
+        reconstruction.import_features(image_ids, database_handle, feature_path)
+        reconstruction.import_matches(image_ids, database_handle, pairs, match_path, None, False)
     verification = planned_frontend(images_dir, out_dir, database, top_k)[-1]
     completed = subprocess.run(verification, text=True)
     if completed.returncode != 0:

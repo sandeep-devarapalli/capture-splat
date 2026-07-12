@@ -118,3 +118,30 @@ def test_build_rgbd_seed_holds_on_bad_alignment_without_augmentation(tmp_path: P
     assert saved["package_augmented"] is False
     assert (tmp_path / "out/package/sparse/0/points3D.bin").exists()
     assert not (tmp_path / "out/metric_seed.ply").exists()
+
+
+def test_build_rgbd_seed_alignment_ignores_non_rgbd_supplements(tmp_path: Path) -> None:
+    source = _source_positions()
+    target = source * 2.0 + np.asarray([1.0, 2.0, 3.0])
+    capture = _write_capture(tmp_path / "capture", source)
+    package = _write_package(tmp_path / "package", target)
+    supplement = capture / "images/000009.jpg"
+    Image.new("RGB", (8, 6), (10, 20, 30)).save(supplement)
+    manifest = load_json_strict(capture / "capture.json")
+    manifest["frames"].append({
+        "rgb": "images/000009.jpg",
+        "timestamp": 9.0,
+        "transform_matrix": np.eye(4).tolist(),
+        "intrinsics": {"fl_x": 4, "fl_y": 4, "cx": 2, "cy": 1.5, "w": 4, "h": 3},
+        "capture_quality": {"accepted": True},
+        "source_kind": "continuous_video",
+    })
+    write_json_strict(capture / "capture.json", manifest)
+    with (package / "sparse/0/images.txt").open("a", encoding="utf-8") as handle:
+        handle.write("9 1 0 0 0 -1000 -1000 -1000 1 000009.jpg\n\n")
+
+    summary = build_rgbd_metric_seed(capture, package, tmp_path / "out", max_points=100)
+
+    assert summary["decision"] == "promote"
+    assert summary["alignment"]["matched_cameras"] == len(source)
+    assert "000009.jpg" not in summary["matched_frame_names"]

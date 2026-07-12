@@ -110,7 +110,7 @@ ladder only uses that repair when `--sanitize-non-finite-ply` is set.
 
 For prepared packages over 250 frames, install the optional HLOC tools
 with `PYTHON_BIN=.venv/bin/python scripts/setup_sfm.sh external`, then use
-`--features hloc --matcher retrieval`. This runs EigenPlaces top-32 retrieval,
+`--features hloc --matcher retrieval`. This runs NetVLAD top-32 retrieval,
 ALIKED-N16, LightGlue, COLMAP geometric verification, and the requested mapper.
 Missing HLOC is `hloc_missing`; Capture Splat does not silently substitute
 exhaustive matching.

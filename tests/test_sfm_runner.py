@@ -64,7 +64,7 @@ def test_method_alias_is_incremental() -> None:
 def test_build_commands_retrieval_never_uses_exhaustive_matcher(tmp_path: Path) -> None:
     commands = build_commands(tmp_path / "images", tmp_path / "out", "glomap", "retrieval", 30, False, None, 8192)
 
-    assert commands[0][0:3] == ["python-hloc", "extract", "eigenplaces"]
+    assert commands[0][0:3] == ["python-hloc", "extract", "netvlad"]
     assert not any("exhaustive_matcher" in command for command in commands)
     assert commands[-2][0:2] == ["glomap", "mapper"]
 

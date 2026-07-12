@@ -1,6 +1,6 @@
 #!/bin/bash
 # Install optional SfM upgrades for `capture-splat sfm`: GLOMAP (global
-# mapper) and HLOC (EigenPlaces retrieval + ALIKED + LightGlue features).
+# mapper) and HLOC (NetVLAD retrieval + ALIKED + LightGlue features).
 # Retrieval writes an explicit blocker when these are missing; it never
 # silently falls back to exhaustive matching.
 set -euo pipefail
