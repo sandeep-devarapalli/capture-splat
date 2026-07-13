@@ -148,6 +148,7 @@ struct ContentView: View {
                             videoCaptureCard
                         }
                         recordExportControls
+                        captureCompletionBanner
                         guidanceReadinessCard
                         if capture.isRecording || capture.captureBlockerStatus != "Clear" {
                             captureBlockerCard
@@ -237,15 +238,19 @@ struct ContentView: View {
                 }
             }
 
+            captureCompletionBanner
+
             HStack(spacing: 8) {
                 Label(capture.nextAction, systemImage: readinessIcon)
                     .foregroundStyle(readinessColor)
                     .fontWeight(.semibold)
                 Spacer()
-                Text("\(coveredSectorCount)/12")
+                Text(capture.coverageDisplayCountText)
                     .monospacedDigit()
-                Text(capture.targetLockDistanceText)
-                    .foregroundStyle(.secondary)
+                if capture.requiresSubjectTarget {
+                    Text(capture.targetLockDistanceText)
+                        .foregroundStyle(.secondary)
+                }
             }
             .font(.caption)
             .lineLimit(1)
@@ -416,6 +421,27 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
+    private var captureCompletionBanner: some View {
+        if let notice = capture.captureCompletionNotice {
+            Label(
+                notice,
+                systemImage: capture.capturePackageState == .ready
+                    ? "checkmark.circle.fill"
+                    : "hourglass.circle.fill"
+            )
+            .font(.caption)
+            .fontWeight(.semibold)
+            .foregroundStyle(capture.capturePackageState == .ready ? .green : .orange)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .accessibilityLabel(notice)
+        }
+    }
+
     private var guidanceReadinessCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 8) {
@@ -424,7 +450,7 @@ struct ContentView: View {
                     .fontWeight(.semibold)
                     .foregroundStyle(readinessColor)
                 Spacer()
-                Text("\(capture.missingSectorCount) missing")
+                Text(capture.coverageDisplayStatusText)
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -441,7 +467,7 @@ struct ContentView: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Label(capture.coverageNavigationText, systemImage: "scope")
+            Label(capture.coverageDisplayNavigationText, systemImage: "scope")
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -736,19 +762,27 @@ struct ContentView: View {
     private var coverageStrip: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Label(viewMode == .guidance ? "Angle Coverage" : "Camera View", systemImage: viewMode == .guidance ? "circle.hexagongrid" : "camera")
+                Label(viewMode == .guidance ? capture.coverageDisplayTitle : "Camera View", systemImage: viewMode == .guidance ? "circle.hexagongrid" : "camera")
                 Spacer()
-                Text("\(capture.coverageHintText) | \(scanModeStatus)")
+                Text("\(capture.coverageDisplayHintText) | \(scanModeStatus)")
                     .foregroundStyle(.secondary)
             }
             .font(.caption)
 
             GeometryReader { proxy in
+                let scores = capture.coverageDisplayScores
                 HStack(spacing: 4) {
-                    ForEach(0..<capture.coverageSectors.count, id: \.self) { index in
+                    ForEach(0..<scores.count, id: \.self) { index in
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(coverageColor(score: capture.coverageSectors[index]))
-                            .frame(width: max((proxy.size.width - 44) / 12, 8), height: 8)
+                            .fill(coverageColor(score: scores[index]))
+                            .frame(
+                                width: max(
+                                    (proxy.size.width - CGFloat(max(scores.count - 1, 0) * 4))
+                                        / CGFloat(max(scores.count, 1)),
+                                    8
+                                ),
+                                height: 8
+                            )
                     }
                 }
             }
@@ -781,12 +815,22 @@ struct ContentView: View {
                         .padding(.vertical, 6)
                         .background(.thinMaterial, in: Capsule())
 
-                    CoverageMiniMap(
-                        scores: capture.coverageSectors,
-                        currentIndex: capture.currentCoverageSector,
-                        targetIndex: capture.targetCoverageSector
-                    )
-                        .frame(width: 156, height: 36)
+                    if capture.usesAngularCoverageDisplay {
+                        CoverageMiniMap(
+                            scores: capture.coverageSectors,
+                            currentIndex: capture.currentCoverageSector,
+                            targetIndex: capture.targetCoverageSector
+                        )
+                            .frame(width: 156, height: 36)
+                    } else {
+                        Label(capture.coverageDisplayHintText, systemImage: capture.currentCaptureIntentOption.systemImage)
+                            .font(.caption2.monospacedDigit())
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(.thinMaterial, in: Capsule())
+                    }
 
                     if scanMode == .roomWalk {
                         Text("\(capture.colmapFeatureText) | \(capture.roomOverlapText)")
@@ -978,12 +1022,23 @@ struct ContentView: View {
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
-                CoverageMiniMap(
-                    scores: capture.coverageSectors,
-                    currentIndex: capture.currentCoverageSector,
-                    targetIndex: capture.targetCoverageSector
-                )
-                    .frame(height: 36)
+                if capture.usesAngularCoverageDisplay {
+                    CoverageMiniMap(
+                        scores: capture.coverageSectors,
+                        currentIndex: capture.currentCoverageSector,
+                        targetIndex: capture.targetCoverageSector
+                    )
+                        .frame(height: 36)
+                } else {
+                    ProgressView(
+                        value: capture.coverageDisplayScores.reduce(0, +),
+                        total: Double(max(capture.coverageDisplayScores.count, 1))
+                    )
+                        .tint(.green)
+                    Text(capture.coverageDisplayHintText)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
                 Text("\(capture.captureBlockerStatus): \(capture.captureBlockerDetail)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -1285,7 +1340,7 @@ struct ContentView: View {
         if capture.captureBlockerStatus != "Clear" {
             return capture.captureBlockerDetail
         }
-        return scanMode == .roomWalk ? capture.colmapCoachDetail : capture.coverageNavigationText
+        return scanMode == .roomWalk ? capture.colmapCoachDetail : capture.coverageDisplayNavigationText
     }
 
     private var overlayActionIcon: String {
@@ -1320,10 +1375,6 @@ struct ContentView: View {
             get: { capture.captureIntent },
             set: { capture.setCaptureIntent($0) }
         )
-    }
-
-    private var coveredSectorCount: Int {
-        capture.coverageSectors.filter { $0 >= 1 }.count
     }
 
     private var targetLockColor: Color {

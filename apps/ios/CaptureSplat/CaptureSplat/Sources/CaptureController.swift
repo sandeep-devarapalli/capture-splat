@@ -177,6 +177,7 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var isFinalizing = false
     @Published private(set) var capturePackageState: CapturePackageState = .idle
     @Published var statusText = "Ready"
+    @Published private(set) var captureCompletionNotice: String?
     @Published var rgbFrames = 0
     @Published var depthFrames = 0
     @Published var imuRows = 0
@@ -230,7 +231,7 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var currentCoverageSector = 0
     @Published var targetCoverageSector = 0
     @Published var coverageNavigationText = "Target sector will appear while scanning."
-    @Published var scanTargetMode = "object"
+    @Published var scanTargetMode = "video_3dgs"
     @Published var isCaptureLockEnabled = true
     private let videoRecorder = CaptureVideoRecorder()
     private var planeAnchors: [UUID: ARPlaneAnchor] = [:]
@@ -345,6 +346,7 @@ final class CaptureController: NSObject, ObservableObject {
     private let location = CLLocationManager()
     private let ciContext = CIContext()
     private let acceptedHaptic = UIImpactFeedbackGenerator(style: .light)
+    private let completionHaptic = UINotificationFeedbackGenerator()
     private let writeQueue = DispatchQueue(label: "capture-splat.writer")
     private let maskWriteQueue = DispatchQueue(label: "capture-splat.person-mask-writer")
     private var frames: [CapturedFrame] = []
@@ -363,6 +365,8 @@ final class CaptureController: NSObject, ObservableObject {
     private var lastAcceptedCameraPosition: SIMD3<Float>?
     private var scheduledFrameCount = 0
     private var isWritingFrame = false
+    private var automaticStopReason: String?
+    private var isAutomaticStopScheduled = false
     private var rgbRateSamples: [TimeInterval] = []
     private var depthRateSamples: [TimeInterval] = []
     private var imuRateSamples: [TimeInterval] = []
@@ -536,8 +540,11 @@ final class CaptureController: NSObject, ObservableObject {
 
     func setCaptureIntent(_ intent: String) {
         guard Self.captureIntentOptions.contains(where: { $0.id == intent }) else { return }
-        if captureIntent != intent, scanTargetMode == "video_3dgs" {
-            clearTargetLock()
+        if captureIntent != intent {
+            captureCompletionNotice = nil
+            if scanTargetMode == "video_3dgs" {
+                clearTargetLock()
+            }
         }
         captureIntent = intent
         isGPSEnabled = intent == "outdoor_object"
@@ -720,6 +727,7 @@ final class CaptureController: NSObject, ObservableObject {
 
     func startRecording() {
         guard !isRecording, !isStarting, !isFinalizing else { return }
+        captureCompletionNotice = nil
         if requiresSubjectTarget, !isObjectTargetLocked {
             statusText = "Lock the subject before recording."
             return
@@ -742,6 +750,10 @@ final class CaptureController: NSObject, ObservableObject {
             return
         }
         defer { isStarting = false }
+        captureCompletionNotice = nil
+        automaticStopReason = nil
+        isAutomaticStopScheduled = false
+        completionHaptic.prepare()
         do {
             let directory = try makeSessionDirectory()
             try makeExportFolders(in: directory)
@@ -795,9 +807,13 @@ final class CaptureController: NSObject, ObservableObject {
             targetDistanceBandCounts = Array(repeating: 0, count: targetDistanceBandCounts.count)
             coverageHintText = "Coverage 0/\(coverageSectors.count)"
             readinessState = "Not ready"
-            nextAction = "Move slowly around the subject"
+            nextAction = scanTargetMode == "video_3dgs"
+                ? "Move slowly with overlapping views"
+                : "Move slowly around the subject"
             missingSectorCount = coverageSectors.count
-            backgroundWarning = "Keep the subject centered; avoid sweeping large background planes."
+            backgroundWarning = scanTargetMode == "video_3dgs"
+                ? "Stay with the selected capture intent; room-wide headings are not required."
+                : "Keep the subject centered; avoid sweeping large background planes."
             guidanceArrowSystemImage = "arrow.up.circle"
             acceptedKeyframes = 0
             skippedKeyframes = 0
@@ -911,7 +927,9 @@ final class CaptureController: NSObject, ObservableObject {
         isRecording = false
         isFinalizing = true
         capturePackageState = .finalizing
-        statusText = "Finalizing capture"
+        statusText = automaticStopReason == "frame_limit"
+            ? "Useful-frame limit reached. Finalizing capture"
+            : "Finalizing capture"
         appendSessionEvent("finalization_started", arTimestamp: lastFrameTimestamp)
         motion.stopDeviceMotionUpdates()
         location.stopUpdatingLocation()
@@ -982,6 +1000,7 @@ final class CaptureController: NSObject, ObservableObject {
             appendSessionEvent("finalization_completed", details: [
                 "video_status": videoResult.status,
                 "mesh_status": meshResult.status,
+                "stop_reason": automaticStopReason ?? "manual",
             ])
             writeSessionSidecars()
             writeFinalizationReport(
@@ -994,6 +1013,10 @@ final class CaptureController: NSObject, ObservableObject {
             statusText = videoResult.succeeded
                 ? "Stopped and finalized \(directory.lastPathComponent)"
                 : "Finalized with video warning: \(videoResult.error ?? videoResult.status)"
+            captureCompletionNotice = videoResult.succeeded
+                ? "Capture complete: \(acceptedKeyframes) useful frames saved."
+                : "Capture saved with a video warning. Review the export before reconstruction."
+            completionHaptic.notificationOccurred(videoResult.succeeded ? .success : .warning)
             capturePackageState = .ready
         } catch {
             appendSessionEvent("finalization_failed", details: ["error": error.localizedDescription])
@@ -1006,6 +1029,8 @@ final class CaptureController: NSObject, ObservableObject {
                 finalizationError: error.localizedDescription
             )
             statusText = "Stopped. Finalize failed: \(error.localizedDescription)"
+            captureCompletionNotice = "Capture stopped, but finalization needs attention."
+            completionHaptic.notificationOccurred(.error)
             capturePackageState = .partial
         }
         isFinalizing = false
@@ -1917,6 +1942,88 @@ final class CaptureController: NSObject, ObservableObject {
         return currentCaptureIntentOption.requiresSubjectLock
     }
 
+    var usesAngularCoverageDisplay: Bool {
+        scanTargetMode == "object" || (scanTargetMode == "video_3dgs" && captureIntent == "object_orbit")
+    }
+
+    var coverageDisplayTitle: String {
+        switch captureIntent {
+        case "scene_cluster": return "Desk Useful Frames"
+        case "room_walkthrough", "full_room_semantic": return "Room Useful Frames"
+        case "object_orbit": return "Orbit Coverage"
+        case "corridor_passage": return "Path Useful Frames"
+        case "facade_wall": return "Wall Useful Frames"
+        case "outdoor_object": return "Outdoor Useful Frames"
+        case "detail_repair": return "Repair Useful Frames"
+        default: return "Useful Frames"
+        }
+    }
+
+    var coverageDisplayScores: [Double] {
+        guard !usesAngularCoverageDisplay else { return coverageSectors }
+        let segmentCount = 6
+        let filledSegments = min(
+            Double(acceptedKeyframes) / Double(max(acceptedFrameGuidanceTarget, 1)) * Double(segmentCount),
+            Double(segmentCount)
+        )
+        return (0..<segmentCount).map { index in
+            min(max(filledSegments - Double(index), 0), 1)
+        }
+    }
+
+    var coverageDisplayHintText: String {
+        guard !usesAngularCoverageDisplay else { return coverageHintText }
+        if acceptedKeyframes >= acceptedFrameGuidanceTarget {
+            return "\(acceptedKeyframes) useful | ready to stop"
+        }
+        return "\(acceptedKeyframes)/\(acceptedFrameGuidanceTarget) useful | \(readinessState)"
+    }
+
+    var coverageDisplayCountText: String {
+        if usesAngularCoverageDisplay {
+            return "\(coveredSectorCount())/\(coverageSectors.count)"
+        }
+        return "\(acceptedKeyframes)/\(acceptedFrameGuidanceTarget)"
+    }
+
+    var coverageDisplayStatusText: String {
+        usesAngularCoverageDisplay ? "\(missingSectorCount) missing" : coverageDisplayCountText
+    }
+
+    var coverageDisplayNavigationText: String {
+        guard !usesAngularCoverageDisplay else { return coverageNavigationText }
+        if acceptedKeyframes >= acceptedFrameGuidanceTarget {
+            return "Useful-frame target reached. Stop unless a visible gap remains."
+        }
+        switch captureIntent {
+        case "scene_cluster":
+            return "Stay around the desk; add side, high, and low views."
+        case "room_walkthrough", "full_room_semantic":
+            return "Keep a connected room path and revisit corners and openings."
+        case "corridor_passage":
+            return "Continue forward with side glances, then return along the path."
+        case "facade_wall":
+            return "Side-step along the wall and add oblique views."
+        case "outdoor_object":
+            return "Keep the outdoor subject stable and add wider views."
+        case "detail_repair":
+            return "Stay on the weak area and add an opposite-side view."
+        default:
+            return currentCaptureIntentOption.guidance
+        }
+    }
+
+    private var acceptedFrameGuidanceTarget: Int {
+        switch captureIntent {
+        case "scene_cluster": return 120
+        case "room_walkthrough", "full_room_semantic": return 180
+        case "corridor_passage", "outdoor_object": return 120
+        case "facade_wall": return 90
+        case "detail_repair": return 60
+        default: return 120
+        }
+    }
+
     var isCapturePackageReady: Bool {
         capturePackageState == .ready
     }
@@ -2365,6 +2472,8 @@ final class CaptureController: NSObject, ObservableObject {
             backgroundWarning = "Accepted haptics are the frames that matter; avoid fast pans."
             guidanceArrowSystemImage = "video.circle"
             guidanceText = "Keep the subject or room edge in view and move smoothly for more overlap."
+        } else if scanTargetMode == "video_3dgs", !usesAngularCoverageDisplay {
+            updateIntentFrameGuidance()
         } else if covered < 4 {
             readinessState = "Not ready"
             nextAction = missingDirectionHint()
@@ -2417,6 +2526,40 @@ final class CaptureController: NSObject, ObservableObject {
             guidanceText = "Good coverage start. Close the loop near where you began."
         }
         updateColmapCoachText()
+    }
+
+    private func updateIntentFrameGuidance() {
+        let target = acceptedFrameGuidanceTarget
+        let needsFinalPass = acceptedKeyframes >= target / 2
+        if acceptedKeyframes >= target {
+            readinessState = "Ready"
+            nextAction = "Ready to stop"
+            backgroundWarning = "Useful-frame readiness is guidance only, not reconstruction quality."
+            guidanceArrowSystemImage = "checkmark.circle"
+            guidanceText = "Stop unless you can name a visible gap around the selected subject."
+            return
+        }
+
+        readinessState = needsFinalPass ? "Good" : "Almost"
+        backgroundWarning = "Stay with the selected subject; room-wide headings are not required."
+        guidanceArrowSystemImage = needsFinalPass ? "arrow.up.and.down.circle" : "arrow.left.and.right.circle"
+        guidanceText = currentCaptureIntentOption.guidance
+        switch captureIntent {
+        case "scene_cluster":
+            nextAction = needsFinalPass ? "Add one high and low desk pass" : "Continue desk side views"
+        case "room_walkthrough", "full_room_semantic":
+            nextAction = needsFinalPass ? "Revisit corners and openings" : "Continue the connected room path"
+        case "corridor_passage":
+            nextAction = needsFinalPass ? "Return along the corridor" : "Continue with side glances"
+        case "facade_wall":
+            nextAction = needsFinalPass ? "Add oblique wall views" : "Continue the lateral wall sweep"
+        case "outdoor_object":
+            nextAction = needsFinalPass ? "Add wider establishing views" : "Continue the slow outdoor orbit"
+        case "detail_repair":
+            nextAction = needsFinalPass ? "Add one opposite-side view" : "Continue the focused repair pass"
+        default:
+            nextAction = needsFinalPass ? "Add final high and low views" : "Continue slow overlapping views"
+        }
     }
 
     private func updateLiveGuidance(from frame: ARFrame, depthMap: CVPixelBuffer) {
@@ -4645,9 +4788,7 @@ extension CaptureController: ARSessionDelegate {
         guard frame.timestamp - lastCandidateFrameTimestamp >= activeMinimumKeyframeInterval else { return }
         lastCandidateFrameTimestamp = frame.timestamp
         guard scheduledFrameCount < activeMaxCapturedFrames else {
-            DispatchQueue.main.async {
-                self.stopRecording()
-            }
+            stopAtUsefulFrameLimit()
             return
         }
         let sectorIndex = coverageSectorIndex(for: frame.camera.transform)
@@ -4734,6 +4875,7 @@ extension CaptureController: ARSessionDelegate {
             }
             if let writeError {
                 DispatchQueue.main.async {
+                    self.scheduledFrameCount = max(self.scheduledFrameCount - 1, 0)
                     self.isWritingFrame = false
                     self.statusText = "Frame write failed: \(writeError.localizedDescription)"
                 }
@@ -4803,8 +4945,26 @@ extension CaptureController: ARSessionDelegate {
                 self.isWritingFrame = false
                 self.statusText = "Recording \(self.rgbFrames) smart frames"
                 self.updateGuidance()
+                if self.acceptedKeyframes >= self.activeMaxCapturedFrames {
+                    self.stopAtUsefulFrameLimit()
+                }
             }
         }
+    }
+
+    private func stopAtUsefulFrameLimit() {
+        guard !isAutomaticStopScheduled, isRecording, !isFinalizing else { return }
+        isAutomaticStopScheduled = true
+        automaticStopReason = "frame_limit"
+        captureCompletionNotice = "\(acceptedKeyframes) useful frames reached. Finalizing..."
+        statusText = "Useful-frame limit reached. Finalizing capture"
+        appendSessionEvent("capture_auto_stopped", arTimestamp: lastFrameTimestamp, details: [
+            "reason": "frame_limit",
+            "accepted_frame_count": acceptedKeyframes,
+            "max_captured_frames": activeMaxCapturedFrames,
+        ])
+        completionHaptic.notificationOccurred(.warning)
+        stopRecording()
     }
 
     private func makeIntrinsics(frame: ARFrame, depthMap: CVPixelBuffer) -> CameraIntrinsics {
