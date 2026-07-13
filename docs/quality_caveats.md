@@ -60,3 +60,9 @@ The background sphere and scene-transform sidecar are packaging aids: seeds
 and coordinate metadata, not reconstruction improvements.
 
 CUDA fallback is a backend choice, not a shortcut around evidence. If gsplat runs where Vulkan is unavailable, keep the same conservative language: finite output, render/source QA decision, weak-frame count, and explicit hold/reject/promote.
+
+The live spatial-guidance wireframe and map are also capture evidence only.
+Visible or colored cells do not prove complete surface coverage, accurate
+geometry, registration, measurement, collision safety, navigation, or a sharp
+3DGS result. Thermal downgrades and unsupported sensors are recorded in
+`metadata/spatial_guidance_report.json` rather than silently overstated.

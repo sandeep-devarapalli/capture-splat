@@ -12,7 +12,7 @@
 
 - v0.1: Video 3DGS capture, export folder, basic blur/exposure/motion feedback.
 - v0.2: Guided capture with haptics, coverage prompts, loop guidance, and less intrusive UI.
-- v0.3: Object and room scan modes with foreground/room completeness reports.
+- v0.3: Video 3DGS capture intents, explicit Object Orbit lock, live LiDAR/trajectory guidance, shared-session RoomPlan semantics, and conservative completeness reports.
 - v0.4: TestFlight-ready distribution and project library.
 - v1.0: Reliable capture scoring, export presets, and on-device preview checks.
 

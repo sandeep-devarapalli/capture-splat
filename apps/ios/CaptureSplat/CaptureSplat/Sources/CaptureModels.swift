@@ -69,6 +69,26 @@ struct CameraIntrinsics: Encodable {
     }
 }
 
+struct SpatialGuidancePoint: Identifiable, Equatable {
+    let id: String
+    let x: Float
+    let z: Float
+    let classification: String
+    let covered: Bool
+}
+
+struct SpatialGuidancePose: Equatable {
+    let x: Float
+    let z: Float
+    let headingRadians: Float
+}
+
+struct SpatialGuidancePathPoint: Identifiable, Equatable {
+    let id: Int
+    let x: Float
+    let z: Float
+}
+
 struct CaptureManifest: Encodable {
     let schema = "capture_splat.v0.3"
     let device: DeviceInfo
@@ -92,6 +112,7 @@ struct CaptureManifest: Encodable {
     let finalizationReportFile = "metadata/finalization_report.json"
     let sessionEventsFile = "metadata/session_events.jsonl"
     let pointCloudPreviewFile = "pointcloud_preview/preview.json"
+    let spatialGuidanceReportFile: String?
     let personMaskIndexFile: String?
     let arkitMeshFile: String?
     let arkitMeshReportFile = "geometry/arkit_mesh_report.json"
@@ -122,6 +143,7 @@ struct CaptureManifest: Encodable {
         case finalizationReportFile = "finalization_report_file"
         case sessionEventsFile = "session_events_file"
         case pointCloudPreviewFile = "pointcloud_preview_file"
+        case spatialGuidanceReportFile = "spatial_guidance_report_file"
         case personMaskIndexFile = "person_mask_index_file"
         case arkitMeshFile = "arkit_mesh_file"
         case arkitMeshReportFile = "arkit_mesh_report_file"

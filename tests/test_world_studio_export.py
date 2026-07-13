@@ -282,6 +282,7 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
         "arkit_mesh_report_file": "geometry/arkit_mesh_report.json",
         "room_plan_semantics_file": "room_plan/room_semantics.json",
         "frame_index_file": "metadata/frame_index.jsonl",
+        "spatial_guidance_report_file": "metadata/spatial_guidance_report.json",
         "frames": capture_frames,
     })
     write_ascii_ply(capture / "geometry" / "arkit_mesh.ply")
@@ -290,6 +291,10 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
     frame_index = capture / "metadata" / "frame_index.jsonl"
     frame_index.parent.mkdir(parents=True, exist_ok=True)
     frame_index.write_text('{"video_frame_index":0}\n', encoding="utf-8")
+    write_json_strict(capture / "metadata" / "spatial_guidance_report.json", {
+        "schema": "capture_splat.spatial_guidance.v0.1",
+        "authority": {"measurement": False, "collision": False, "navigation": False},
+    })
 
     export_world_studio_handoff(
         package,
@@ -306,6 +311,8 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
     assert manifest["assets"]["mesh_report"]["path"] == "navigation_mesh_report.json"
     assert manifest["assets"]["room_semantics"]["coordinate_frame"] == "roomplan_world_unregistered"
     assert manifest["assets"]["camera_trajectory"]["path"] == "camera_trajectory.jsonl"
+    assert manifest["assets"]["spatial_guidance_report"]["path"] == "spatial_guidance_report.json"
+    assert manifest["assets"]["spatial_guidance_report"]["authority"] == "capture_guidance_evidence"
     assert manifest["metric_registration"]["status"] == "accepted"
     assert manifest["metric_registration"]["matched_cameras"] == 8
     assert manifest["metric_registration"]["arkit_to_target"] == [

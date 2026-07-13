@@ -240,7 +240,7 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var isSubjectTargetReady = false
     @Published var isRoomTargetLocked = false
     @Published var targetLockStatus = "Lock object before recording"
-    @Published var targetLockDetail = "Center the object, then tap Lock Object."
+    @Published var targetLockDetail = "Center the object, then tap Lock Subject."
     @Published var targetLockDistanceText = "--"
     @Published var isObjectMaskEnabled = true
     @Published var isObjectExtentLocked = false
@@ -256,6 +256,15 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var roomPlanFile: URL?
     @Published var roomPlanReportFile: URL?
     @Published var roomPlanSemanticsFile: URL?
+    @Published var isSpatialGuidanceVisible = true
+    @Published private(set) var spatialGuidanceMode = "pose_only"
+    @Published private(set) var spatialGuidanceStatus = "RGB tracking"
+    @Published private(set) var spatialGuidanceFaceBudget = 0
+    @Published private(set) var spatialGuidanceUpdateHz = 0.0
+    @Published private(set) var spatialGuidanceShowsMesh = false
+    @Published private(set) var spatialGuidanceCells: [SpatialGuidancePoint] = []
+    @Published private(set) var spatialGuidancePath: [SpatialGuidancePathPoint] = []
+    @Published private(set) var spatialGuidancePose: SpatialGuidancePose?
 
     static let captureIntentOptions: [CaptureIntentOption] = [
         CaptureIntentOption(
@@ -438,6 +447,26 @@ final class CaptureController: NSObject, ObservableObject {
     private var lockedRoomWorldTransform: simd_float4x4?
     private var latestObjectExtentProposal: ObjectExtentProposal?
     private var lockedObjectExtentProposal: ObjectExtentProposal?
+    private var spatialAnchorCells: [UUID: SpatialGuidancePoint] = [:]
+    private var spatialPlaneCells: [UUID: SpatialGuidancePoint] = [:]
+    private var spatialCellObservationCounts: [String: Int] = [:]
+    private var spatialPathPointID = 0
+    private var lastSpatialPathPosition: SIMD2<Float>?
+    private var lastSpatialPoseTimestamp: TimeInterval = -.infinity
+    private var spatialGuidanceUpdateDurationsMs: [Double] = []
+    private var spatialGuidanceUpdateCount = 0
+    private var spatialGuidanceDroppedUpdateCount = 0
+    private var lastSpatialAnchorUpdateTimestamp: [UUID: TimeInterval] = [:]
+    private var spatialGuidanceThermalTransitions: [[String: Any]] = []
+    private var lastSpatialGuidancePolicy = ""
+    private let spatialGuidanceCellSizeMeters: Float = 0.5
+    private let maxSpatialGuidancePathPoints = 240
+    private let maxSpatialGuidanceDurationSamples = 600
+    private var sharedRoomCaptureSession: RoomCaptureSession?
+    private var sharedRoomPlanGeneration: UUID?
+    private var sharedRoomPlanDirectory: URL?
+    private var sharedRoomPlanStopCompletion: (() -> Void)?
+    private var sharedRoomPlanTimeoutWorkItem: DispatchWorkItem?
 
     deinit {
         healthTimer?.invalidate()
@@ -462,7 +491,40 @@ final class CaptureController: NSObject, ObservableObject {
         self.session = session
         session.delegate = self
         session.delegateQueue = .main
+        refreshSpatialGuidanceCapability()
         logger.info("Attached configured AR session on the main delegate queue")
+    }
+
+    var showsObjectExtentGuidance: Bool {
+        requiresSubjectTarget && isObjectMaskEnabled && objectExtentOverlay != nil
+    }
+
+    func setSpatialGuidanceVisible(_ visible: Bool) {
+        isSpatialGuidanceVisible = visible
+        refreshSpatialGuidanceCapability()
+    }
+
+    private func refreshSpatialGuidanceCapability() {
+        let supportsMesh = ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
+        let supportsDepth = ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
+        let supportsPlanes = session != nil
+        if captureIntent == "full_room_semantic", RoomCaptureSession.isSupported, sharedRoomCaptureSession != nil {
+            spatialGuidanceMode = "roomplan_shared"
+            spatialGuidanceStatus = "Room semantics"
+        } else if supportsMesh {
+            spatialGuidanceMode = "lidar_mesh"
+            spatialGuidanceStatus = "LiDAR mesh"
+        } else if supportsDepth {
+            spatialGuidanceMode = "depth_points"
+            spatialGuidanceStatus = "Depth points"
+        } else if supportsPlanes {
+            spatialGuidanceMode = "planes_and_features"
+            spatialGuidanceStatus = "Planes"
+        } else {
+            spatialGuidanceMode = "pose_only"
+            spatialGuidanceStatus = "RGB tracking"
+        }
+        applySpatialGuidanceThermalPolicy(ProcessInfo.processInfo.thermalState)
     }
 
     func setScanTargetMode(_ mode: String) {
@@ -481,6 +543,7 @@ final class CaptureController: NSObject, ObservableObject {
         isGPSEnabled = intent == "outdoor_object"
         updateCaptureProfileText()
         updateGuidance()
+        refreshSpatialGuidanceCapability()
     }
 
     func lockObjectTarget() {
@@ -581,7 +644,7 @@ final class CaptureController: NSObject, ObservableObject {
     func lockObjectExtent() {
         guard isObjectTargetLocked else {
             objectExtentStatus = "Lock object first"
-            objectExtentDetail = "Center the subject and tap Lock Object before confirming extent."
+            objectExtentDetail = "Center the subject and tap Lock Subject before confirming extent."
             return
         }
         guard isObjectMaskEnabled else {
@@ -785,11 +848,25 @@ final class CaptureController: NSObject, ObservableObject {
             roomPlanFile = nil
             roomPlanReportFile = nil
             roomPlanSemanticsFile = nil
+            spatialGuidancePath.removeAll()
+            spatialGuidancePose = nil
+            spatialPathPointID = 0
+            lastSpatialPathPosition = nil
+            lastSpatialPoseTimestamp = -.infinity
+            spatialCellObservationCounts.removeAll()
+            spatialGuidanceUpdateDurationsMs.removeAll()
+            spatialGuidanceUpdateCount = 0
+            spatialGuidanceDroppedUpdateCount = 0
+            lastSpatialAnchorUpdateTimestamp.removeAll()
+            spatialGuidanceThermalTransitions.removeAll()
+            publishSpatialGuidanceCells()
             rgbRateSamples.removeAll()
             depthRateSamples.removeAll()
             imuRateSamples.removeAll()
             gpsRateSamples.removeAll()
             isRecording = true
+            lastSpatialGuidancePolicy = ""
+            applySpatialGuidanceThermalPolicy(ProcessInfo.processInfo.thermalState)
             capturePackageState = .recording
             statusText = "Recording"
             let startupLatency = ProcessInfo.processInfo.systemUptime - requestedAt
@@ -822,6 +899,7 @@ final class CaptureController: NSObject, ObservableObject {
                 location.requestWhenInUseAuthorization()
                 location.startUpdatingLocation()
             }
+            startSharedRoomPlanIfNeeded(in: directory)
         } catch {
             capturePackageState = currentSessionDirectory == nil ? .idle : .partial
             statusText = "Start failed: \(error.localizedDescription)"
@@ -839,14 +917,17 @@ final class CaptureController: NSObject, ObservableObject {
         location.stopUpdatingLocation()
         applyCaptureLocks(false)
         let meshSnapshot = recordedMeshAnchorIDs.compactMap { meshAnchors[$0] }
-        videoRecorder.finish { [weak self] videoResult in
+        stopSharedRoomPlanIfNeeded { [weak self] in
             guard let self else { return }
-            self.writeQueue.async { [weak self] in
+            self.videoRecorder.finish { [weak self] videoResult in
                 guard let self else { return }
-                let meshResult = self.writeARKitMesh(anchors: meshSnapshot)
-                self.maskWriteQueue.async { [weak self] in
-                    DispatchQueue.main.async {
-                        self?.completeCaptureFinalization(videoResult: videoResult, meshResult: meshResult)
+                self.writeQueue.async { [weak self] in
+                    guard let self else { return }
+                    let meshResult = self.writeARKitMesh(anchors: meshSnapshot)
+                    self.maskWriteQueue.async { [weak self] in
+                        DispatchQueue.main.async {
+                            self?.completeCaptureFinalization(videoResult: videoResult, meshResult: meshResult)
+                        }
                     }
                 }
             }
@@ -966,6 +1047,7 @@ final class CaptureController: NSObject, ObservableObject {
                 units: "meters"
             ),
             intrinsics: intrinsics,
+            spatialGuidanceReportFile: "metadata/spatial_guidance_report.json",
             personMaskIndexFile: personMaskWrittenCount > 0 ? "metadata/person_mask_index.jsonl" : nil,
             arkitMeshFile: arkitMeshAvailable ? "geometry/arkit_mesh.ply" : nil,
             videoFile: videoRecorder.appendedFrameCount > 0 ? CaptureVideoRecorder.videoRelativePath : nil,
@@ -1087,6 +1169,7 @@ final class CaptureController: NSObject, ObservableObject {
         writeJSON(objectMatteReport(), to: metadata.appendingPathComponent("object_matte_report.json"))
         writeJSON(capturePolicyReport(), to: metadata.appendingPathComponent("capture_policy.json"))
         writeJSON(sensorCapabilitiesReport(), to: metadata.appendingPathComponent("sensor_capabilities.json"))
+        writeJSON(spatialGuidanceReport(), to: metadata.appendingPathComponent("spatial_guidance_report.json"))
     }
 
     private func writeFinalizationReport(
@@ -1555,22 +1638,73 @@ final class CaptureController: NSObject, ObservableObject {
         roomPlanDetail = message
     }
 
+    private func startSharedRoomPlanIfNeeded(in directory: URL) {
+        guard captureIntent == "full_room_semantic" else {
+            refreshSpatialGuidanceCapability()
+            return
+        }
+        guard RoomCaptureSession.isSupported, let session else {
+            noteRoomPlanFailure("Shared RoomPlan is unavailable. Video 3DGS capture will continue.")
+            appendSessionEvent("room_plan_shared_held", details: ["reason": "unsupported_or_missing_ar_session"])
+            refreshSpatialGuidanceCapability()
+            return
+        }
+
+        let generation = UUID()
+        let roomSession = RoomCaptureSession(arSession: session)
+        roomSession.delegate = self
+        sharedRoomCaptureSession = roomSession
+        sharedRoomPlanGeneration = generation
+        sharedRoomPlanDirectory = directory
+        var configuration = RoomCaptureSession.Configuration()
+        configuration.isCoachingEnabled = false
+        roomPlanStatus = "RoomPlan scanning"
+        roomPlanDetail = "Room semantics share the Video 3DGS camera session."
+        spatialGuidanceMode = "roomplan_shared"
+        spatialGuidanceStatus = "Room semantics"
+        applySpatialGuidanceThermalPolicy(ProcessInfo.processInfo.thermalState)
+        roomSession.run(configuration: configuration)
+        appendSessionEvent("room_plan_shared_started", details: ["generation": generation.uuidString])
+    }
+
+    private func stopSharedRoomPlanIfNeeded(completion: @escaping () -> Void) {
+        guard let roomSession = sharedRoomCaptureSession else {
+            completion()
+            return
+        }
+        sharedRoomPlanStopCompletion = completion
+        roomPlanStatus = "RoomPlan processing"
+        roomPlanDetail = "Building layout evidence in the capture coordinate frame."
+
+        let generation = sharedRoomPlanGeneration
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, self.sharedRoomPlanGeneration == generation else { return }
+            self.noteRoomPlanFailure("RoomPlan processing timed out; RGB-D capture evidence was preserved.")
+            self.appendSessionEvent("room_plan_shared_held", details: ["reason": "processing_timeout"])
+            self.finishSharedRoomPlan()
+        }
+        sharedRoomPlanTimeoutWorkItem = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: timeout)
+        roomSession.stop(pauseARSession: false)
+    }
+
+    private func finishSharedRoomPlan() {
+        sharedRoomPlanTimeoutWorkItem?.cancel()
+        sharedRoomPlanTimeoutWorkItem = nil
+        sharedRoomCaptureSession?.delegate = nil
+        sharedRoomCaptureSession = nil
+        sharedRoomPlanGeneration = nil
+        sharedRoomPlanDirectory = nil
+        let completion = sharedRoomPlanStopCompletion
+        sharedRoomPlanStopCompletion = nil
+        completion?()
+    }
+
     @available(iOS 16.0, *)
     func exportRoomPlan(room: CapturedRoom) {
         do {
             let directory = try prepareRoomPlanDirectory()
-            let roomPlanDirectory = directory.appendingPathComponent("room_plan", isDirectory: true)
-            let usdzURL = roomPlanDirectory.appendingPathComponent("room.usdz")
-            let reportURL = roomPlanDirectory.appendingPathComponent("room_plan_report.json")
-            let semanticsURL = roomPlanDirectory.appendingPathComponent("room_semantics.json")
-            try room.export(to: usdzURL, exportOptions: .mesh)
-            let report = roomPlanReport(room: room)
-            let semantics = roomPlanSemanticsReport(room: room)
-            writeJSON(report, to: reportURL)
-            writeJSON(semantics, to: semanticsURL)
-            roomPlanFile = usdzURL
-            roomPlanReportFile = reportURL
-            roomPlanSemanticsFile = semanticsURL
+            try writeRoomPlanAssets(room: room, directory: directory)
             if !frames.isEmpty {
                 _ = try? writeCaptureManifest()
             }
@@ -1582,6 +1716,21 @@ final class CaptureController: NSObject, ObservableObject {
             roomPlanStatus = "RoomPlan export failed"
             roomPlanDetail = error.localizedDescription
         }
+    }
+
+    @available(iOS 16.0, *)
+    private func writeRoomPlanAssets(room: CapturedRoom, directory: URL) throws {
+        let roomPlanDirectory = directory.appendingPathComponent("room_plan", isDirectory: true)
+        try FileManager.default.createDirectory(at: roomPlanDirectory, withIntermediateDirectories: true)
+        let usdzURL = roomPlanDirectory.appendingPathComponent("room.usdz")
+        let reportURL = roomPlanDirectory.appendingPathComponent("room_plan_report.json")
+        let semanticsURL = roomPlanDirectory.appendingPathComponent("room_semantics.json")
+        try room.export(to: usdzURL, exportOptions: .mesh)
+        writeJSON(roomPlanReport(room: room), to: reportURL)
+        writeJSON(roomPlanSemanticsReport(room: room), to: semanticsURL)
+        roomPlanFile = usdzURL
+        roomPlanReportFile = reportURL
+        roomPlanSemanticsFile = semanticsURL
     }
 
     private func prepareRoomPlanDirectory() throws -> URL {
@@ -1903,8 +2052,10 @@ final class CaptureController: NSObject, ObservableObject {
 
     private func refreshHealth() {
         storageFreeText = availableStorageText()
-        let currentThermalState = thermalStateLabel(ProcessInfo.processInfo.thermalState)
+        let thermalState = ProcessInfo.processInfo.thermalState
+        let currentThermalState = thermalStateLabel(thermalState)
         thermalStateText = currentThermalState
+        applySpatialGuidanceThermalPolicy(thermalState)
         if isRecording, currentThermalState != lastRecordedThermalState {
             appendSessionEvent("thermal_state_changed", details: ["thermal_state": currentThermalState])
             lastRecordedThermalState = currentThermalState
@@ -1938,6 +2089,181 @@ final class CaptureController: NSObject, ObservableObject {
         @unknown default:
             return "unknown"
         }
+    }
+
+    private func applySpatialGuidanceThermalPolicy(_ state: ProcessInfo.ThermalState) {
+        let policy: String
+        switch state {
+        case .nominal, .fair:
+            policy = "full"
+            spatialGuidanceFaceBudget = 60_000
+            spatialGuidanceUpdateHz = 5
+            spatialGuidanceShowsMesh = isSpatialGuidanceVisible
+                && (spatialGuidanceMode == "lidar_mesh" || spatialGuidanceMode == "roomplan_shared")
+        case .serious:
+            policy = "reduced"
+            spatialGuidanceFaceBudget = 30_000
+            spatialGuidanceUpdateHz = 2
+            spatialGuidanceShowsMesh = isSpatialGuidanceVisible
+                && (spatialGuidanceMode == "lidar_mesh" || spatialGuidanceMode == "roomplan_shared")
+        case .critical:
+            policy = "pose_only"
+            spatialGuidanceFaceBudget = 0
+            spatialGuidanceUpdateHz = 0
+            spatialGuidanceShowsMesh = false
+        @unknown default:
+            policy = "reduced"
+            spatialGuidanceFaceBudget = 30_000
+            spatialGuidanceUpdateHz = 2
+            spatialGuidanceShowsMesh = false
+        }
+        guard policy != lastSpatialGuidancePolicy else { return }
+        lastSpatialGuidancePolicy = policy
+        if isRecording {
+            let transition: [String: Any] = [
+                "policy": policy,
+                "thermal_state": thermalStateLabel(state),
+                "face_budget": spatialGuidanceFaceBudget,
+                "update_hz": spatialGuidanceUpdateHz,
+            ]
+            spatialGuidanceThermalTransitions.append(transition)
+            appendSessionEvent("spatial_guidance_policy_changed", details: transition)
+        }
+    }
+
+    private func updateSpatialGuidancePose(from frame: ARFrame) {
+        guard frame.timestamp - lastSpatialPoseTimestamp >= 0.1 else { return }
+        lastSpatialPoseTimestamp = frame.timestamp
+        let transform = frame.camera.transform
+        let position = SIMD2<Float>(transform.columns.3.x, transform.columns.3.z)
+        let forward = cameraForward(transform)
+        spatialGuidancePose = SpatialGuidancePose(
+            x: position.x,
+            z: position.y,
+            headingRadians: atan2(forward.x, forward.z)
+        )
+        if lastSpatialPathPosition.map({ simd_distance($0, position) >= 0.1 }) ?? true {
+            spatialGuidancePath.append(SpatialGuidancePathPoint(
+                id: spatialPathPointID,
+                x: position.x,
+                z: position.y
+            ))
+            spatialPathPointID += 1
+            lastSpatialPathPosition = position
+            if spatialGuidancePath.count > maxSpatialGuidancePathPoints {
+                spatialGuidancePath.removeFirst(spatialGuidancePath.count - maxSpatialGuidancePathPoints)
+            }
+        }
+    }
+
+    private func recordSpatialGuidanceAnchor(_ anchor: ARAnchor) {
+        guard spatialGuidanceUpdateHz > 0 else {
+            spatialGuidanceDroppedUpdateCount += 1
+            return
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        if let lastUpdate = lastSpatialAnchorUpdateTimestamp[anchor.identifier],
+           now - lastUpdate < 1 / spatialGuidanceUpdateHz {
+            spatialGuidanceDroppedUpdateCount += 1
+            return
+        }
+        lastSpatialAnchorUpdateTimestamp[anchor.identifier] = now
+        let started = ProcessInfo.processInfo.systemUptime
+        if let mesh = anchor as? ARMeshAnchor {
+            let point = spatialGuidancePoint(
+                id: mesh.identifier,
+                transform: mesh.transform,
+                classification: dominantMeshClassification(mesh.geometry)
+            )
+            spatialAnchorCells[mesh.identifier] = point
+        } else if let plane = anchor as? ARPlaneAnchor {
+            let center = plane.transform * SIMD4<Float>(plane.center.x, plane.center.y, plane.center.z, 1)
+            var transform = matrix_identity_float4x4
+            transform.columns.3 = SIMD4<Float>(center.x, center.y, center.z, 1)
+            spatialPlaneCells[plane.identifier] = spatialGuidancePoint(
+                id: plane.identifier,
+                transform: transform,
+                classification: planeClassificationLabel(plane.classification)
+            )
+        } else {
+            return
+        }
+        publishSpatialGuidanceCells()
+        let duration = (ProcessInfo.processInfo.systemUptime - started) * 1_000
+        spatialGuidanceUpdateCount += 1
+        spatialGuidanceUpdateDurationsMs.append(duration)
+        if spatialGuidanceUpdateDurationsMs.count > maxSpatialGuidanceDurationSamples {
+            spatialGuidanceUpdateDurationsMs.removeFirst()
+        }
+    }
+
+    private func spatialGuidancePoint(
+        id: UUID,
+        transform: simd_float4x4,
+        classification: String
+    ) -> SpatialGuidancePoint {
+        let x = transform.columns.3.x
+        let z = transform.columns.3.z
+        let key = spatialGuidanceCellKey(x: x, z: z)
+        return SpatialGuidancePoint(
+            id: "\(id.uuidString):\(key)",
+            x: x,
+            z: z,
+            classification: classification,
+            covered: spatialCellObservationCounts[key, default: 0] > 0
+        )
+    }
+
+    private func spatialGuidanceCellKey(x: Float, z: Float) -> String {
+        "\(Int(floor(x / spatialGuidanceCellSizeMeters))):\(Int(floor(z / spatialGuidanceCellSizeMeters)))"
+    }
+
+    private func publishSpatialGuidanceCells() {
+        var cells: [String: SpatialGuidancePoint] = [:]
+        for point in Array(spatialAnchorCells.values) + Array(spatialPlaneCells.values) {
+            let key = spatialGuidanceCellKey(x: point.x, z: point.z)
+            let covered = spatialCellObservationCounts[key, default: 0] > 0
+            if cells[key] == nil || cells[key]?.classification == "none" {
+                cells[key] = SpatialGuidancePoint(
+                    id: key,
+                    x: point.x,
+                    z: point.z,
+                    classification: point.classification,
+                    covered: covered
+                )
+            }
+        }
+        spatialGuidanceCells = cells.values.sorted { $0.id < $1.id }
+    }
+
+    private func markSpatialGuidanceCoverage(at position: SIMD3<Float>, forward: SIMD3<Float>) {
+        let rawForward = SIMD2<Float>(forward.x, forward.z)
+        let forwardLength = simd_length(rawForward)
+        guard forwardLength.isFinite, forwardLength > 0.001 else { return }
+        let forwardXZ = rawForward / forwardLength
+        for point in spatialGuidanceCells {
+            let offset = SIMD2<Float>(point.x - position.x, point.z - position.z)
+            let distance = simd_length(offset)
+            guard distance >= 0.2, distance <= 2.5 else { continue }
+            let direction = offset / distance
+            guard simd_dot(forwardXZ, direction) >= 0.35 else { continue }
+            let key = spatialGuidanceCellKey(x: point.x, z: point.z)
+            spatialCellObservationCounts[key, default: 0] += 1
+        }
+        publishSpatialGuidanceCells()
+    }
+
+    private func dominantMeshClassification(_ geometry: ARMeshGeometry) -> String {
+        let source = geometry.classification
+        let faceCount = geometry.faces.count
+        guard faceCount > 0 else { return "none" }
+        let stride = max(1, faceCount / 256)
+        var counts: [UInt8: Int] = [:]
+        for index in Swift.stride(from: 0, to: faceCount, by: stride) {
+            let value = meshClassification(source, faceIndex: index)
+            counts[value, default: 0] += 1
+        }
+        return meshClassificationLabel(counts.max { $0.value < $1.value }?.key ?? 0)
     }
 
     private func recordRateSample(_ samples: inout [TimeInterval], at timestamp: TimeInterval) -> Double {
@@ -2129,7 +2455,7 @@ final class CaptureController: NSObject, ObservableObject {
                 targetLockStatus = "Lock object before recording"
                 targetLockDetail = latestTargetCandidateDistance == nil
                     ? "Center the object and wait for LiDAR depth."
-                    : "Center the object, then tap Lock Object."
+                    : "Center the object, then tap Lock Subject."
             }
         case "room":
             if isRoomTargetLocked {
@@ -2226,15 +2552,19 @@ final class CaptureController: NSObject, ObservableObject {
         return values[values.count / 2]
     }
 
-    private func recordAcceptedCoverage(from frame: ARFrame, sectorIndex: Int) {
+    private func recordAcceptedCoverage(
+        timestamp: TimeInterval,
+        transform: simd_float4x4,
+        sectorIndex: Int
+    ) {
         let index = min(max(sectorIndex, 0), coverageSectorCounts.count - 1)
         let previousCount = coverageSectorCounts[index]
         coverageSectorCounts[index] = min(previousCount + 1, coverageObservationTarget)
         coverageSectors = coverageSectorCounts.map { Double($0) / Double(coverageObservationTarget) }
         if coverageSectorCounts[index] != previousCount {
-            appendCoverageHistorySample(timestamp: frame.timestamp, sectorIndex: index, guidancePointCount: guidancePoints.count)
+            appendCoverageHistorySample(timestamp: timestamp, sectorIndex: index, guidancePointCount: guidancePoints.count)
         }
-        if let bands = targetCoverageBands(for: frame.camera.transform) {
+        if let bands = targetCoverageBands(for: transform) {
             targetElevationBandCounts[bands.elevation] += 1
             targetDistanceBandCounts[bands.distance] += 1
         }
@@ -2733,6 +3063,94 @@ final class CaptureController: NSObject, ObservableObject {
                 "vertical_requested": true,
             ],
             "fallback_policy": "preserve_rgbd_capture_and_report_unavailable_optional_sensors",
+        ]
+    }
+
+    private func spatialGuidanceReport() -> [String: Any] {
+        let path = spatialGuidancePath.filter { $0.x.isFinite && $0.z.isFinite }
+        let pathLength = zip(path, path.dropFirst()).reduce(0.0) { partial, pair in
+            partial + Double(simd_distance(
+                SIMD2<Float>(pair.0.x, pair.0.z),
+                SIMD2<Float>(pair.1.x, pair.1.z)
+            ))
+        }
+        let loopClosed: Bool
+        if let first = path.first, let last = path.last, pathLength >= 3 {
+            loopClosed = simd_distance(
+                SIMD2<Float>(first.x, first.z),
+                SIMD2<Float>(last.x, last.z)
+            ) <= 1
+        } else {
+            loopClosed = false
+        }
+        let coveredCells = spatialGuidanceCells.filter(\.covered)
+        var classCoverage: [String: [String: Int]] = [:]
+        for cell in spatialGuidanceCells {
+            classCoverage[cell.classification, default: ["observed": 0, "covered": 0]]["observed", default: 0] += 1
+            if cell.covered {
+                classCoverage[cell.classification, default: ["observed": 0, "covered": 0]]["covered", default: 0] += 1
+            }
+        }
+        let durations = spatialGuidanceUpdateDurationsMs.filter(\.isFinite).sorted()
+        let averageDuration = durations.isEmpty ? 0 : durations.reduce(0, +) / Double(durations.count)
+        let p95Index = durations.isEmpty ? 0 : min(Int((Double(durations.count - 1) * 0.95).rounded(.up)), durations.count - 1)
+        let p95Duration = durations.isEmpty ? 0 : durations[p95Index]
+        let sourceTriangleCount = meshAnchors.values.reduce(0) { $0 + $1.geometry.faces.count }
+
+        return [
+            "schema": "capture_splat.spatial_guidance.v0.1",
+            "capture_intent": captureIntent,
+            "capability_mode": spatialGuidanceMode,
+            "guidance_visible": isSpatialGuidanceVisible,
+            "capabilities": [
+                "lidar_scene_depth": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
+                "scene_mesh": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
+                "mesh_classification": ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification),
+                "plane_detection": session != nil,
+                "room_plan": RoomCaptureSession.isSupported,
+            ],
+            "geometry": [
+                "source_mesh_anchor_count": meshAnchors.count,
+                "source_plane_anchor_count": planeAnchors.count,
+                "source_triangle_count": sourceTriangleCount,
+                "preview_renderer": "realitykit_scene_understanding",
+                "preview_face_budget": spatialGuidanceFaceBudget,
+                "renderer_managed_triangle_count": true,
+            ],
+            "coverage": [
+                "cell_size_meters": spatialGuidanceCellSizeMeters,
+                "observed_cell_count": spatialGuidanceCells.count,
+                "accepted_keyframe_covered_cell_count": coveredCells.count,
+                "accepted_keyframe_coverage_ratio": spatialGuidanceCells.isEmpty
+                    ? 0
+                    : Double(coveredCells.count) / Double(spatialGuidanceCells.count),
+                "surface_classes": classCoverage,
+            ],
+            "trajectory": [
+                "sample_count": path.count,
+                "length_meters": pathLength,
+                "loop_closed": loopClosed,
+            ],
+            "performance": [
+                "target_update_hz": spatialGuidanceUpdateHz,
+                "update_count": spatialGuidanceUpdateCount,
+                "dropped_update_count": spatialGuidanceDroppedUpdateCount,
+                "average_update_ms": averageDuration,
+                "p95_update_ms": p95Duration,
+            ],
+            "thermal_transitions": spatialGuidanceThermalTransitions,
+            "room_plan": [
+                "status": roomPlanFile == nil ? roomPlanStatus : "exported",
+                "usdz_written": roomPlanFile != nil,
+                "semantics_written": roomPlanSemanticsFile != nil,
+            ],
+            "authority": [
+                "measurement": false,
+                "collision": false,
+                "semantic_ground_truth": false,
+                "navigation": false,
+                "quality": false,
+            ],
         ]
     }
 
@@ -3927,7 +4345,7 @@ final class CaptureController: NSObject, ObservableObject {
         }
         guard isObjectTargetLocked else {
             objectExtentStatus = "Lock object first"
-            objectExtentDetail = "Center the object, then tap Lock Object."
+            objectExtentDetail = "Center the object, then tap Lock Subject."
             return
         }
         if isObjectExtentLocked {
@@ -4062,6 +4480,57 @@ final class CaptureController: NSObject, ObservableObject {
     }
 }
 
+extension CaptureController: RoomCaptureSessionDelegate {
+    func captureSession(_ session: RoomCaptureSession, didUpdate room: CapturedRoom) {
+        guard session === sharedRoomCaptureSession else { return }
+        updateRoomPlanPreview(room: room)
+    }
+
+    func captureSession(_ session: RoomCaptureSession, didProvide instruction: RoomCaptureSession.Instruction) {
+        guard session === sharedRoomCaptureSession else { return }
+        noteRoomPlanInstruction(instruction)
+    }
+
+    func captureSession(
+        _ session: RoomCaptureSession,
+        didEndWith data: CapturedRoomData,
+        error: Error?
+    ) {
+        guard session === sharedRoomCaptureSession,
+              let generation = sharedRoomPlanGeneration,
+              let directory = sharedRoomPlanDirectory else { return }
+        if let error {
+            noteRoomPlanFailure(error.localizedDescription)
+            appendSessionEvent("room_plan_shared_held", details: ["reason": error.localizedDescription])
+            finishSharedRoomPlan()
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let builder = RoomBuilder(options: [.beautifyObjects])
+                let room = try await builder.capturedRoom(from: data)
+                guard self.sharedRoomPlanGeneration == generation else { return }
+                try self.writeRoomPlanAssets(room: room, directory: directory)
+                let summary = self.roomPlanSummary(room)
+                self.roomPlanStatus = "RoomPlan exported"
+                self.roomPlanDetail = summary.detail
+                self.roomPlanSummaryText = summary.shortText
+                self.appendSessionEvent("room_plan_shared_exported", details: [
+                    "walls": room.walls.count,
+                    "objects": room.objects.count,
+                ])
+            } catch {
+                guard self.sharedRoomPlanGeneration == generation else { return }
+                self.noteRoomPlanFailure(error.localizedDescription)
+                self.appendSessionEvent("room_plan_shared_held", details: ["reason": error.localizedDescription])
+            }
+            self.finishSharedRoomPlan()
+        }
+    }
+}
+
 extension CaptureController: ARSessionDelegate {
     func session(_ session: ARSession, didFailWithError error: Error) {
         logger.error("AR session failed: \(error.localizedDescription, privacy: .public)")
@@ -4101,6 +4570,7 @@ extension CaptureController: ARSessionDelegate {
                 meshAnchors[mesh.identifier] = mesh
                 if isRecording { recordedMeshAnchorIDs.insert(mesh.identifier) }
             }
+            recordSpatialGuidanceAnchor(anchor)
         }
     }
 
@@ -4113,6 +4583,7 @@ extension CaptureController: ARSessionDelegate {
                 meshAnchors[mesh.identifier] = mesh
                 if isRecording { recordedMeshAnchorIDs.insert(mesh.identifier) }
             }
+            recordSpatialGuidanceAnchor(anchor)
         }
     }
 
@@ -4120,12 +4591,16 @@ extension CaptureController: ARSessionDelegate {
         for anchor in anchors {
             if anchor is ARPlaneAnchor {
                 planeAnchors.removeValue(forKey: anchor.identifier)
+                spatialPlaneCells.removeValue(forKey: anchor.identifier)
             }
             if anchor is ARMeshAnchor {
                 meshAnchors.removeValue(forKey: anchor.identifier)
                 recordedMeshAnchorIDs.remove(anchor.identifier)
+                spatialAnchorCells.removeValue(forKey: anchor.identifier)
             }
+            lastSpatialAnchorUpdateTimestamp.removeValue(forKey: anchor.identifier)
         }
+        publishSpatialGuidanceCells()
     }
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
@@ -4138,6 +4613,7 @@ extension CaptureController: ARSessionDelegate {
             lastRecordedTrackingState = currentTrackingState
         }
         latestFeaturePointCount = frame.rawFeaturePoints?.points.count ?? 0
+        updateSpatialGuidancePose(from: frame)
         updateMotionRate(from: frame)
         if isRecording, currentSessionDirectory != nil {
             videoRecorder.append(frame: frame, captureDevice: Self.primaryCaptureDevice)
@@ -4307,7 +4783,15 @@ extension CaptureController: ARSessionDelegate {
                 self.recordAcceptedRoomPath(position: acceptedPosition)
                 self.lastAcceptedCameraPosition = acceptedPosition
                 self.lastAcceptedExposureMean = keyframeDecision.exposureMean
-                self.recordAcceptedCoverage(from: frame, sectorIndex: keyframeDecision.sectorIndex)
+                self.recordAcceptedCoverage(
+                    timestamp: timestamp,
+                    transform: transform,
+                    sectorIndex: keyframeDecision.sectorIndex
+                )
+                self.markSpatialGuidanceCoverage(
+                    at: acceptedPosition,
+                    forward: self.cameraForward(transform)
+                )
                 self.recordKeyframeEvent(
                     accepted: true,
                     decision: keyframeDecision,

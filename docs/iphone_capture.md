@@ -9,6 +9,20 @@ Use **Video 3DGS Max** for training input. The app records quality-gated RGB-D
 keyframes plus a continuous HEVC video and timestamped ARKit pose/intrinsics
 index. It does not train 3DGS on-device.
 
+The capture view defaults to **Guidance**. On supported LiDAR iPhones it shows
+RealityKit scene-understanding wireframe plus a gravity-aligned map of the
+camera trail, observed surface cells, accepted-keyframe coverage, and heading.
+Switch to **Camera** to hide these inspection overlays without changing the
+capture gate. At serious thermal state the guidance update budget is reduced;
+at critical thermal state mesh rendering is disabled while trajectory,
+blockers, recording, and export continue.
+
+Without LiDAR, Guidance degrades to detected planes, feature points, and camera
+trajectory where ARKit provides them. This is not dense RGB-only surface
+reconstruction, and the normal Capture Splat RGB-D package still requires scene
+depth. Mirrors, glass, distant surfaces, harsh sunlight, and moving objects can
+also leave LiDAR coverage incomplete.
+
 ## Capture-Time Quality Gate
 
 The app accepts smart keyframes instead of exporting every AR frame. A haptic
@@ -108,14 +122,22 @@ It also opens a native LiDAR preview backed by
 points from accepted keyframes. Use it as capture guidance evidence; full mesh
 or splat quality still needs host validation.
 
-Room mode also includes a **Room Plan** review surface on supported LiDAR
-iPhones. It opens Apple's RoomPlan scanner so you can inspect wall, opening,
-floor, and large-object layout while capturing a room. Stopping the Room Plan
-scan writes `room_plan/room.usdz` and `room_plan/room_plan_report.json` in the
-current capture folder when available. It also writes
-`room_plan/room_semantics.json` with conservative room-element proposals. Treat this as room-layout guidance and
-scale/context evidence only; it is not COLMAP registration proof, collision
-geometry, or a 3DGS quality claim.
+For the **RoomPlan + 3DGS** intent, Apple's RoomPlan processing shares the
+existing Video 3DGS AR session instead of opening a second camera. Stopping
+capture keeps that AR session alive while RoomBuilder writes
+`room_plan/room.usdz`, `room_plan/room_plan_report.json`, and
+`room_plan/room_semantics.json` in the same capture folder. RoomPlan failure or
+a bounded processing timeout is reported as a hold and does not discard valid
+RGB-D/video evidence. The separate Room Plan sheet remains available as a
+recovery/debug path during physical validation.
+
+Every finalized capture also writes
+`metadata/spatial_guidance_report.json`. It records the resolved sensor mode,
+surface-cell and trajectory evidence, update timing, thermal downgrades, and
+RoomPlan status. Its measurement, collision, semantic-ground-truth,
+navigation, and quality authority flags are all false. Treat RoomPlan and live
+coverage as capture guidance and scale/context evidence only; neither proves
+COLMAP registration, collision geometry, complete coverage, or 3DGS quality.
 
 Before COLMAP or VkSplat, run:
 

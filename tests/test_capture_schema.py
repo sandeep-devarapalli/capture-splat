@@ -38,6 +38,7 @@ def test_load_capture_v03_with_capture_policy_sidecars(tmp_path: Path) -> None:
         "capture_policy_file": "metadata/capture_policy.json",
         "sensor_capabilities_file": "metadata/sensor_capabilities.json",
         "finalization_report_file": "metadata/finalization_report.json",
+        "spatial_guidance_report_file": "metadata/spatial_guidance_report.json",
     })
     write_json_strict(manifest, data)
 
@@ -45,3 +46,4 @@ def test_load_capture_v03_with_capture_policy_sidecars(tmp_path: Path) -> None:
 
     assert loaded["schema"] == "capture_splat.v0.3"
     assert loaded["capture_policy_file"] == "metadata/capture_policy.json"
+    assert loaded["spatial_guidance_report_file"] == "metadata/spatial_guidance_report.json"

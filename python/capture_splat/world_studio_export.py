@@ -443,6 +443,9 @@ def export_world_studio_handoff(
     camera_trajectory = camera_trajectory or _capture_asset(
         capture_manifest, capture_data, "frame_index_file", "metadata/frame_index.jsonl"
     )
+    spatial_guidance = _capture_asset(
+        capture_manifest, capture_data, "spatial_guidance_report_file", "metadata/spatial_guidance_report.json"
+    )
     measurement_points = measurement_points or _first_existing(package, ("metric_seed.ply",))
 
     copied_images = _copy_images(images, out_dir, copy_files)
@@ -459,6 +462,9 @@ def export_world_studio_handoff(
     copied_mesh_report = _copy_asset(mesh_report, out_dir, "navigation_mesh_report.json", copy_files)
     copied_room_semantics = _copy_asset(room_semantics, out_dir, "room_semantics.json", copy_files)
     copied_camera_trajectory = _copy_asset(camera_trajectory, out_dir, "camera_trajectory.jsonl", copy_files)
+    copied_spatial_guidance = _copy_asset(
+        spatial_guidance, out_dir, "spatial_guidance_report.json", copy_files
+    )
     copied_measurement_points = _copy_asset(measurement_points, out_dir, "measurement_points.ply", copy_files)
 
     assets: dict[str, Any] = {}
@@ -503,6 +509,10 @@ def export_world_studio_handoff(
     if copied_camera_trajectory:
         assets["camera_trajectory"] = _metric_asset_ref(
             copied_camera_trajectory, out_dir, "arkit_world", "metric_capture_evidence", "meters"
+        )
+    if copied_spatial_guidance:
+        assets["spatial_guidance_report"] = _metric_asset_ref(
+            copied_spatial_guidance, out_dir, "arkit_world", "capture_guidance_evidence", "meters"
         )
     if copied_measurement_points:
         assets["measurement_points"] = _metric_asset_ref(

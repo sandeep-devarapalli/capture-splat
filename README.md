@@ -64,7 +64,12 @@ person/object masks only as proposals. Its strict summary includes capture QA,
 finalization state, and an `sfm_request` resolved from the actual prepared frame
 count. A `hold` preserves usable evidence; it is not a quality claim.
 
-For room scans, the iPhone app also has a Room Plan review path on supported LiDAR iPhones. It can export `room_plan/room.usdz` plus a conservative layout report as capture guidance, not as 3DGS quality proof.
+The iPhone app defaults to live spatial Guidance: LiDAR scene-understanding
+wireframe, a gravity-aligned trail/surface map, and accepted-keyframe coverage
+when supported, with honest plane/feature/pose fallbacks. The `RoomPlan + 3DGS`
+intent shares the Video 3DGS AR session and can export `room_plan/room.usdz`
+plus conservative semantic and guidance reports. These are capture evidence,
+not collision, navigation, measurement, or 3DGS quality proof.
 
 Then run:
 

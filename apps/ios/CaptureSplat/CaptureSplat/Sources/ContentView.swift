@@ -36,7 +36,7 @@ private enum ScanMode: String, CaseIterable, Identifiable {
 }
 
 private enum ScanViewMode: String, CaseIterable, Identifiable {
-    case scan = "Scan"
+    case guidance = "Guidance"
     case camera = "Camera"
 
     var id: String { rawValue }
@@ -55,7 +55,7 @@ struct ContentView: View {
     @EnvironmentObject private var capture: CaptureController
     @State private var selectedTab: WorkspaceTab = .capture
     @State private var scanMode: ScanMode = .video3DGS
-    @State private var viewMode: ScanViewMode = .scan
+    @State private var viewMode: ScanViewMode = .guidance
     @State private var isCapturePanelExpanded = false
     @State private var activeSheet: ActiveSheet?
 
@@ -64,7 +64,7 @@ struct ContentView: View {
             ARCaptureView()
                 .ignoresSafeArea()
 
-            if selectedTab == .capture, viewMode == .scan {
+            if selectedTab == .capture, viewMode == .guidance {
                 scanGuidanceOverlay
             }
 
@@ -86,9 +86,13 @@ struct ContentView: View {
         .task {
             capture.prepareSensors()
             capture.setScanTargetMode(scanMode.controllerTargetMode)
+            capture.setSpatialGuidanceVisible(viewMode == .guidance)
         }
         .onChange(of: scanMode) { _, mode in
             capture.setScanTargetMode(mode.controllerTargetMode)
+        }
+        .onChange(of: viewMode) { _, mode in
+            capture.setSpatialGuidanceVisible(mode == .guidance)
         }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
@@ -137,7 +141,7 @@ struct ContentView: View {
                         if scanMode != .video3DGS {
                             targetLockCard
                         }
-                        if scanMode == .objectOrbit {
+                        if capture.requiresSubjectTarget {
                             objectExtentCard
                         }
                         if scanMode == .video3DGS {
@@ -534,7 +538,7 @@ struct ContentView: View {
                         capture.lockObjectTarget()
                     }
                 } label: {
-                    Label(scanMode == .roomWalk ? "Lock Room" : "Lock Object", systemImage: "scope")
+                    Label(scanMode == .roomWalk ? "Lock Room" : "Lock Subject", systemImage: "scope")
                 }
                 .buttonStyle(.bordered)
                 .disabled(capture.isRecording || scanMode == .outdoor)
@@ -732,7 +736,7 @@ struct ContentView: View {
     private var coverageStrip: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Label(viewMode == .scan ? "Angle Coverage" : "Camera View", systemImage: viewMode == .scan ? "circle.hexagongrid" : "camera")
+                Label(viewMode == .guidance ? "Angle Coverage" : "Camera View", systemImage: viewMode == .guidance ? "circle.hexagongrid" : "camera")
                 Spacer()
                 Text("\(capture.coverageHintText) | \(scanModeStatus)")
                     .foregroundStyle(.secondary)
@@ -797,6 +801,21 @@ struct ContentView: View {
                 .padding(.top, 72)
                 .padding(.leading, 14)
 
+                VStack {
+                    HStack {
+                        Spacer()
+                        SpatialGuidanceMiniMap(
+                            mode: capture.spatialGuidanceStatus,
+                            cells: capture.spatialGuidanceCells,
+                            path: capture.spatialGuidancePath,
+                            pose: capture.spatialGuidancePose
+                        )
+                    }
+                    Spacer()
+                }
+                .padding(.top, 72)
+                .padding(.trailing, 14)
+
                 VStack(spacing: 6) {
                     targetReticle
                     Text(primaryOverlayAction)
@@ -839,7 +858,7 @@ struct ContentView: View {
 
     private func objectExtentOverlay(in proxy: GeometryProxy) -> some View {
         Group {
-            if let box = capture.objectExtentOverlay, scanMode == .objectOrbit {
+            if let box = capture.objectExtentOverlay, capture.showsObjectExtentGuidance {
                 Rectangle()
                     .stroke(capture.isObjectExtentLocked ? .green : .yellow, style: StrokeStyle(lineWidth: 2, dash: [7, 5]))
                     .frame(
@@ -1587,6 +1606,92 @@ private struct CoverageMiniMap: View {
             return .yellow.opacity(0.85)
         }
         return .secondary.opacity(0.3)
+    }
+}
+
+private struct SpatialGuidanceMiniMap: View {
+    let mode: String
+    let cells: [SpatialGuidancePoint]
+    let path: [SpatialGuidancePathPoint]
+    let pose: SpatialGuidancePose?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Image(systemName: "map")
+                Text(mode)
+                    .lineLimit(1)
+            }
+            .font(.caption2)
+            .fontWeight(.semibold)
+
+            Canvas { context, size in
+                let samples = cells.map { SIMD2<Float>($0.x, $0.z) }
+                    + path.map { SIMD2<Float>($0.x, $0.z) }
+                    + (pose.map { [SIMD2<Float>($0.x, $0.z)] } ?? [])
+                guard !samples.isEmpty else { return }
+                let minX = samples.map(\.x).min() ?? 0
+                let maxX = samples.map(\.x).max() ?? 0
+                let minZ = samples.map(\.y).min() ?? 0
+                let maxZ = samples.map(\.y).max() ?? 0
+                let span = max(maxX - minX, maxZ - minZ, 2)
+                let scale = Float(min(size.width, size.height) - 12) / span
+                let center = SIMD2<Float>((minX + maxX) * 0.5, (minZ + maxZ) * 0.5)
+
+                func project(_ point: SIMD2<Float>) -> CGPoint {
+                    CGPoint(
+                        x: size.width * 0.5 + CGFloat((point.x - center.x) * scale),
+                        y: size.height * 0.5 - CGFloat((point.y - center.y) * scale)
+                    )
+                }
+
+                for cell in cells {
+                    let point = project(SIMD2<Float>(cell.x, cell.z))
+                    let rect = CGRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6)
+                    context.fill(
+                        Path(roundedRect: rect, cornerRadius: 1.5),
+                        with: .color(surfaceColor(cell.classification).opacity(cell.covered ? 0.9 : 0.32))
+                    )
+                }
+
+                if path.count > 1 {
+                    var trail = Path()
+                    trail.move(to: project(SIMD2<Float>(path[0].x, path[0].z)))
+                    for point in path.dropFirst() {
+                        trail.addLine(to: project(SIMD2<Float>(point.x, point.z)))
+                    }
+                    context.stroke(trail, with: .color(.white.opacity(0.72)), lineWidth: 1.5)
+                }
+
+                if let pose {
+                    let origin = project(SIMD2<Float>(pose.x, pose.z))
+                    let direction = CGVector(
+                        dx: CGFloat(sin(pose.headingRadians)) * 11,
+                        dy: CGFloat(-cos(pose.headingRadians)) * 11
+                    )
+                    var arrow = Path()
+                    arrow.move(to: origin)
+                    arrow.addLine(to: CGPoint(x: origin.x + direction.dx, y: origin.y + direction.dy))
+                    context.stroke(arrow, with: .color(.orange), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    context.fill(Path(ellipseIn: CGRect(x: origin.x - 3, y: origin.y - 3, width: 6, height: 6)), with: .color(.orange))
+                }
+            }
+            .frame(width: 124, height: 96)
+        }
+        .padding(8)
+        .frame(width: 140, height: 132, alignment: .topLeading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func surfaceColor(_ classification: String) -> Color {
+        switch classification {
+        case "floor": return .teal
+        case "wall", "ceiling": return .cyan
+        case "door": return .orange
+        case "window": return .blue
+        case "table", "seat": return .mint
+        default: return .gray
+        }
     }
 }
 
