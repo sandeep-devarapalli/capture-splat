@@ -206,6 +206,54 @@ def _metric_asset_ref(
     return ref
 
 
+def _mesh_walk_evidence(report_path: Path | None) -> dict[str, Any]:
+    if report_path is None or not report_path.exists():
+        return {"status": "held", "reason": "mesh_report_missing"}
+    try:
+        report = load_json_strict(report_path)
+    except (OSError, ValueError):
+        return {"status": "held", "reason": "mesh_report_invalid"}
+    if not isinstance(report, dict) or report.get("status") != "finite_mesh_written":
+        return {"status": "held", "reason": "finite_mesh_not_reported"}
+    non_finite = report.get("non_finite_vertex_count", 0)
+    if not isinstance(non_finite, int) or non_finite != 0:
+        return {"status": "held", "reason": "non_finite_mesh_vertices"}
+    budget_limited = report.get("budget_limited", report.get("truncated", False)) is True
+    if not budget_limited:
+        return {"status": "accepted", "reason": "complete_finite_mesh"}
+    coverage_preserving = report.get("coverage_preserving") is True
+    anchor_ratio = report.get("anchor_coverage_ratio")
+    spatial_ratio = report.get("spatial_cell_coverage_ratio")
+    ratios_complete = all(
+        isinstance(value, (int, float))
+        and math.isfinite(float(value))
+        and 0.999 <= float(value) <= 1.001
+        for value in (anchor_ratio, spatial_ratio)
+    )
+    counts_complete = (
+        isinstance(report.get("eligible_anchor_count"), int)
+        and report["eligible_anchor_count"] > 0
+        and report.get("exported_anchor_count") == report["eligible_anchor_count"]
+        and isinstance(report.get("source_spatial_cell_count"), int)
+        and report["source_spatial_cell_count"] > 0
+        and report.get("exported_spatial_cell_count") == report["source_spatial_cell_count"]
+    )
+    selection_policy = report.get("selection_policy")
+    if (
+        report.get("schema") == "capture_splat.arkit_mesh_report.v0.2"
+        and coverage_preserving
+        and ratios_complete
+        and counts_complete
+        and selection_policy == "anchor_spatial_stratified_even_faces_v1"
+    ):
+        return {
+            "status": "accepted",
+            "reason": "coverage_preserving_budgeted_mesh",
+            "selection_policy": selection_policy,
+        }
+    return {"status": "held", "reason": "source_mesh_truncated"}
+
+
 def _metric_registration(
     capture_manifest: Path | None,
     package: Path,
@@ -500,11 +548,23 @@ def export_world_studio_handoff(
         manifest.get("dataparser_transform"),
     )
     manifest["metric_registration"] = registration
-    if copied_navigation_mesh and registration["status"] == "accepted":
+    mesh_walk_evidence = _mesh_walk_evidence(copied_mesh_report)
+    manifest["mesh_walk_evidence"] = mesh_walk_evidence
+    if (
+        copied_navigation_mesh
+        and registration["status"] == "accepted"
+        and mesh_walk_evidence["status"] == "accepted"
+    ):
         manifest["walk_eligibility"] = {
             "status": "eligible",
-            "reason": "registered_metric_mesh",
+            "reason": mesh_walk_evidence["reason"],
             "authority": "capture_metric_evidence_not_collision_validation",
+        }
+    elif copied_navigation_mesh and registration["status"] == "accepted":
+        manifest["walk_eligibility"] = {
+            "status": "held",
+            "reason": mesh_walk_evidence["reason"],
+            "authority": "fly_only",
         }
     elif copied_navigation_mesh:
         manifest["walk_eligibility"] = {

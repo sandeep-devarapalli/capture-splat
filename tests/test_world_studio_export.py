@@ -4,7 +4,11 @@ import numpy as np
 from PIL import Image
 
 from capture_splat.json_utils import load_json_strict, write_json_strict
-from capture_splat.world_studio_export import MANIFEST_NAME, export_world_studio_handoff
+from capture_splat.world_studio_export import (
+    MANIFEST_NAME,
+    _mesh_walk_evidence,
+    export_world_studio_handoff,
+)
 
 
 def write_image(path: Path) -> None:
@@ -27,6 +31,44 @@ def write_ascii_ply(path: Path) -> None:
         ]) + "\n",
         encoding="ascii",
     )
+
+
+def test_mesh_walk_evidence_holds_legacy_truncated_mesh(tmp_path: Path) -> None:
+    report = tmp_path / "arkit_mesh_report.json"
+    write_json_strict(report, {
+        "status": "finite_mesh_written",
+        "non_finite_vertex_count": 0,
+        "truncated": True,
+    })
+
+    assert _mesh_walk_evidence(report) == {
+        "status": "held",
+        "reason": "source_mesh_truncated",
+    }
+
+
+def test_mesh_walk_evidence_accepts_explicit_spatial_coverage(tmp_path: Path) -> None:
+    report = tmp_path / "arkit_mesh_report.json"
+    write_json_strict(report, {
+        "schema": "capture_splat.arkit_mesh_report.v0.2",
+        "status": "finite_mesh_written",
+        "non_finite_vertex_count": 0,
+        "budget_limited": True,
+        "coverage_preserving": True,
+        "eligible_anchor_count": 12,
+        "exported_anchor_count": 12,
+        "anchor_coverage_ratio": 1.0,
+        "source_spatial_cell_count": 9,
+        "exported_spatial_cell_count": 9,
+        "spatial_cell_coverage_ratio": 1.0,
+        "selection_policy": "anchor_spatial_stratified_even_faces_v1",
+    })
+
+    assert _mesh_walk_evidence(report) == {
+        "status": "accepted",
+        "reason": "coverage_preserving_budgeted_mesh",
+        "selection_policy": "anchor_spatial_stratified_even_faces_v1",
+    }
 
 
 def test_export_world_studio_writes_relative_handoff_manifest(tmp_path: Path) -> None:

@@ -157,6 +157,16 @@ private struct MeshExportResult {
     let error: String?
 }
 
+private struct MeshAnchorExportPlan {
+    let anchor: ARMeshAnchor
+    let sourceVertexCount: Int
+    let sourceTriangleCount: Int
+    let spatialCell: SIMD3<Int32>
+    var triangleQuota = 0
+    var nextTriangle = 0
+    var exportedTriangleCount = 0
+}
+
 final class CaptureController: NSObject, ObservableObject {
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "capture_splat",
@@ -1152,72 +1162,177 @@ final class CaptureController: NSObject, ObservableObject {
         let plyURL = directory.appendingPathComponent("geometry/arkit_mesh.ply")
         let maxVertices = 200_000
         let maxTriangles = 300_000
+        let spatialCellSizeMeters: Float = 0.5
         var vertices: [SIMD3<Float>] = []
         var faces: [(UInt32, UInt32, UInt32, UInt8)] = []
         var classificationCounts: [String: Int] = [:]
+        var sourceClassificationCounts: [String: Int] = [:]
         var nonFiniteVertexCount = 0
-        var truncated = false
+        var invalidFaceCount = 0
+        var degenerateFaceCount = 0
+        var vertexBudgetSkippedTriangleCount = 0
+        var plans: [MeshAnchorExportPlan] = []
 
-        for anchor in anchors.sorted(by: { $0.identifier.uuidString < $1.identifier.uuidString }) {
-            if vertices.count >= maxVertices || faces.count >= maxTriangles {
-                truncated = true
-                break
-            }
+        for anchor in anchors {
             let geometry = anchor.geometry
-            let source = geometry.vertices
-            var localToGlobal = Array(repeating: Int32(-1), count: source.count)
-            for localIndex in 0..<source.count {
-                if vertices.count >= maxVertices {
-                    truncated = true
-                    break
-                }
-                let address = source.buffer.contents().advanced(by: source.offset + localIndex * source.stride)
-                let values = address.assumingMemoryBound(to: Float.self)
-                let local = SIMD3<Float>(values[0], values[1], values[2])
-                let world4 = anchor.transform * SIMD4<Float>(local.x, local.y, local.z, 1)
-                let world = SIMD3<Float>(world4.x, world4.y, world4.z)
-                guard world.x.isFinite, world.y.isFinite, world.z.isFinite else {
-                    nonFiniteVertexCount += 1
-                    continue
-                }
-                localToGlobal[localIndex] = Int32(vertices.count)
-                vertices.append(world)
-            }
-
             let elements = geometry.faces
-            guard elements.primitiveType == .triangle, elements.indexCountPerPrimitive == 3 else { continue }
-            for faceIndex in 0..<elements.count {
-                if faces.count >= maxTriangles {
-                    truncated = true
-                    break
+            guard elements.primitiveType == .triangle,
+                  elements.indexCountPerPrimitive == 3,
+                  elements.count > 0 else { continue }
+            for localIndex in 0..<geometry.vertices.count {
+                if meshWorldVertex(geometry.vertices, at: localIndex, transform: anchor.transform) == nil {
+                    nonFiniteVertexCount += 1
                 }
+            }
+            for faceIndex in 0..<elements.count {
+                let classification = meshClassification(geometry.classification, faceIndex: faceIndex)
+                sourceClassificationCounts[meshClassificationLabel(classification), default: 0] += 1
+            }
+            let origin = anchor.transform.columns.3
+            guard origin.x.isFinite, origin.y.isFinite, origin.z.isFinite else { continue }
+            plans.append(MeshAnchorExportPlan(
+                anchor: anchor,
+                sourceVertexCount: geometry.vertices.count,
+                sourceTriangleCount: elements.count,
+                spatialCell: SIMD3<Int32>(
+                    Int32(floor(origin.x / spatialCellSizeMeters)),
+                    Int32(floor(origin.y / spatialCellSizeMeters)),
+                    Int32(floor(origin.z / spatialCellSizeMeters))
+                )
+            ))
+        }
+
+        plans.sort { lhs, rhs in
+            if lhs.spatialCell.x != rhs.spatialCell.x { return lhs.spatialCell.x < rhs.spatialCell.x }
+            if lhs.spatialCell.y != rhs.spatialCell.y { return lhs.spatialCell.y < rhs.spatialCell.y }
+            if lhs.spatialCell.z != rhs.spatialCell.z { return lhs.spatialCell.z < rhs.spatialCell.z }
+            return lhs.anchor.identifier.uuidString < rhs.anchor.identifier.uuidString
+        }
+        let sourceVertexCount = plans.reduce(0) { $0 + $1.sourceVertexCount }
+        let sourceTriangleCount = plans.reduce(0) { $0 + $1.sourceTriangleCount }
+        let quotas = meshTriangleQuotas(
+            counts: plans.map(\.sourceTriangleCount),
+            budget: maxTriangles
+        )
+        for index in plans.indices {
+            plans[index].triangleQuota = quotas[index]
+        }
+
+        var localToGlobal = plans.map {
+            Array(repeating: Int32(-1), count: $0.sourceVertexCount)
+        }
+        var activePlans = plans.indices.filter { plans[$0].triangleQuota > 0 }
+        while !activePlans.isEmpty, faces.count < maxTriangles {
+            var nextActivePlans: [Int] = []
+            for planIndex in activePlans {
+                let plan = plans[planIndex]
+                let faceIndex = meshSampleIndex(
+                    ordinal: plan.nextTriangle,
+                    sourceCount: plan.sourceTriangleCount,
+                    sampleCount: plan.triangleQuota
+                )
+                plans[planIndex].nextTriangle += 1
+                let geometry = plan.anchor.geometry
+                let elements = geometry.faces
                 let baseIndex = faceIndex * elements.indexCountPerPrimitive
                 guard let localA = meshIndex(elements, at: baseIndex),
                       let localB = meshIndex(elements, at: baseIndex + 1),
                       let localC = meshIndex(elements, at: baseIndex + 2),
-                      Int(localA) < localToGlobal.count,
-                      Int(localB) < localToGlobal.count,
-                      Int(localC) < localToGlobal.count else {
+                      localA != localB, localA != localC, localB != localC,
+                      Int(localA) < plan.sourceVertexCount,
+                      Int(localB) < plan.sourceVertexCount,
+                      Int(localC) < plan.sourceVertexCount else {
+                    invalidFaceCount += 1
+                    if plans[planIndex].nextTriangle < plan.triangleQuota {
+                        nextActivePlans.append(planIndex)
+                    }
                     continue
                 }
-                let globalA = localToGlobal[Int(localA)]
-                let globalB = localToGlobal[Int(localB)]
-                let globalC = localToGlobal[Int(localC)]
-                guard globalA >= 0, globalB >= 0, globalC >= 0 else { continue }
+                guard let worldA = meshWorldVertex(geometry.vertices, at: Int(localA), transform: plan.anchor.transform),
+                      let worldB = meshWorldVertex(geometry.vertices, at: Int(localB), transform: plan.anchor.transform),
+                      let worldC = meshWorldVertex(geometry.vertices, at: Int(localC), transform: plan.anchor.transform) else {
+                    invalidFaceCount += 1
+                    if plans[planIndex].nextTriangle < plan.triangleQuota {
+                        nextActivePlans.append(planIndex)
+                    }
+                    continue
+                }
+                let areaSquared = simd_length_squared(simd_cross(worldB - worldA, worldC - worldA))
+                guard areaSquared.isFinite, areaSquared > 1e-12 else {
+                    degenerateFaceCount += 1
+                    if plans[planIndex].nextTriangle < plan.triangleQuota {
+                        nextActivePlans.append(planIndex)
+                    }
+                    continue
+                }
+
+                let localIndices = [Int(localA), Int(localB), Int(localC)]
+                let worldVertices = [worldA, worldB, worldC]
+                let newVertexCount = localIndices.reduce(0) {
+                    $0 + (localToGlobal[planIndex][$1] < 0 ? 1 : 0)
+                }
+                guard vertices.count + newVertexCount <= maxVertices else {
+                    vertexBudgetSkippedTriangleCount += 1
+                    if plans[planIndex].nextTriangle < plan.triangleQuota {
+                        nextActivePlans.append(planIndex)
+                    }
+                    continue
+                }
+                for (localIndex, world) in zip(localIndices, worldVertices) {
+                    if localToGlobal[planIndex][localIndex] < 0 {
+                        localToGlobal[planIndex][localIndex] = Int32(vertices.count)
+                        vertices.append(world)
+                    }
+                }
                 let classification = meshClassification(geometry.classification, faceIndex: faceIndex)
                 classificationCounts[meshClassificationLabel(classification), default: 0] += 1
-                faces.append((UInt32(globalA), UInt32(globalB), UInt32(globalC), classification))
+                faces.append((
+                    UInt32(localToGlobal[planIndex][Int(localA)]),
+                    UInt32(localToGlobal[planIndex][Int(localB)]),
+                    UInt32(localToGlobal[planIndex][Int(localC)]),
+                    classification
+                ))
+                plans[planIndex].exportedTriangleCount += 1
+                if plans[planIndex].nextTriangle < plan.triangleQuota {
+                    nextActivePlans.append(planIndex)
+                }
             }
+            activePlans = nextActivePlans
+        }
+
+        let sourceSpatialCells = Set(plans.map(meshSpatialCellKey))
+        let exportedPlans = plans.filter { $0.exportedTriangleCount > 0 }
+        let exportedSpatialCells = Set(exportedPlans.map(meshSpatialCellKey))
+        let anchorCoverageRatio = plans.isEmpty ? 0.0 : Double(exportedPlans.count) / Double(plans.count)
+        let spatialCoverageRatio = sourceSpatialCells.isEmpty
+            ? 0.0
+            : Double(exportedSpatialCells.count) / Double(sourceSpatialCells.count)
+        let coveragePreserving = !plans.isEmpty
+            && exportedPlans.count == plans.count
+            && exportedSpatialCells.count == sourceSpatialCells.count
+        let triangleBudgetApplied = sourceTriangleCount > maxTriangles
+        let vertexBudgetApplied = vertexBudgetSkippedTriangleCount > 0
+        let budgetLimited = triangleBudgetApplied || vertexBudgetApplied
+        let classificationCoverage = sourceClassificationCounts.reduce(into: [String: Double]()) { result, entry in
+            result[entry.key] = entry.value > 0
+                ? Double(classificationCounts[entry.key, default: 0]) / Double(entry.value)
+                : 0.0
         }
 
         guard !vertices.isEmpty, !faces.isEmpty else {
             writeJSON([
-                "schema": "capture_splat.arkit_mesh_report.v0.1",
+                "schema": "capture_splat.arkit_mesh_report.v0.2",
                 "status": anchors.isEmpty ? "no_mesh_anchors" : "no_finite_triangles",
                 "anchor_count": anchors.count,
+                "eligible_anchor_count": plans.count,
+                "source_vertex_count": sourceVertexCount,
+                "source_triangle_count": sourceTriangleCount,
                 "vertex_count": vertices.count,
                 "triangle_count": faces.count,
                 "non_finite_vertex_count": nonFiniteVertexCount,
+                "invalid_face_count": invalidFaceCount,
+                "degenerate_face_count": degenerateFaceCount,
+                "selection_policy": "anchor_spatial_stratified_even_faces_v1",
                 "ply_written": false,
                 "authority": meshAuthorityReport(),
             ], to: reportURL)
@@ -1259,16 +1374,35 @@ final class CaptureController: NSObject, ObservableObject {
         do {
             try data.write(to: plyURL, options: .atomic)
             writeJSON([
-                "schema": "capture_splat.arkit_mesh_report.v0.1",
+                "schema": "capture_splat.arkit_mesh_report.v0.2",
                 "status": "finite_mesh_written",
                 "anchor_count": anchors.count,
+                "eligible_anchor_count": plans.count,
+                "exported_anchor_count": exportedPlans.count,
+                "source_vertex_count": sourceVertexCount,
+                "source_triangle_count": sourceTriangleCount,
                 "vertex_count": vertices.count,
                 "triangle_count": faces.count,
                 "non_finite_vertex_count": nonFiniteVertexCount,
+                "invalid_face_count": invalidFaceCount,
+                "degenerate_face_count": degenerateFaceCount,
+                "vertex_budget_skipped_triangle_count": vertexBudgetSkippedTriangleCount,
                 "max_vertex_count": maxVertices,
                 "max_triangle_count": maxTriangles,
-                "truncated": truncated,
+                "budget_limited": budgetLimited,
+                "triangle_budget_applied": triangleBudgetApplied,
+                "vertex_budget_applied": vertexBudgetApplied,
+                "truncated": budgetLimited,
+                "selection_policy": "anchor_spatial_stratified_even_faces_v1",
+                "coverage_preserving": coveragePreserving,
+                "anchor_coverage_ratio": anchorCoverageRatio,
+                "spatial_cell_size_meters": spatialCellSizeMeters,
+                "source_spatial_cell_count": sourceSpatialCells.count,
+                "exported_spatial_cell_count": exportedSpatialCells.count,
+                "spatial_cell_coverage_ratio": spatialCoverageRatio,
+                "source_classification_counts": sourceClassificationCounts,
                 "classification_counts": classificationCounts,
+                "classification_coverage": classificationCoverage,
                 "ply_file": "geometry/arkit_mesh.ply",
                 "ply_written": true,
                 "authority": meshAuthorityReport(),
@@ -1276,7 +1410,7 @@ final class CaptureController: NSObject, ObservableObject {
             return MeshExportResult(plyWritten: true, status: "finite_mesh_written", error: nil)
         } catch {
             writeJSON([
-                "schema": "capture_splat.arkit_mesh_report.v0.1",
+                "schema": "capture_splat.arkit_mesh_report.v0.2",
                 "status": "write_failed",
                 "error": error.localizedDescription,
                 "ply_written": false,
@@ -1284,6 +1418,69 @@ final class CaptureController: NSObject, ObservableObject {
             ], to: reportURL)
             return MeshExportResult(plyWritten: false, status: "write_failed", error: error.localizedDescription)
         }
+    }
+
+    private func meshTriangleQuotas(counts: [Int], budget: Int) -> [Int] {
+        guard budget > 0 else { return Array(repeating: 0, count: counts.count) }
+        let total = counts.reduce(0, +)
+        guard total > budget else { return counts }
+        let active = counts.indices.filter { counts[$0] > 0 }
+        var result = Array(repeating: 0, count: counts.count)
+        if budget < active.count {
+            for ordinal in 0..<budget {
+                let sampled = ((2 * ordinal + 1) * active.count) / (2 * budget)
+                result[active[min(sampled, active.count - 1)]] = 1
+            }
+            return result
+        }
+        for index in active { result[index] = 1 }
+        let remaining = budget - active.count
+        guard remaining > 0 else { return result }
+        let capacities = counts.indices.map { max(0, counts[$0] - result[$0]) }
+        let totalCapacity = capacities.reduce(0, +)
+        guard totalCapacity > 0 else { return result }
+        var remainders: [(index: Int, value: Int)] = []
+        var distributed = 0
+        for index in counts.indices where capacities[index] > 0 {
+            let weighted = remaining * capacities[index]
+            let share = min(capacities[index], weighted / totalCapacity)
+            result[index] += share
+            distributed += share
+            remainders.append((index, weighted % totalCapacity))
+        }
+        remainders.sort {
+            $0.value == $1.value ? $0.index < $1.index : $0.value > $1.value
+        }
+        var leftover = remaining - distributed
+        for entry in remainders where leftover > 0 {
+            guard result[entry.index] < counts[entry.index] else { continue }
+            result[entry.index] += 1
+            leftover -= 1
+        }
+        return result
+    }
+
+    private func meshSampleIndex(ordinal: Int, sourceCount: Int, sampleCount: Int) -> Int {
+        guard sampleCount < sourceCount else { return ordinal }
+        return min(sourceCount - 1, ((2 * ordinal + 1) * sourceCount) / (2 * sampleCount))
+    }
+
+    private func meshWorldVertex(
+        _ source: ARGeometrySource,
+        at index: Int,
+        transform: simd_float4x4
+    ) -> SIMD3<Float>? {
+        guard index >= 0, index < source.count else { return nil }
+        let address = source.buffer.contents().advanced(by: source.offset + index * source.stride)
+        let values = address.assumingMemoryBound(to: Float.self)
+        let local = SIMD3<Float>(values[0], values[1], values[2])
+        let world4 = transform * SIMD4<Float>(local.x, local.y, local.z, 1)
+        let world = SIMD3<Float>(world4.x, world4.y, world4.z)
+        return world.x.isFinite && world.y.isFinite && world.z.isFinite ? world : nil
+    }
+
+    private func meshSpatialCellKey(_ plan: MeshAnchorExportPlan) -> String {
+        "\(plan.spatialCell.x):\(plan.spatialCell.y):\(plan.spatialCell.z)"
     }
 
     private func meshIndex(_ element: ARGeometryElement, at index: Int) -> UInt32? {

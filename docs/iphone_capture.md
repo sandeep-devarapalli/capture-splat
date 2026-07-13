@@ -88,8 +88,15 @@ optional location permission does not cover the first Desk-capture screen.
 On supported LiDAR iPhones, the quality-first configuration additionally
 records non-empty ARKit person stencils under `masks/person/` at no more than
 5 Hz and writes `metadata/person_mask_index.jsonl`. A separate classified ARKit
-mesh is capped at 200,000 vertices and 300,000 triangles and exported as
-`geometry/arkit_mesh.ply` with `arkit_mesh_report.json`. Tracking, thermal,
+mesh is capped at 200,000 referenced vertices and 300,000 triangles and
+exported as `geometry/arkit_mesh.ply` with `arkit_mesh_report.json`. When the
+source exceeds that budget, the exporter allocates faces across every eligible
+anchor and samples across each anchor's full face range instead of keeping an
+anchor-order prefix. Report v0.2 records source/exported totals, anchor and
+0.5-meter spatial-cell coverage, per-class coverage, invalid geometry, and the
+applied budget. `coverage_preserving` is capture evidence only; the mesh remains
+ineligible for collision or measurement authority until host validation accepts
+it. Tracking, thermal,
 camera-lock, loop, fallback, and finalization transitions are written to
 `metadata/session_events.jsonl`. Mask or mesh pressure never relaxes the RGB-D
 quality gate; optional writes are dropped or held and reported instead.
