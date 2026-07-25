@@ -112,6 +112,89 @@ def test_export_world_studio_writes_relative_handoff_manifest(tmp_path: Path) ->
     assert all(not Path(frame["rgb_path"]).is_absolute() for frame in manifest["source_frames"])
 
 
+def test_export_world_studio_attaches_quality_evidence(tmp_path: Path) -> None:
+    package = tmp_path / "colmap_package"
+    write_image(package / "images" / "000001.jpg")
+    write_ascii_ply(tmp_path / "splat.ply")
+    qa = tmp_path / "capture_splat_render_source_qa_summary.json"
+    write_json_strict(
+        qa,
+        {
+            "schema": "capture_splat.render_source_qa.v0.1",
+            "decision": "hold",
+            "frame_count": 38,
+            "valid_frame_count": 38,
+            "weak_frames": ["000233", "000249"],
+        },
+    )
+    export_world_studio_handoff(
+        package,
+        tmp_path / "world_studio",
+        gaussian=tmp_path / "splat.ply",
+        render_source_qa=qa,
+        copy_files=True,
+    )
+    manifest = load_json_strict(tmp_path / "world_studio" / MANIFEST_NAME)
+    stats = load_json_strict(tmp_path / "world_studio" / "quality" / "ply_stats.json")
+
+    assert manifest["assets"]["render_source_qa"]["path"] == "quality/render_source_qa.json"
+    assert manifest["assets"]["ply_stats"]["path"] == "quality/ply_stats.json"
+    assert manifest["assets"]["render_source_qa"]["checksum"].startswith("sha256:")
+    assert manifest["assets"]["ply_stats"]["checksum"].startswith("sha256:")
+    assert stats["path"] == "splat.ply"
+    assert stats["finite"] is True
+    assert stats["splat_count"] == 1
+
+
+def test_export_world_studio_rejects_invalid_quality_schema(tmp_path: Path) -> None:
+    package = tmp_path / "colmap_package"
+    write_image(package / "images" / "000001.jpg")
+    write_ascii_ply(tmp_path / "splat.ply")
+    qa = tmp_path / "capture_splat_render_source_qa_summary.json"
+    write_json_strict(
+        qa,
+        {
+            "schema": "unknown.qa.v1",
+            "decision": "hold",
+            "frame_count": 1,
+            "valid_frame_count": 1,
+            "weak_frames": [],
+        },
+    )
+
+    try:
+        export_world_studio_handoff(
+            package,
+            tmp_path / "world_studio",
+            gaussian=tmp_path / "splat.ply",
+            render_source_qa=qa,
+        )
+    except ValueError as error:
+        assert "unsupported schema" in str(error)
+    else:
+        raise AssertionError("expected invalid render/source QA schema to fail")
+
+
+def test_export_world_studio_records_non_finite_selected_gaussian(tmp_path: Path) -> None:
+    package = tmp_path / "colmap_package"
+    write_image(package / "images" / "000001.jpg")
+    gaussian = tmp_path / "splat.ply"
+    write_ascii_ply(gaussian)
+    gaussian.write_text(gaussian.read_text(encoding="ascii").replace("0 0 0\n", "nan 0 0\n"), encoding="ascii")
+
+    export_world_studio_handoff(
+        package,
+        tmp_path / "world_studio",
+        gaussian=gaussian,
+        copy_files=True,
+    )
+    stats = load_json_strict(tmp_path / "world_studio" / "quality" / "ply_stats.json")
+
+    assert stats["path"] == "splat.ply"
+    assert stats["finite"] is False
+    assert stats["non_finite_count"] == 1
+
+
 def test_export_world_studio_includes_trainer_dataparser_transform(tmp_path: Path) -> None:
     package = tmp_path / "colmap_package"
     write_image(package / "images" / "000001.jpg")

@@ -261,14 +261,18 @@ and conservative authority metadata:
 capture-splat export-world-studio \
   --package runs/my_scan/colmap_package \
   --gaussian runs/my_scan/vksplat_ladder/step_0007000/splat.ply \
+  --render-source-qa runs/my_scan/render_qa/step_0007000/capture_splat_render_source_qa_summary.json \
   --transforms runs/my_scan/ingest/nerfstudio_dataset/transforms.json \
   --out runs/my_scan/world_studio_package
 ```
 
 This writes `capture-splat.world-studio.json` with schema
-`capture_splat.world_studio_handoff.v0.1`. Source frames are visual evidence;
+`capture_splat.world_studio_handoff.v0.2`. When a Gaussian PLY is present, the
+exporter computes finite/splat statistics from that exact packaged PLY. An
+optional strict render/source QA summary is copied as validation evidence.
+Source frames are visual evidence;
 trained splats are review proposals, not metric, collision, semantic, or
-navigation authority.
+navigation authority. Finite PLY and QA decisions are not high-quality claims.
 
 ## Linux, Windows, And Cloud GPUs
 

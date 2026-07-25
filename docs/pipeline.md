@@ -300,6 +300,7 @@ opened in World Studio:
 capture-splat export-world-studio \
   --package runs/scan/colmap_package \
   --gaussian runs/scan/vksplat_ladder/step_0007000/splat.ply \
+  --render-source-qa runs/scan/render_qa/step_0007000/capture_splat_render_source_qa_summary.json \
   --capture-manifest captures/scan/capture.json \
   --transforms runs/scan/ingest/nerfstudio_dataset/transforms.json \
   --out runs/scan/world_studio_package
@@ -312,6 +313,13 @@ source frames, ordinary `points.ply`, Gaussian `.ply`, `capture.json`,
 references when present. The handoff keeps source frames as visual evidence and
 trained splats as review proposals, not metric, collision, semantic, or
 navigation authority.
+
+For a Gaussian PLY, the exporter always writes
+`quality/ply_stats.json` from the exact packaged PLY. With
+`--render-source-qa`, it validates and includes the strict
+`capture_splat.render_source_qa.v0.1` summary as
+`quality/render_source_qa.json`. These sidecars support `promote|hold|reject`
+review decisions; they do not establish high quality or metric authority.
 
 When `--capture-manifest` points to an iPhone `capture.json`, the exporter also
 copies the available ARKit navigation mesh, mesh report, RoomPlan semantic

@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from .json_utils import load_json_strict, write_json_strict
+from .ply_stats import inspect_ply
 from .rgbd_seed import camera_alignment_report
 from .scene_transform import SIDECAR_NAME
 
@@ -175,6 +176,34 @@ def _copy_asset(src: Path | None, out_dir: Path, name: str, copy_files: bool) ->
     dst = out_dir / name
     _copy_or_link(src, dst, copy_files)
     return dst
+
+
+def _write_quality_json(path: Path, payload: dict[str, Any]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() or path.is_symlink():
+        path.unlink()
+    write_json_strict(path, payload)
+    return path
+
+
+def _validated_render_source_qa(path: Path) -> dict[str, Any]:
+    summary = load_json_strict(path)
+    if not isinstance(summary, dict):
+        raise ValueError("render/source QA summary must be a JSON object")
+    if summary.get("schema") != "capture_splat.render_source_qa.v0.1":
+        raise ValueError("render/source QA summary has an unsupported schema")
+    if summary.get("decision") not in {"promote", "hold", "reject"}:
+        raise ValueError("render/source QA summary decision must be promote, hold, or reject")
+    for key in ("frame_count", "valid_frame_count"):
+        value = summary.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(f"render/source QA summary {key} must be a non-negative integer")
+    if summary["valid_frame_count"] > summary["frame_count"]:
+        raise ValueError("render/source QA summary valid_frame_count cannot exceed frame_count")
+    weak_frames = summary.get("weak_frames")
+    if not isinstance(weak_frames, list) or not all(isinstance(value, str) for value in weak_frames):
+        raise ValueError("render/source QA summary weak_frames must be a string array")
+    return summary
 
 
 def _capture_asset(
@@ -399,6 +428,7 @@ def export_world_studio_handoff(
     mesh_report: Path | None = None,
     room_semantics: Path | None = None,
     camera_trajectory: Path | None = None,
+    render_source_qa: Path | None = None,
     measurement_points: Path | None = None,
     measurement_points_frame: str = "colmap_world",
     image_dir_name: str = "images",
@@ -462,6 +492,19 @@ def export_world_studio_handoff(
     copied_mesh_report = _copy_asset(mesh_report, out_dir, "navigation_mesh_report.json", copy_files)
     copied_room_semantics = _copy_asset(room_semantics, out_dir, "room_semantics.json", copy_files)
     copied_camera_trajectory = _copy_asset(camera_trajectory, out_dir, "camera_trajectory.jsonl", copy_files)
+    copied_render_source_qa = (
+        _write_quality_json(
+            out_dir / "quality/render_source_qa.json",
+            _validated_render_source_qa(render_source_qa),
+        )
+        if render_source_qa is not None
+        else None
+    )
+    copied_ply_stats = None
+    if copied_gaussian is not None and copied_gaussian.suffix.lower() == ".ply":
+        stats = inspect_ply(copied_gaussian)
+        stats["path"] = copied_gaussian.relative_to(out_dir).as_posix()
+        copied_ply_stats = _write_quality_json(out_dir / "quality/ply_stats.json", stats)
     copied_spatial_guidance = _copy_asset(
         spatial_guidance, out_dir, "spatial_guidance_report.json", copy_files
     )
@@ -510,6 +553,10 @@ def export_world_studio_handoff(
         assets["camera_trajectory"] = _metric_asset_ref(
             copied_camera_trajectory, out_dir, "arkit_world", "metric_capture_evidence", "meters"
         )
+    if copied_render_source_qa:
+        assets["render_source_qa"] = _file_ref(copied_render_source_qa, out_dir)
+    if copied_ply_stats:
+        assets["ply_stats"] = _file_ref(copied_ply_stats, out_dir)
     if copied_spatial_guidance:
         assets["spatial_guidance_report"] = _metric_asset_ref(
             copied_spatial_guidance, out_dir, "arkit_world", "capture_guidance_evidence", "meters"
@@ -538,6 +585,7 @@ def export_world_studio_handoff(
         "notes": [
             "Source frames are visual evidence.",
             "Trained splats are review proposals, not metric, collision, semantic, or navigation authority.",
+            "Attached render/source QA and PLY statistics are validation evidence, not a high-quality claim.",
         ],
     }
     dataparser_transform = _dataparser_transform(gaussian)
