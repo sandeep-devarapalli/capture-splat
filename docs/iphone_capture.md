@@ -194,3 +194,16 @@ For rooms, move in small connected side steps around the perimeter. Keep the
 previous wall, corner, table edge, shelf, or textured object in view while adding
 translation. Avoid fast pans, exposure jumps, blank walls, glass, and stopping
 after only one height band.
+
+## Future live sender boundary
+
+The Phase 1 live path is replay-only and does not modify the iPhone capture
+loop. A future sender must follow the bounded store-and-forward design in
+[Live Session Phase 1](live_session.md): enqueue only atomically completed local
+files, never retain `ARFrame` or capture pixel buffers, keep one bounded sender
+with backpressure and limited in-flight uploads, and always prioritize capture
+and local evidence during disk, thermal, background, or network pressure.
+
+Leaving loopback is a separate security phase. It requires explicit LAN
+opt-in, pairing credentials, authenticated sessions, and TLS before any phone
+sender can connect to World Studio.

@@ -414,6 +414,34 @@ evidence; trained splats are review proposals, not metric, collision, semantic,
 or navigation authority. Finite PLY and QA decisions are not high-quality
 claims.
 
+### Replay a capture live to World Studio
+
+Phase 1 can replay an existing capture into World Studio while it is listening
+on loopback:
+
+```bash
+capture-splat replay-live-session \
+  --capture /path/to/capture_splat_export \
+  --receiver http://127.0.0.1:43127 \
+  --delay-ms 100
+```
+
+The command sends only frames not explicitly rejected, preserves each camera's
+original intrinsics and calibration dimensions, and streams every referenced
+RGB, depth, confidence, and person/valid/object mask asset. It writes nothing
+inside the source capture. The strict printed
+`capture_splat.live_replay_summary.v0.1` contains the generated session ID;
+provide that ID with `--session-id ... --resume` to continue after a later
+process restart. `--shuffle --seed`, `--duplicate-every`,
+`--disconnect-after`, and `--disconnect-seconds` exercise receiver recovery.
+
+The receiver is intentionally restricted to HTTP loopback in Phase 1. The live
+surface is source-frame and camera evidence with permanent proposal-only
+authority; it is not live 3DGS reconstruction and does not replace a world
+already loaded in World Studio. See [Live Session Phase 1](docs/live_session.md)
+for the contract, transport, recovery behavior, and the bounded future iOS
+sender design.
+
 ## Linux, Windows, And Cloud GPUs
 
 The iPhone app must be built with Apple tooling, but once you have an exported capture folder, the processing side is intended to work on macOS, Linux, Windows, and cloud NVIDIA machines.
