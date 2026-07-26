@@ -10,6 +10,7 @@ from .background_remove import remove_background
 from .backend_render_compare import compare_backend_renders
 from .capture_quality_report import run_capture_quality_report
 from .colmap_export import export_colmap_text
+from .equirectangular_import import import_equirectangular
 from .frames_extract import run_extract_frames
 from .colmap_focused_repair import run_colmap_focused_repair
 from .colmap_support_delta import compare_colmap_support_delta
@@ -58,6 +59,12 @@ def main() -> None:
     p_import.add_argument("--out", type=Path, required=True)
     p_import.add_argument("--no-copy-files", action="store_true")
     p_import.add_argument("--require-depth", action="store_true")
+    p_import_360 = sub.add_parser("import-360", help="Project equirectangular images or video into perspective SfM images")
+    p_import_360.add_argument("--input", type=Path, required=True)
+    p_import_360.add_argument("--out", type=Path, required=True)
+    p_import_360.add_argument("--size", type=int, default=1024)
+    p_import_360.add_argument("--fov", type=float, default=110.0)
+    p_import_360.add_argument("--target-panoramas", type=int, default=12)
     p_colmap = sub.add_parser("colmap-export", help="Write COLMAP text package")
     p_colmap.add_argument("--capture", type=Path, required=True)
     p_colmap.add_argument("--out", type=Path, required=True)
@@ -375,6 +382,14 @@ def main() -> None:
             args.out,
             copy_files=not args.no_copy_files,
             require_depth=args.require_depth,
+        )
+    elif args.command == "import-360":
+        payload = import_equirectangular(
+            args.input,
+            args.out,
+            size=args.size,
+            fov_degrees=args.fov,
+            target_panoramas=args.target_panoramas,
         )
     elif args.command == "colmap-export":
         payload = export_colmap_text(args.capture, args.out)

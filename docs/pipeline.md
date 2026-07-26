@@ -103,6 +103,21 @@ capture-splat import-transforms \
 Depth files such as `.exr` or `.npy` are preserved when frame paths are present.
 This is a format conversion, not a reconstruction-quality claim.
 
+Equirectangular inputs use an image-stage importer:
+
+```bash
+capture-splat import-360 \
+  --input /path/to/panorama_or_video \
+  --out runs/imported_360
+```
+
+It preserves source panoramas, emits six equatorial plus four upper and four
+lower perspective views per panorama, writes matching white-valid masks, and
+records intrinsics plus virtual-camera rotations in
+`metadata/equirectangular_rig.json`. The importer does not invent translations
+or world poses and therefore does not emit `capture.json`. Use the output as
+projection evidence while rig-constrained SfM remains pending.
+
 COLMAP registration and trainer health are quality gates. A successful file export is not the same as a high-quality reconstruction.
 
 ## Evidence Gates
