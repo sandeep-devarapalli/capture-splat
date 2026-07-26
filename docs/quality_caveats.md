@@ -76,6 +76,13 @@ normalization decision must be checksum-bound to the current sparse model and
 recorded by the trainer summary. Capture Splat blocks an unsupported explicit
 no-normalization request instead of writing an identity transform claim.
 
+Likewise, preserved LiDAR depth and derived normals do not imply that a trainer
+used them. `metadata/training_supervision.json` binds those sidecars by checksum
+and records coverage. Trainer summaries separately record available,
+supported, and applied states. `required` blocks unsupported backends; `auto`
+does not silently substitute sparse COLMAP point-depth loss for metric sensor
+supervision.
+
 CUDA fallback is a backend choice, not a shortcut around evidence. If gsplat runs where Vulkan is unavailable, keep the same conservative language: finite output, render/source QA decision, weak-frame count, and explicit hold/reject/promote.
 
 The live spatial-guidance wireframe and map are also capture evidence only.

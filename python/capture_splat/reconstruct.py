@@ -14,6 +14,7 @@ from .reconstruction_recipe import RECIPES, resolve_recipe
 from .render_source_qa import run_render_source_qa
 from .rgbd_seed import build_rgbd_metric_seed
 from .sfm_runner import run_sfm
+from .training_supervision import prepare_training_supervision
 from .vksplat_ladder import DEFAULT_STEPS, run_vksplat_ladder
 from .world_studio_export import export_world_studio_handoff
 
@@ -25,7 +26,16 @@ STAGE_CONFIG_KEYS = {
     "prepare": ("capture_manifest", "capture_manifest_checksum", "recipe"),
     "sfm": ("allow_cpu_matching", "retrieval_top_k"),
     "seed": ("seed_source",),
-    "train": ("backend", "backend_root", "steps", "stop_reset_at", "normalization", "mcmc_refine_every"),
+    "train": (
+        "backend",
+        "backend_root",
+        "steps",
+        "stop_reset_at",
+        "normalization",
+        "mcmc_refine_every",
+        "depth_supervision",
+        "normal_supervision",
+    ),
     "prune": ("prune_alpha", "max_pruned_fraction"),
     "qa": (
         "qa_render_dir",
@@ -254,6 +264,8 @@ def _dry_run(
     normalization: str,
     mcmc_refine_every: str | int,
     seed_source: str,
+    depth_supervision: str,
+    normal_supervision: str,
 ) -> dict[str, Any]:
     capture = load_capture(capture_dir)
     recipe_name, recipe_source = resolve_recipe(capture, recipe)
@@ -271,6 +283,8 @@ def _dry_run(
             steps=steps,
             normalization=normalization,
             mcmc_refine_every=str(mcmc_refine_every),
+            depth_supervision=depth_supervision,
+            normal_supervision=normal_supervision,
         ),
         _stage("prune", "blocked" if training_blocked else "planned", authority="viewer_hygiene_only"),
         _stage(
@@ -290,6 +304,8 @@ def _dry_run(
         "steps": steps,
         "normalization": normalization,
         "mcmc_refine_every": str(mcmc_refine_every),
+        "depth_supervision": depth_supervision,
+        "normal_supervision": normal_supervision,
         "seed_source": seed_source,
         "resume": False,
         "dry_run": True,
@@ -323,6 +339,8 @@ def reconstruct_capture(
     normalization: str = "auto",
     mcmc_refine_every: str | int = "auto",
     seed_source: str = "auto",
+    depth_supervision: str = "auto",
+    normal_supervision: str = "auto",
 ) -> dict[str, Any]:
     capture_dir = capture_dir.resolve()
     out_dir = out_dir.resolve()
@@ -343,6 +361,10 @@ def reconstruct_capture(
         raise ValueError("normalization must be auto, on, or off")
     if seed_source not in {"auto", "depth", "mesh"}:
         raise ValueError("seed source must be auto, depth, or mesh")
+    if depth_supervision not in {"auto", "off", "required"}:
+        raise ValueError("depth supervision must be auto, off, or required")
+    if normal_supervision not in {"auto", "off", "required"}:
+        raise ValueError("normal supervision must be auto, off, or required")
     if not step_values or any(step <= 0 for step in step_values):
         raise ValueError("training steps must be positive")
     if resume and dry_run:
@@ -371,13 +393,15 @@ def reconstruct_capture(
         "normalization": normalization,
         "mcmc_refine_every": str(mcmc_refine_every),
         "seed_source": seed_source,
+        "depth_supervision": depth_supervision,
+        "normal_supervision": normal_supervision,
     }
     if out_dir.exists() and any(out_dir.iterdir()) and not resume:
         raise FileExistsError(f"reconstruction output is not empty: {out_dir}")
     out_dir.mkdir(parents=True, exist_ok=True)
     if dry_run:
         return _dry_run(
-            capture_dir, out_dir, backend, backend_root, recipe, step_values, stop_after, qa_render_dir, normalization, mcmc_refine_every, seed_source
+            capture_dir, out_dir, backend, backend_root, recipe, step_values, stop_after, qa_render_dir, normalization, mcmc_refine_every, seed_source, depth_supervision, normal_supervision
         )
     prior: dict[str, Any] = {}
     completed_stages: dict[str, dict[str, Any]] = {}
@@ -412,6 +436,8 @@ def reconstruct_capture(
         "recipe": recipe,
         "steps": step_values,
         "normalization": normalization,
+        "depth_supervision": depth_supervision,
+        "normal_supervision": normal_supervision,
         "resume": resume,
         "dry_run": False,
         "stop_after": stop_after,
@@ -515,6 +541,19 @@ def reconstruct_capture(
         _write(out_dir, summary)
         return summary
     summary["training_package"] = str(training_package.resolve())
+    try:
+        supervision = prepare_training_supervision(
+            training_package,
+            derive_normals=normal_supervision != "off",
+        )
+    except Exception as error:
+        supervision = {"decision": "hold", "error": str(error)}
+        if depth_supervision == "required" or normal_supervision == "required":
+            record(_stage("seed", "blocked", error=f"training supervision failed: {error}"))
+            summary.update({"decision": "blocked", "failed_stage": "seed"})
+            _write(out_dir, summary)
+            return summary
+    summary["training_supervision"] = supervision
     if stop_after == "seed":
         _write(out_dir, summary)
         return summary
@@ -543,6 +582,8 @@ def reconstruct_capture(
                 steps=step_values,
                 stop_reset_at=stop_reset_at,
                 normalization=normalization,
+                depth_supervision=depth_supervision,
+                normal_supervision=normal_supervision,
             )
         elif ladder is None:
             ladder = run_gsplat_ladder(
@@ -552,6 +593,8 @@ def reconstruct_capture(
                 steps=step_values,
                 normalization=normalization,
                 mcmc_refine_every=mcmc_refine_every,
+                depth_supervision=depth_supervision,
+                normal_supervision=normal_supervision,
             )
     except Exception as error:
         failed = load_json_strict(ladder_path) if ladder_path.exists() else {}

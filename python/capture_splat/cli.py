@@ -29,6 +29,7 @@ from .scene_transform import write_scene_transform_sidecar
 from .sfm_runner import colmap_capabilities, colmap_has_cuda, run_sfm, run_triangulate
 from .spz_export import export_spz
 from .transforms_import import import_transforms_package
+from .training_supervision import prepare_training_supervision
 from .gsplat_ladder import run_gsplat_ladder
 from .gsplat_runner import doctor as gsplat_doctor
 from .gsplat_runner import run_gsplat
@@ -104,6 +105,13 @@ def main() -> None:
         type=Path,
         help="Strict JSON manifest of accepted source-frame indices to omit non-destructively",
     )
+    p_supervision = sub.add_parser(
+        "prepare-training-supervision",
+        help="Validate metric depth/confidence and derive checksum-bound normal proposals",
+    )
+    p_supervision.add_argument("--package", type=Path, required=True)
+    p_supervision.add_argument("--confidence-minimum", type=int, choices=[0, 1, 2], default=1)
+    p_supervision.add_argument("--no-derive-normals", action="store_true")
     p_remove_background = sub.add_parser(
         "remove-background",
         help="Write non-destructive premultiplied object images from valid masks or optional InSPyReNet",
@@ -151,6 +159,8 @@ def main() -> None:
     p_reconstruct.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
     p_reconstruct.add_argument("--mcmc-refine-every", default="auto", metavar="auto|N")
     p_reconstruct.add_argument("--seed-source", choices=["auto", "depth", "mesh"], default="auto")
+    p_reconstruct.add_argument("--depth-supervision", choices=["auto", "off", "required"], default="auto")
+    p_reconstruct.add_argument("--normal-supervision", choices=["auto", "off", "required"], default="auto")
     p_compare = sub.add_parser("compare-app-output", help="Compare observable outputs from iPhone 3DGS apps")
     p_compare.add_argument("--capture-splat", type=Path)
     p_compare.add_argument("--splatking", type=Path)
@@ -208,6 +218,8 @@ def main() -> None:
     p_train.add_argument("--stop-reset-at", type=int, help="Stop VkSplat opacity resets after this step.")
     p_train.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
     p_train.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
+    p_train.add_argument("--depth-supervision", choices=["auto", "off", "required"], default="auto")
+    p_train.add_argument("--normal-supervision", choices=["auto", "off", "required"], default="auto")
     p_train.add_argument("--dry-run", action="store_true")
     p_probe = sub.add_parser("vksplat-render-probe", help="Train VkSplat with train renders enabled and QA exact source-frame cameras")
     p_probe.add_argument("--package", type=Path, required=True)
@@ -232,6 +244,8 @@ def main() -> None:
     p_train_gsplat.add_argument("--photometric", choices=["none", "bilateral-grid", "ppisp"])
     p_train_gsplat.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
     p_train_gsplat.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
+    p_train_gsplat.add_argument("--depth-supervision", choices=["auto", "off", "required"], default="auto")
+    p_train_gsplat.add_argument("--normal-supervision", choices=["auto", "off", "required"], default="auto")
     p_train_gsplat.add_argument("--no-bilateral-grid", action="store_true")
     p_train_gsplat.add_argument("--no-random-bkgd", action="store_true")
     p_train_gsplat.add_argument("--max-gaussians", type=int, default=1_000_000)
@@ -400,6 +414,8 @@ def main() -> None:
     p_gsplat_ladder.add_argument("--photometric", choices=["none", "bilateral-grid", "ppisp"])
     p_gsplat_ladder.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
     p_gsplat_ladder.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
+    p_gsplat_ladder.add_argument("--depth-supervision", choices=["auto", "off", "required"], default="auto")
+    p_gsplat_ladder.add_argument("--normal-supervision", choices=["auto", "off", "required"], default="auto")
     p_gsplat_ladder.add_argument("--mcmc-refine-every", default="auto", metavar="auto|N")
     p_gsplat_ladder.add_argument("--dry-run", action="store_true")
     p_gsplat_ladder.add_argument("--sanitize-non-finite-ply", action="store_true")
@@ -421,6 +437,8 @@ def main() -> None:
     p_ladder.add_argument("--stop-reset-at", type=int, help="Stop VkSplat opacity resets after this step for every rung.")
     p_ladder.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
     p_ladder.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
+    p_ladder.add_argument("--depth-supervision", choices=["auto", "off", "required"], default="auto")
+    p_ladder.add_argument("--normal-supervision", choices=["auto", "off", "required"], default="auto")
     p_ladder.add_argument("--max-psnr-drop", type=float, default=0.5)
     p_ladder.add_argument("--max-ssim-drop", type=float, default=0.02)
     p_ladder.add_argument("--max-mae-increase", type=float, default=0.01)
@@ -482,6 +500,12 @@ def main() -> None:
             dedup_tolerance_seconds=args.dedup_tolerance,
             frame_exclusions=args.frame_exclusions,
         )
+    elif args.command == "prepare-training-supervision":
+        payload = prepare_training_supervision(
+            args.package,
+            confidence_minimum=args.confidence_minimum,
+            derive_normals=not args.no_derive_normals,
+        )
     elif args.command == "remove-background":
         payload = remove_background(
             args.images,
@@ -527,6 +551,8 @@ def main() -> None:
             normalization=args.normalization,
             mcmc_refine_every=args.mcmc_refine_every,
             seed_source=args.seed_source,
+            depth_supervision=args.depth_supervision,
+            normal_supervision=args.normal_supervision,
         )
     elif args.command == "compare-app-output":
         payload = compare_app_outputs(
@@ -579,7 +605,7 @@ def main() -> None:
             capture_profile=args.capture_profile,
         )
     elif args.command == "train-vksplat":
-        payload = run_vksplat(args.package, args.out, args.vksplat_root, steps=args.steps, dry_run=args.dry_run, save_train_renders=args.save_train_renders, stop_reset_at=args.stop_reset_at, masks=args.masks, normalization=args.normalization)
+        payload = run_vksplat(args.package, args.out, args.vksplat_root, steps=args.steps, dry_run=args.dry_run, save_train_renders=args.save_train_renders, stop_reset_at=args.stop_reset_at, masks=args.masks, normalization=args.normalization, depth_supervision=args.depth_supervision, normal_supervision=args.normal_supervision)
     elif args.command == "vksplat-render-probe":
         payload = run_vksplat_render_probe(
             args.package,
@@ -611,6 +637,8 @@ def main() -> None:
             masks=args.masks,
             normalization=args.normalization,
             mcmc_refine_every=args.mcmc_refine_every,
+            depth_supervision=args.depth_supervision,
+            normal_supervision=args.normal_supervision,
         )
     elif args.command == "scene-transform":
         payload = write_scene_transform_sidecar(args.ply, args.sparse_dir, args.trainer, normalized=not args.no_normalize)
@@ -793,6 +821,8 @@ def main() -> None:
             masks=args.masks,
             normalization=args.normalization,
             mcmc_refine_every=args.mcmc_refine_every,
+            depth_supervision=args.depth_supervision,
+            normal_supervision=args.normal_supervision,
         )
     elif args.command == "train-vksplat-ladder":
         payload = run_vksplat_ladder(
@@ -809,6 +839,8 @@ def main() -> None:
             stop_reset_at=args.stop_reset_at,
             masks=args.masks,
             normalization=args.normalization,
+            depth_supervision=args.depth_supervision,
+            normal_supervision=args.normal_supervision,
             max_psnr_drop=args.max_psnr_drop,
             max_ssim_drop=args.max_ssim_drop,
             max_mae_increase=args.max_mae_increase,

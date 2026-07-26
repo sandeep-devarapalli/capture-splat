@@ -4,6 +4,7 @@ import pytest
 
 from capture_splat.json_utils import write_json_strict
 from capture_splat.scene_transform import _sha256
+from capture_splat.training_supervision import prepare_training_supervision
 from capture_splat.vksplat_ladder import run_vksplat_ladder
 from capture_splat.vksplat_runner import run_vksplat
 
@@ -20,16 +21,43 @@ def make_package(root: Path) -> Path:
     return package
 
 
-def make_vksplat_root(root: Path) -> Path:
+def make_vksplat_root(
+    root: Path,
+    *,
+    support_sensor_depth: bool = False,
+    support_sensor_normals: bool = False,
+) -> Path:
     vksplat = root / "vksplat"
     vksplat.mkdir()
     (vksplat / "simple_trainer.py").write_text(
         "class MCMCTrainerConfig: mask_dir = None\n"
         "class TrainerConfig: mask_dir = None\n"
-        "def train_main(config): pass\n",
+        + ("sensor_depth_manifest = None\n" if support_sensor_depth else "")
+        + ("sensor_normal_manifest = None\n" if support_sensor_normals else "")
+        + "def train_main(config): pass\n",
         encoding="utf-8",
     )
     return vksplat
+
+
+def add_supervision(package: Path) -> None:
+    import numpy as np
+
+    (package / "depth").mkdir()
+    (package / "confidence").mkdir()
+    np.save(package / "depth/000001.npy", np.ones((3, 4), dtype=np.float32), allow_pickle=False)
+    np.save(package / "confidence/000001.npy", np.full((3, 4), 2, dtype=np.uint8), allow_pickle=False)
+    write_json_strict(package / "capture.json", {
+        "source": "capture_splat.prepare_capture",
+        "depth_scale": 1.0,
+        "frames": [{
+            "rgb": "images/000001.jpg",
+            "depth": "depth/000001.npy",
+            "confidence": "confidence/000001.npy",
+            "intrinsics": {"fl_x": 4, "fl_y": 4, "cx": 2, "cy": 1.5, "w": 4, "h": 3},
+        }],
+    })
+    prepare_training_supervision(package)
 
 
 def write_qa(path: Path, psnr: float, ssim: float, mae: float, correlation: float, decision: str = "promote") -> None:
@@ -193,6 +221,46 @@ def test_vksplat_required_masks_block_incomplete_frame_coverage(tmp_path: Path) 
 
     with pytest.raises(RuntimeError, match="required masks"):
         run_vksplat(package, tmp_path / "out", vksplat, masks="required", dry_run=True)
+
+
+def test_vksplat_required_sensor_manifests_are_written_only_when_supported(tmp_path: Path) -> None:
+    package = make_package(tmp_path)
+    add_supervision(package)
+    vksplat = make_vksplat_root(
+        tmp_path,
+        support_sensor_depth=True,
+        support_sensor_normals=True,
+    )
+
+    summary = run_vksplat(
+        package,
+        tmp_path / "out",
+        vksplat,
+        depth_supervision="required",
+        normal_supervision="required",
+        dry_run=True,
+    )
+
+    runner = (tmp_path / "out/capture_splat_vksplat_runner.py").read_text(encoding="utf-8")
+    report = str(package / "metadata/training_supervision.json")
+    assert f"config.sensor_depth_manifest = {report!r}" in runner
+    assert f"config.sensor_normal_manifest = {report!r}" in runner
+    assert summary["sensor_supervision"]["depth"]["applied"] is True
+
+
+def test_vksplat_required_sensor_depth_blocks_unsupported_trainer(tmp_path: Path) -> None:
+    package = make_package(tmp_path)
+    add_supervision(package)
+    vksplat = make_vksplat_root(tmp_path)
+
+    with pytest.raises(RuntimeError, match="dedicated sensor depth"):
+        run_vksplat(
+            package,
+            tmp_path / "out",
+            vksplat,
+            depth_supervision="required",
+            dry_run=True,
+        )
 
 
 def test_vksplat_auto_records_metric_normalization_limitation(tmp_path: Path) -> None:

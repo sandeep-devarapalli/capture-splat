@@ -47,9 +47,10 @@ for one gate only.
 
 ### Reconstruction
 
-- Extend the shipped metric-package and trainer-normalization policy with
-  controlled depth/normal refinement options without overriding
-  COLMAP-refined cameras.
+- Benchmark the shipped checksum-bound sensor depth/normal supervision
+  contract on trainers that expose dedicated metric-sensor inputs. Current
+  public VkSplat and gsplat baselines preserve the evidence but do not consume
+  it as metric LiDAR supervision.
 - Validate the shipped rig-constrained equirectangular SfM path on a real 360
   sequence; recovered panorama poses remain non-metric registration evidence.
 - Physically validate the shipped optional AprilTag scale checker on a measured

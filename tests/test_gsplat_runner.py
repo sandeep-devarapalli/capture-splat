@@ -5,6 +5,7 @@ import pytest
 from capture_splat.gsplat_runner import run_gsplat
 from capture_splat.json_utils import write_json_strict
 from capture_splat.scene_transform import _sha256
+from capture_splat.training_supervision import prepare_training_supervision
 
 
 def make_package(root: Path) -> Path:
@@ -20,7 +21,12 @@ def make_package(root: Path) -> Path:
     return package
 
 
-def make_gsplat_root(root: Path, support_masks: bool = False) -> Path:
+def make_gsplat_root(
+    root: Path,
+    support_masks: bool = False,
+    support_sensor_depth: bool = False,
+    support_sensor_normals: bool = False,
+) -> Path:
     gsplat = root / "gsplat"
     examples = gsplat / "examples"
     examples.mkdir(parents=True)
@@ -28,10 +34,31 @@ def make_gsplat_root(root: Path, support_masks: bool = False) -> Path:
         "post_processing: str | None = None\n"
         "normalize_world_space: bool = True\n"
         "steps_scaler = 1.0\nrandom_bkgd = False\ncap_max = 1000000\n"
-        f"print('--post-processing {{None,bilateral_grid,ppisp}} --random-bkgd --steps-scaler --strategy.cap-max --strategy.refine-every{' --mask-dir' if support_masks else ''}')\n",
+        f"print('--post-processing {{None,bilateral_grid,ppisp}} --random-bkgd --steps-scaler --strategy.cap-max --strategy.refine-every{' --mask-dir' if support_masks else ''}{' --sensor-depth-manifest' if support_sensor_depth else ''}{' --sensor-normal-manifest' if support_sensor_normals else ''}')\n",
         encoding="utf-8",
     )
     return gsplat
+
+
+def add_supervision(package: Path) -> None:
+    import numpy as np
+
+    (package / "depth").mkdir()
+    (package / "confidence").mkdir()
+    np.save(package / "depth/000001.npy", np.ones((3, 4), dtype=np.float32), allow_pickle=False)
+    np.save(package / "confidence/000001.npy", np.full((3, 4), 2, dtype=np.uint8), allow_pickle=False)
+    capture = {
+        "source": "capture_splat.prepare_capture",
+        "depth_scale": 1.0,
+        "frames": [{
+            "rgb": "images/000001.jpg",
+            "depth": "depth/000001.npy",
+            "confidence": "confidence/000001.npy",
+            "intrinsics": {"fl_x": 4, "fl_y": 4, "cx": 2, "cy": 1.5, "w": 4, "h": 3},
+        }],
+    }
+    write_json_strict(package / "capture.json", capture)
+    prepare_training_supervision(package)
 
 
 def make_metric_package(package: Path) -> None:
@@ -204,6 +231,61 @@ def test_gsplat_required_masks_block_incomplete_frame_coverage(tmp_path: Path) -
 
     with pytest.raises(RuntimeError, match="required masks"):
         run_gsplat(package, tmp_path / "out", gsplat, masks="required", dry_run=True)
+
+
+def test_gsplat_auto_preserves_unsupported_sensor_depth_evidence(tmp_path: Path) -> None:
+    package = make_package(tmp_path)
+    add_supervision(package)
+    gsplat = make_gsplat_root(tmp_path)
+
+    summary = run_gsplat(package, tmp_path / "out", gsplat, dry_run=True)
+
+    depth = summary["sensor_supervision"]["depth"]
+    assert depth["available"] is True
+    assert depth["supported"] is False
+    assert depth["applied"] is False
+    assert depth["warning"] == "sensor_depth_evidence_preserved_but_trainer_unsupported"
+    assert summary["trainer_capabilities"]["builtin_depth_loss"]["semantics"] == "colmap_sparse_point_depth_not_sensor_depth"
+    assert "--depth-loss" not in summary["command"]
+
+
+def test_gsplat_required_sensor_manifests_are_passed_only_when_supported(tmp_path: Path) -> None:
+    package = make_package(tmp_path)
+    add_supervision(package)
+    gsplat = make_gsplat_root(
+        tmp_path,
+        support_sensor_depth=True,
+        support_sensor_normals=True,
+    )
+
+    summary = run_gsplat(
+        package,
+        tmp_path / "out",
+        gsplat,
+        depth_supervision="required",
+        normal_supervision="required",
+        dry_run=True,
+    )
+
+    command = summary["command"]
+    report = str(package / "metadata/training_supervision.json")
+    assert command[command.index("--sensor-depth-manifest") + 1] == report
+    assert command[command.index("--sensor-normal-manifest") + 1] == report
+
+
+def test_gsplat_required_sensor_depth_blocks_unsupported_trainer(tmp_path: Path) -> None:
+    package = make_package(tmp_path)
+    add_supervision(package)
+    gsplat = make_gsplat_root(tmp_path)
+
+    with pytest.raises(RuntimeError, match="dedicated sensor depth"):
+        run_gsplat(
+            package,
+            tmp_path / "out",
+            gsplat,
+            depth_supervision="required",
+            dry_run=True,
+        )
 
 
 def test_gsplat_auto_disables_normalization_for_checksum_bound_metric_package(tmp_path: Path) -> None:

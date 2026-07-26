@@ -267,6 +267,19 @@ Current VkSplat normalizes internally and therefore records a limitation in
 auto mode; an explicit `off` request blocks. A metric input package alone does
 not establish that a trained PLY is in meters.
 
+SfM package copying also preserves depth and confidence files referenced by
+`capture.json`. Run `prepare-training-supervision` on the package to validate
+finite metric depth, confidence coverage, depth scale, and intrinsics, and to
+derive checksum-bound normal proposals. The report may be partial when
+continuous-video supplements have no LiDAR sidecars. Partial evidence is
+`hold`, not a reason to discard otherwise valid RGB frames.
+
+Trainer policies are `auto|off|required` for depth and normals. A dedicated
+sensor-manifest capability is required before either is applied. The gsplat
+example trainer's existing depth loss uses sparse COLMAP points, not captured
+LiDAR maps, and is recorded separately rather than enabled as sensor
+supervision.
+
 `--background-sphere` seeds distant background points for room and outdoor
 scenes. Both trainers write `capture_splat_scene_transform.json` next to the
 PLY so viewers can map package cameras into the trained splat world. New SfM
