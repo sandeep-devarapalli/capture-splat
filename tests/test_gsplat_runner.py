@@ -28,7 +28,7 @@ def make_gsplat_root(root: Path, support_masks: bool = False) -> Path:
         "post_processing: str | None = None\n"
         "normalize_world_space: bool = True\n"
         "steps_scaler = 1.0\nrandom_bkgd = False\ncap_max = 1000000\n"
-        f"print('--post-processing {{None,bilateral_grid,ppisp}} --random-bkgd --steps-scaler --strategy.cap-max{' --mask-dir' if support_masks else ''}')\n",
+        f"print('--post-processing {{None,bilateral_grid,ppisp}} --random-bkgd --steps-scaler --strategy.cap-max --strategy.refine-every{' --mask-dir' if support_masks else ''}')\n",
         encoding="utf-8",
     )
     return gsplat
@@ -72,6 +72,9 @@ def test_gsplat_dry_run_scales_schedule_instead_of_truncating(tmp_path: Path) ->
     assert command[command.index("--post-processing") + 1] == "bilateral_grid"
     assert "--random_bkgd" in command
     assert command[command.index("--strategy.cap-max") + 1] == "1000000"
+    assert command[command.index("--strategy.refine-every") + 1] == "2000"
+    assert summary["mcmc_refine_every"]["target_effective_steps"] == 200
+    assert summary["mcmc_refine_every"]["expected_effective_steps"] == 200
     assert (tmp_path / "out" / "capture_splat_gsplat_summary.json").exists()
 
 
@@ -97,6 +100,39 @@ def test_gsplat_full_schedule_run_omits_scaler_and_respects_opt_outs(tmp_path: P
     assert "--post-processing" not in command
     assert "--random_bkgd" not in command
     assert command[command.index("--strategy.cap-max") + 1] == "500000"
+    assert command[command.index("--strategy.refine-every") + 1] == "200"
+
+
+def test_gsplat_auto_refine_cadence_uses_frame_count_and_compensates_scaler(tmp_path: Path) -> None:
+    package = make_package(tmp_path)
+    for index in range(2, 361):
+        (package / "images" / f"{index:06d}.jpg").write_bytes(b"fixture")
+    gsplat = make_gsplat_root(tmp_path)
+
+    summary = run_gsplat(package, tmp_path / "out", gsplat, steps=7000, dry_run=True)
+
+    cadence = summary["mcmc_refine_every"]
+    assert cadence["frame_count"] == 360
+    assert cadence["target_effective_steps"] == 400
+    assert cadence["expected_effective_steps"] >= 400
+    assert summary["command"][summary["command"].index("--strategy.refine-every") + 1] == str(
+        cadence["trainer_command_value"]
+    )
+
+
+def test_gsplat_explicit_refine_cadence_requires_mcmc(tmp_path: Path) -> None:
+    package = make_package(tmp_path)
+    gsplat = make_gsplat_root(tmp_path)
+
+    with pytest.raises(ValueError, match="only applies"):
+        run_gsplat(
+            package,
+            tmp_path / "out",
+            gsplat,
+            strategy="default",
+            mcmc_refine_every=400,
+            dry_run=True,
+        )
 
 
 def test_gsplat_missing_package_is_rejected(tmp_path: Path) -> None:

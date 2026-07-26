@@ -178,7 +178,8 @@ capture-splat build-rgbd-seed \
 capture-splat triangulate --package runs/scan/colmap_package --out runs/scan/triangulate
 capture-splat train-gsplat-ladder ... # bilateral grid + random background are
                                       # on by default when capabilities pass;
-                                      # rungs compress the full schedule
+                                      # rungs compress the full schedule and
+                                      # compensate frame-aware MCMC cadence
 capture-splat prune-ply --input .../splat.ply
 capture-splat export-world-studio --package ... --capture-profile room_interior
 ```

@@ -23,7 +23,7 @@ def make_gsplat_root(root: Path) -> Path:
     (examples / "simple_trainer.py").write_text(
         "post_processing: str | None = None\n"
         "steps_scaler = 1.0\nrandom_bkgd = False\ncap_max = 1000000\n"
-        "print('--post-processing {None,bilateral_grid,ppisp} --random-bkgd --steps-scaler --strategy.cap-max')\n",
+        "print('--post-processing {None,bilateral_grid,ppisp} --random-bkgd --steps-scaler --strategy.cap-max --strategy.refine-every')\n",
         encoding="utf-8",
     )
     return gsplat
