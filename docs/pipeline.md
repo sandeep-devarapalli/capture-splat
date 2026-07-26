@@ -112,11 +112,29 @@ capture-splat import-360 \
 ```
 
 It preserves source panoramas, emits six equatorial plus four upper and four
-lower perspective views per panorama, writes matching white-valid masks, and
+lower perspective views per panorama, writes disjoint white-valid feature
+masks so overlapping projections do not duplicate panorama pixels, and
 records intrinsics plus virtual-camera rotations in
 `metadata/equirectangular_rig.json`. The importer does not invent translations
 or world poses and therefore does not emit `capture.json`. Use the output as
-projection evidence while rig-constrained SfM remains pending.
+projection evidence, then recover panorama poses with the fixed virtual-camera
+rig:
+
+```bash
+capture-splat sfm-360-rig \
+  --package runs/imported_360 \
+  --out runs/imported_360_colmap \
+  --method global
+```
+
+The rig command verifies every projection and mask checksum, gives each virtual
+camera a stable folder identity, applies the known zero-translation relative
+poses before matching, enables rig verification, and freezes the rig
+extrinsics and calibrated pinhole intrinsics during mapping. It reports
+registered panorama frames rather than inflating coverage with 14 virtual
+images per panorama. The generated rig explicitly converts the importer's
+y-up projection frame to COLMAP's y-down pinhole frame. The recovered
+trajectory has no metric-scale authority.
 
 Finite Gaussian PLYs can be packaged for optional web delivery with the
 external `splat-transform` CLI:

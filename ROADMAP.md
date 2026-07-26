@@ -50,9 +50,8 @@ for one gate only.
 - Extend the shipped metric-package and trainer-normalization policy with
   controlled depth/normal refinement options without overriding
   COLMAP-refined cameras.
-- Add rig-constrained SfM for the shipped equirectangular image-stage importer;
-  its perspective projections and virtual-camera provenance do not yet recover
-  world poses.
+- Validate the shipped rig-constrained equirectangular SfM path on a real 360
+  sequence; recovered panorama poses remain non-metric registration evidence.
 - Physically validate the shipped optional AprilTag scale checker on a measured
   target before using its checksum-bound report for World Studio measurement.
 - Validate the shipped strict SPZ export on World Studio and mobile browsers,

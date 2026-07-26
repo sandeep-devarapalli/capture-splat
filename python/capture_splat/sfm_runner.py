@@ -61,6 +61,7 @@ def colmap_capabilities() -> dict[str, Any]:
     capabilities: dict[str, Any] = {
         "global_mapper": False,
         "view_graph_calibrator": False,
+        "rig_configurator": False,
         "caspar": False,
     }
     if find_binary("colmap") is None:
@@ -75,6 +76,7 @@ def colmap_capabilities() -> dict[str, Any]:
     capabilities.update({
         "global_mapper": "global_mapper" in commands,
         "view_graph_calibrator": "view_graph_calibrator" in commands,
+        "rig_configurator": "rig_configurator" in commands,
         "caspar": "BundleAdjustmentCaspar.gpu_index" in bundle,
     })
     return capabilities
@@ -121,6 +123,7 @@ def build_commands(
     view_graph_calibration: bool = False,
     mask_dir: Path | None = None,
     single_camera_options: tuple[str, str] | None = None,
+    use_gpu: bool = True,
 ) -> list[list[str]]:
     method = normalize_method(method)
     database = out_dir / "database.db"
@@ -142,6 +145,7 @@ def build_commands(
             "--image_path", str(images_dir),
             *image_reader,
             *( ["--ImageReader.mask_path", str(mask_dir)] if mask_dir is not None else [] ),
+            "--FeatureExtraction.use_gpu", "1" if use_gpu else "0",
             "--SiftExtraction.max_num_features", str(int(max_features)),
         ])
     if matcher == "sequential":
@@ -150,12 +154,17 @@ def build_commands(
             "--database_path", str(database),
             "--SequentialMatching.overlap", str(int(overlap)),
             "--SequentialMatching.loop_detection", "1" if loop_detection else "0",
+            "--FeatureMatching.use_gpu", "1" if use_gpu else "0",
         ]
         if loop_detection and vocab_tree is not None:
             match_command += ["--SequentialMatching.vocab_tree_path", str(vocab_tree)]
         commands.append(match_command)
     elif matcher == "exhaustive":
-        commands.append(["colmap", "exhaustive_matcher", "--database_path", str(database)])
+        commands.append([
+            "colmap", "exhaustive_matcher",
+            "--database_path", str(database),
+            "--FeatureMatching.use_gpu", "1" if use_gpu else "0",
+        ])
     elif matcher != "retrieval":
         raise ValueError(f"unsupported matcher: {matcher}")
     if view_graph_calibration:
@@ -178,12 +187,20 @@ def build_commands(
             "--output_path", str(sparse / "0"),
         ])
     else:
-        commands.append([
+        mapper_command = [
             "colmap", "global_mapper" if method == "global" else "mapper",
             "--database_path", str(mapping_database),
             "--image_path", str(images_dir),
             "--output_path", str(sparse),
-        ])
+        ]
+        if not use_gpu and method == "global":
+            mapper_command += [
+                "--GlobalMapper.gp_use_gpu", "0",
+                "--GlobalMapper.ba_ceres_use_gpu", "0",
+            ]
+        elif not use_gpu:
+            mapper_command += ["--Mapper.ba_use_gpu", "0"]
+        commands.append(mapper_command)
     return commands
 
 
@@ -523,6 +540,7 @@ def run_sfm(
         view_graph_calibration=resolved_view_graph_calibration,
         mask_dir=run_mask_dir,
         single_camera_options=single_camera_options,
+        use_gpu=colmap_cuda is True,
     )
     if matcher == "retrieval" and retrieval_top_k != 32:
         commands[:5] = planned_frontend(run_images, out_dir, out_dir / "database.db", retrieval_top_k)

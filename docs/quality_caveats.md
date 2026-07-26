@@ -6,8 +6,10 @@ The host tools should report these as quality blockers rather than hiding them b
 
 Perspective views from one equirectangular panorama share one optical center.
 Their recorded rotations are projection provenance, not recovered camera
-motion or triangulation evidence. Do not treat `import-360` output as a posed
-capture until a rig-aware SfM stage has established camera motion.
+motion or triangulation evidence. Use `sfm-360-rig` so their fixed rotations
+and zero translations are preserved while motion between panorama frames is
+estimated. Successful registration still does not establish metric scale or
+visual quality.
 
 SPZ compression is lossy and coordinate-system aware. A finite reverse
 conversion with low sampled coordinate/color error is necessary but does not

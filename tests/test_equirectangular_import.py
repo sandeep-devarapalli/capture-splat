@@ -6,6 +6,7 @@ import pytest
 
 from capture_splat.equirectangular_import import (
     default_virtual_views,
+    feature_ownership_mask,
     import_equirectangular,
     project_equirectangular,
     virtual_camera_rotation,
@@ -61,7 +62,18 @@ def test_import_360_writes_virtual_rig_without_fake_capture_poses(tmp_path: Path
     assert all(not Path(view["valid_mask"]).is_absolute() for view in rig["virtual_views"])
     assert all(view["image_evidence"]["checksum"].startswith("sha256:") for view in rig["virtual_views"])
     first_mask = Image.open(out / rig["virtual_views"][0]["valid_mask"])
-    assert set(np.asarray(first_mask).ravel()) == {255}
+    assert set(np.asarray(first_mask).ravel()) == {0, 255}
+    for view in rig["virtual_views"]:
+        mask = np.asarray(Image.open(out / view["valid_mask"]))
+        assert np.count_nonzero(mask) > 0
+        assert np.count_nonzero(mask) < mask.size
+
+
+def test_feature_ownership_keeps_each_virtual_camera_center() -> None:
+    views = default_virtual_views()
+    for yaw, pitch in views:
+        mask = np.asarray(feature_ownership_mask(yaw, pitch, 33, 100, views))
+        assert mask[16, 16] == 255
 
 
 def test_import_360_rejects_non_equirectangular_input_and_dirty_output(tmp_path: Path) -> None:
