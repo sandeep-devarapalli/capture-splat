@@ -415,6 +415,16 @@ cameras, residuals, units, scale conversion, and `accepted|held|unavailable`.
 Walk is only marked eligible when a navigation mesh exists and registration is
 accepted; that eligibility is capture evidence, not collision validation.
 
+Run `capture-splat build-collision-candidate` on the classified ARKit mesh and
+its strict v0.2 report to derive a smaller inspection/collision proposal. The
+deterministic selector distributes its face budget across spatial cells and
+surface classes instead of keeping a face-order prefix. Its report rejects
+non-finite, mismatched, or non-coverage-preserving source evidence and records
+floor/wall presence, retained spatial cells, checksums, units, and coordinate
+frame. A valid output remains `hold` with collision and navigation authority
+false until floor continuity, wall retention, and registered splat overlap are
+checked physically.
+
 Use `--measurement-points` with
 `--measurement-points-frame metric_colmap_world` only for a seed whose accepted
 metric-scale report is bound to the same sparse model and exact PLY checksum.

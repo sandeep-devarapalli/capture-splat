@@ -283,6 +283,33 @@ def _measurement_eligibility(
     }
 
 
+def _collision_eligibility(candidate: Path | None, report_path: Path | None) -> dict[str, Any]:
+    authority = {
+        "collision_authority": False,
+        "navigation_authority": False,
+        "quality_claim": False,
+    }
+    if candidate is None or report_path is None:
+        return {"status": "missing", "reason": "collision_candidate_or_report_missing", "authority": authority}
+    try:
+        report = load_json_strict(report_path)
+    except (OSError, ValueError):
+        return {"status": "reject", "reason": "collision_candidate_report_invalid", "authority": authority}
+    if report.get("schema") != "capture_splat.collision_candidate.v0.1":
+        return {"status": "reject", "reason": "collision_candidate_report_schema_invalid", "authority": authority}
+    evidence = report.get("candidate")
+    if not isinstance(evidence, dict) or evidence.get("checksum") != _sha256(candidate):
+        return {"status": "reject", "reason": "collision_candidate_checksum_mismatch", "authority": authority}
+    if report.get("coordinate_frame") != "arkit_world" or report.get("units") != "meters":
+        return {"status": "reject", "reason": "collision_candidate_frame_or_units_invalid", "authority": authority}
+    return {
+        "status": "held",
+        "reason": report.get("reason", "physical_collision_validation_pending"),
+        "software_prerequisites": report.get("software_prerequisites") is True,
+        "authority": authority,
+    }
+
+
 def _mesh_walk_evidence(report_path: Path | None) -> dict[str, Any]:
     if report_path is None or not report_path.exists():
         return {"status": "held", "reason": "mesh_report_missing"}
@@ -478,6 +505,8 @@ def export_world_studio_handoff(
     camera_trajectory: Path | None = None,
     planes: Path | None = None,
     metric_scale_report: Path | None = None,
+    collision_candidate: Path | None = None,
+    collision_report: Path | None = None,
     render_source_qa: Path | None = None,
     measurement_points: Path | None = None,
     measurement_points_frame: str = "colmap_world",
@@ -541,6 +570,16 @@ def export_world_studio_handoff(
     metric_scale_report = metric_scale_report or _first_existing(
         package, ("metadata/metric_scale_report.json",)
     )
+    collision_candidate = collision_candidate or _first_existing(
+        package, ("collision_candidate.ply", "geometry/collision_candidate.ply")
+    )
+    collision_report = collision_report or _first_existing(
+        package,
+        (
+            "capture_splat_collision_candidate_report.json",
+            "geometry/capture_splat_collision_candidate_report.json",
+        ),
+    )
     measurement_points = measurement_points or _first_existing(package, ("metric_seed.ply",))
     measurement_units = {
         "arkit_world": "meters",
@@ -569,6 +608,12 @@ def export_world_studio_handoff(
     copied_room_plan_report = _copy_asset(room_plan_report, out_dir, "room_plan_report.json", copy_files)
     copied_metric_scale_report = _copy_asset(
         metric_scale_report, out_dir, "metric_scale_report.json", copy_files
+    )
+    copied_collision_candidate = _copy_asset(
+        collision_candidate, out_dir, "collision_candidate.ply", copy_files
+    )
+    copied_collision_report = _copy_asset(
+        collision_report, out_dir, "collision_candidate_report.json", copy_files
     )
     copied_render_source_qa = (
         _write_quality_json(
@@ -649,6 +694,14 @@ def export_world_studio_handoff(
         assets["metric_scale_report"] = _metric_asset_ref(
             copied_metric_scale_report, out_dir, "metric_colmap_world", "metric_scale_evidence", "meters"
         )
+    if copied_collision_candidate:
+        assets["collision_candidate"] = _metric_asset_ref(
+            copied_collision_candidate, out_dir, "arkit_world", "collision_candidate_evidence", "meters"
+        )
+    if copied_collision_report:
+        assets["collision_candidate_report"] = _metric_asset_ref(
+            copied_collision_report, out_dir, "arkit_world", "collision_candidate_report", "meters"
+        )
     if copied_render_source_qa:
         assets["render_source_qa"] = _file_ref(copied_render_source_qa, out_dir)
     if copied_ply_stats:
@@ -712,6 +765,10 @@ def export_world_studio_handoff(
         measurement_units,
         package,
         sparse_dir_name,
+    )
+    manifest["collision_eligibility"] = _collision_eligibility(
+        copied_collision_candidate,
+        copied_collision_report,
     )
     mesh_walk_evidence = _mesh_walk_evidence(copied_mesh_report)
     manifest["mesh_walk_evidence"] = mesh_walk_evidence

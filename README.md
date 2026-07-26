@@ -319,6 +319,21 @@ are omitted, the command still writes the shared
 `camera_pairs.json` and reports `renderer_missing`; that is a setup blocker, not
 a quality result.
 
+Build a compact, classification-aware collision candidate from validated ARKit
+mesh evidence before packaging a room for interaction review:
+
+```bash
+capture-splat build-collision-candidate \
+  --mesh captures/scan/geometry/arkit_mesh.ply \
+  --mesh-report captures/scan/geometry/arkit_mesh_report.json \
+  --out runs/my_scan/collision_candidate
+```
+
+The command samples across 0.5-meter spatial cells and ARKit surface classes,
+preserves meter units and checksums, and writes a strict `hold` report. It does
+not grant collision or navigation authority; floor/wall continuity and
+splat/mesh overlap still require physical review.
+
 To hand a run to World Studio, write a local package with relative references
 and conservative authority metadata:
 
@@ -326,6 +341,8 @@ and conservative authority metadata:
 capture-splat export-world-studio \
   --package runs/my_scan/colmap_package \
   --gaussian runs/my_scan/vksplat_ladder/step_0007000/splat.ply \
+  --collision-candidate runs/my_scan/collision_candidate/collision_candidate.ply \
+  --collision-report runs/my_scan/collision_candidate/capture_splat_collision_candidate_report.json \
   --render-source-qa runs/my_scan/render_qa/step_0007000/capture_splat_render_source_qa_summary.json \
   --transforms runs/my_scan/ingest/nerfstudio_dataset/transforms.json \
   --out runs/my_scan/world_studio_package

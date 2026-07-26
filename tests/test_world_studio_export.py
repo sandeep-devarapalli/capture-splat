@@ -390,6 +390,18 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
     })
     metric_seed = tmp_path / "metric_seed.ply"
     write_ascii_ply(metric_seed)
+    collision_candidate = tmp_path / "collision_candidate.ply"
+    write_ascii_ply(collision_candidate)
+    collision_report = tmp_path / "collision_candidate_report.json"
+    write_json_strict(collision_report, {
+        "schema": "capture_splat.collision_candidate.v0.1",
+        "decision": "hold",
+        "reason": "physical_floor_wall_and_splat_registration_validation_pending",
+        "software_prerequisites": True,
+        "coordinate_frame": "arkit_world",
+        "units": "meters",
+        "candidate": {"checksum": _sha256(collision_candidate)},
+    })
     write_json_strict(package / "metadata" / "metric_scale_report.json", {
         "schema": "capture_splat.metric_scale_report.v0.1",
         "status": "accepted",
@@ -412,6 +424,8 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
         capture_manifest=capture / "capture.json",
         measurement_points=metric_seed,
         measurement_points_frame="metric_colmap_world",
+        collision_candidate=collision_candidate,
+        collision_report=collision_report,
         copy_files=True,
     )
     manifest = load_json_strict(tmp_path / "world_studio" / MANIFEST_NAME)
@@ -430,6 +444,7 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
     assert manifest["assets"]["metric_scale_report"]["units"] == "meters"
     assert manifest["assets"]["measurement_points"]["coordinate_frame"] == "metric_colmap_world"
     assert manifest["assets"]["measurement_points"]["units"] == "meters"
+    assert manifest["assets"]["collision_candidate"]["units"] == "meters"
     assert manifest["metric_registration"]["status"] == "accepted"
     assert manifest["metric_registration"]["matched_cameras"] == 8
     assert manifest["metric_registration"]["arkit_to_target"] == [
@@ -443,6 +458,8 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
     assert manifest["measurement_eligibility"]["status"] == "held"
     assert manifest["measurement_eligibility"]["software_prerequisites"] is True
     assert manifest["measurement_eligibility"]["reason"] == "physical_known_distance_validation_pending"
+    assert manifest["collision_eligibility"]["status"] == "held"
+    assert manifest["collision_eligibility"]["software_prerequisites"] is True
     assert manifest["world_up"] == [0.0, 1.0, 0.0]
     assert manifest["initial_camera"]["look_at"] == [0.0, 0.0, 1.0]
     assert manifest["initial_camera"]["up"] == [0.0, -1.0, 0.0]

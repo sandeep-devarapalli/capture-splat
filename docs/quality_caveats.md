@@ -89,3 +89,8 @@ World Studio handoffs may carry a checksum-bound metric seed in
 `metric_colmap_world` with meter units. That continuity proves neither surface
 accuracy nor measurement readiness. Capture Splat therefore holds measurement
 eligibility until a physical known-distance validation is recorded.
+
+A simplified classified ARKit mesh is only a collision candidate. Preserved
+spatial cells, floor/wall labels, finite triangles, and correct meter units are
+software prerequisites; they do not prove watertight floors, retained walls,
+splat registration, safe movement, or navigation authority.

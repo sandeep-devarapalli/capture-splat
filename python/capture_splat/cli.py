@@ -9,6 +9,7 @@ from .app_output_compare import compare_app_outputs
 from .background_remove import remove_background
 from .backend_render_compare import compare_backend_renders
 from .capture_quality_report import run_capture_quality_report
+from .collision_candidate import build_collision_candidate
 from .colmap_export import export_colmap_text
 from .equirectangular_import import import_equirectangular
 from .frames_extract import run_extract_frames
@@ -174,6 +175,8 @@ def main() -> None:
     p_world_studio.add_argument("--camera-trajectory", type=Path)
     p_world_studio.add_argument("--planes", type=Path)
     p_world_studio.add_argument("--metric-scale-report", type=Path)
+    p_world_studio.add_argument("--collision-candidate", type=Path)
+    p_world_studio.add_argument("--collision-report", type=Path)
     p_world_studio.add_argument("--render-source-qa", type=Path)
     p_world_studio.add_argument("--measurement-points", type=Path)
     p_world_studio.add_argument(
@@ -250,6 +253,16 @@ def main() -> None:
     p_spz.add_argument("--max-position-p95-fraction", type=float, default=0.005)
     p_spz.add_argument("--max-color-mae", type=float, default=0.03)
     p_spz.add_argument("--dry-run", action="store_true")
+    p_collision = sub.add_parser(
+        "build-collision-candidate",
+        help="Simplify classified ARKit mesh evidence without granting collision authority",
+    )
+    p_collision.add_argument("--mesh", type=Path, required=True)
+    p_collision.add_argument("--mesh-report", type=Path, required=True)
+    p_collision.add_argument("--out", type=Path, required=True)
+    p_collision.add_argument("--max-faces", type=int, default=100_000)
+    p_collision.add_argument("--cell-size", type=float, default=0.5)
+    p_collision.add_argument("--intent", choices=["room", "object"], default="room")
     p_frames = sub.add_parser("extract-frames", help="Extract training frames from a capture video")
     p_frames.add_argument("--video", type=Path, required=True)
     p_frames.add_argument("--out", type=Path, required=True)
@@ -517,6 +530,8 @@ def main() -> None:
             camera_trajectory=args.camera_trajectory,
             planes=args.planes,
             metric_scale_report=args.metric_scale_report,
+            collision_candidate=args.collision_candidate,
+            collision_report=args.collision_report,
             render_source_qa=args.render_source_qa,
             measurement_points=args.measurement_points,
             measurement_points_frame=args.measurement_points_frame,
@@ -585,6 +600,15 @@ def main() -> None:
             max_position_p95_fraction=args.max_position_p95_fraction,
             max_color_mae=args.max_color_mae,
             dry_run=args.dry_run,
+        )
+    elif args.command == "build-collision-candidate":
+        payload = build_collision_candidate(
+            args.mesh,
+            args.mesh_report,
+            args.out,
+            max_faces=args.max_faces,
+            cell_size=args.cell_size,
+            intent=args.intent,
         )
     elif args.command == "extract-frames":
         payload = run_extract_frames(
