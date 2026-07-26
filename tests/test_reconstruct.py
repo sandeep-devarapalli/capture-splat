@@ -90,7 +90,8 @@ def test_reconstruct_runs_and_resumes_the_evidence_stages(tmp_path: Path, monkey
         write_json_strict(out_dir / "capture_splat_sfm_summary.json", summary)
         return summary
 
-    def fake_seed(capture_dir, package_dir, out_dir):
+    def fake_seed(capture_dir, package_dir, out_dir, seed_source="auto"):
+        assert seed_source == "auto"
         package = out_dir / "package"
         package.mkdir(parents=True)
         summary = {

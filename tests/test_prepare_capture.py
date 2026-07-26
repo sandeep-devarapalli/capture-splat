@@ -68,6 +68,26 @@ def test_prepare_capture_keeps_accepted_rgbd_and_holds_without_video(tmp_path: P
     assert (tmp_path / "prepared/frames/depth/000001.npy").exists()
 
 
+def test_prepare_capture_preserves_mesh_and_report_for_metric_seed(tmp_path: Path) -> None:
+    capture = _capture(tmp_path / "capture")
+    geometry = capture / "geometry"
+    geometry.mkdir()
+    (geometry / "arkit_mesh.ply").write_bytes(b"ply")
+    write_json_strict(geometry / "arkit_mesh_report.json", {"status": "finite_mesh_written"})
+    manifest = load_json_strict(capture / "capture.json")
+    manifest["arkit_mesh_file"] = "geometry/arkit_mesh.ply"
+    manifest["arkit_mesh_report_file"] = "geometry/arkit_mesh_report.json"
+    write_json_strict(capture / "capture.json", manifest)
+
+    prepare_capture(capture, tmp_path / "prepared", target_frames=2)
+    prepared = load_json_strict(tmp_path / "prepared/frames/capture.json")
+
+    assert prepared["arkit_mesh_file"] == "geometry/arkit_mesh.ply"
+    assert prepared["arkit_mesh_report_file"] == "geometry/arkit_mesh_report.json"
+    assert (tmp_path / "prepared/frames/geometry/arkit_mesh.ply").read_bytes() == b"ply"
+    assert (tmp_path / "prepared/frames/geometry/arkit_mesh_report.json").exists()
+
+
 def test_prepare_capture_refuses_non_empty_output(tmp_path: Path) -> None:
     capture = _capture(tmp_path / "capture")
     output = tmp_path / "prepared"

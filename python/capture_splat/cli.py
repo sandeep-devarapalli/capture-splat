@@ -118,6 +118,7 @@ def main() -> None:
     p_seed.add_argument("--confidence-minimum", type=int, default=1)
     p_seed.add_argument("--voxel-size", type=float, default=0.02)
     p_seed.add_argument("--max-points", type=int, default=250_000)
+    p_seed.add_argument("--seed-source", choices=["auto", "depth", "mesh"], default="auto")
     p_reconstruct = sub.add_parser("reconstruct", help="Run the resumable capture-to-3DGS evidence pipeline")
     p_reconstruct.add_argument("--capture", type=Path, required=True)
     p_reconstruct.add_argument("--out", type=Path, required=True)
@@ -138,6 +139,7 @@ def main() -> None:
     p_reconstruct.add_argument("--stop-reset-at", type=int)
     p_reconstruct.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
     p_reconstruct.add_argument("--mcmc-refine-every", default="auto", metavar="auto|N")
+    p_reconstruct.add_argument("--seed-source", choices=["auto", "depth", "mesh"], default="auto")
     p_compare = sub.add_parser("compare-app-output", help="Compare observable outputs from iPhone 3DGS apps")
     p_compare.add_argument("--capture-splat", type=Path)
     p_compare.add_argument("--splatking", type=Path)
@@ -449,6 +451,7 @@ def main() -> None:
             confidence_minimum=args.confidence_minimum,
             voxel_size=args.voxel_size,
             max_points=args.max_points,
+            seed_source=args.seed_source,
         )
     elif args.command == "reconstruct":
         payload = reconstruct_capture(
@@ -471,6 +474,7 @@ def main() -> None:
             stop_reset_at=args.stop_reset_at,
             normalization=args.normalization,
             mcmc_refine_every=args.mcmc_refine_every,
+            seed_source=args.seed_source,
         )
     elif args.command == "compare-app-output":
         payload = compare_app_outputs(

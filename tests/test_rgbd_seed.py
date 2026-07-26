@@ -96,6 +96,41 @@ def _write_package(root: Path, centers: np.ndarray) -> Path:
     return root
 
 
+def _write_mesh(capture: Path) -> None:
+    geometry = capture / "geometry"
+    geometry.mkdir()
+    points = [
+        (-0.2, -0.2, -1.0),
+        (0.2, -0.2, -1.0),
+        (-0.2, 0.2, -1.0),
+        (0.2, 0.2, -1.0),
+        (0.0, 0.0, -1.2),
+    ]
+    (geometry / "arkit_mesh.ply").write_text(
+        "\n".join([
+            "ply",
+            "format ascii 1.0",
+            f"element vertex {len(points)}",
+            "property float x",
+            "property float y",
+            "property float z",
+            "end_header",
+            *(f"{x} {y} {z}" for x, y, z in points),
+        ]) + "\n",
+        encoding="ascii",
+    )
+    write_json_strict(geometry / "arkit_mesh_report.json", {
+        "schema": "capture_splat.arkit_mesh_report.v0.2",
+        "status": "finite_mesh_written",
+        "ply_written": True,
+        "non_finite_vertex_count": 0,
+    })
+    manifest = load_json_strict(capture / "capture.json")
+    manifest["arkit_mesh_file"] = "geometry/arkit_mesh.ply"
+    manifest["arkit_mesh_report_file"] = "geometry/arkit_mesh_report.json"
+    write_json_strict(capture / "capture.json", manifest)
+
+
 def test_build_rgbd_seed_augments_only_copied_package(tmp_path: Path) -> None:
     source = _source_positions()
     target = source * 2.0 + np.asarray([1.0, 2.0, 3.0])
@@ -233,3 +268,29 @@ def test_build_rgbd_seed_preserves_non_metric_fallback_without_scale_authority(t
     assert summary["package_augmented"] is True
     assert "arkit_metric_scale_authority_missing_seed_in_colmap_units" in summary["warnings"]
     assert not (tmp_path / "out/package/metadata/metric_scale_report.json").exists()
+
+
+def test_build_metric_seed_can_use_report_bound_arkit_mesh_vertices(tmp_path: Path) -> None:
+    source = _source_positions()
+    target = source * 2.0 + np.asarray([1.0, 2.0, 3.0])
+    capture = _write_capture(tmp_path / "capture", source)
+    _write_mesh(capture)
+    package = _write_package(tmp_path / "package", target)
+
+    summary = build_rgbd_metric_seed(
+        capture,
+        package,
+        tmp_path / "out",
+        seed_source="mesh",
+        max_points=100,
+    )
+
+    assert summary["decision"] == "promote"
+    assert summary["seed_source_requested"] == "mesh"
+    assert summary["seed_source_resolved"] == "mesh"
+    assert summary["seed_point_count"] == 5
+    assert summary["mesh_seed"]["rgb_colored_point_count"] > 0
+    assert len(summary["mesh_seed"]["mesh"]["checksum"]) == 71
+    report = load_json_strict(tmp_path / "out/package/metadata/metric_scale_report.json")
+    consumed = {item["path"] for item in report["consumed_capture_assets"]}
+    assert consumed == {"geometry/arkit_mesh.ply", "geometry/arkit_mesh_report.json"}

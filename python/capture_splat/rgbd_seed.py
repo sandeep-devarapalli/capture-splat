@@ -13,6 +13,7 @@ from PIL import Image
 from .background_sphere import next_point_id
 from .capture_schema import iter_frames, load_capture
 from .json_utils import load_json_strict, write_json_strict
+from .ply_stats import inspect_ply, load_ply_scalar_samples
 from .scene_transform import PACKAGE_ORIENTATION_NAME, PACKAGE_ORIENTATION_SCHEMA
 
 SUMMARY_SCHEMA = "capture_splat.rgbd_seed_summary.v0.1"
@@ -331,6 +332,98 @@ def _frame_points(
     return points, colors
 
 
+def _color_mesh_points(
+    capture_dir: Path,
+    capture: dict[str, Any],
+    frames: list[Any],
+    points: np.ndarray,
+) -> tuple[np.ndarray, int]:
+    colors = np.full((len(points), 3), 127, dtype=np.uint8)
+    best_distance = np.full(len(points), np.inf)
+    homogeneous = np.concatenate([points, np.ones((len(points), 1))], axis=1)
+    for frame in frames:
+        image_path = capture_dir / frame.image_path
+        if not image_path.exists():
+            continue
+        camera_to_world = np.asarray(frame.transform_matrix, dtype=np.float64)
+        if camera_to_world.shape != (4, 4) or not np.all(np.isfinite(camera_to_world)):
+            continue
+        try:
+            world_to_camera = np.linalg.inv(camera_to_world)
+        except np.linalg.LinAlgError:
+            continue
+        camera_points = (world_to_camera @ homogeneous.T).T[:, :3]
+        depth = -camera_points[:, 2]
+        with Image.open(image_path) as image:
+            rgb = np.asarray(image.convert("RGB"))
+        height, width = rgb.shape[:2]
+        fl_x, fl_y, cx, cy = _depth_intrinsics(frame.intrinsics, width, height)
+        valid_depth = np.isfinite(depth) & (depth > 0.05)
+        u = np.zeros(len(points))
+        v = np.zeros(len(points))
+        u[valid_depth] = fl_x * camera_points[valid_depth, 0] / depth[valid_depth] + cx
+        v[valid_depth] = cy - fl_y * camera_points[valid_depth, 1] / depth[valid_depth]
+        ui = np.rint(u).astype(np.int64)
+        vi = np.rint(v).astype(np.int64)
+        visible = valid_depth & (ui >= 0) & (ui < width) & (vi >= 0) & (vi < height)
+        closer = visible & (depth < best_distance)
+        if np.any(closer):
+            colors[closer] = rgb[vi[closer], ui[closer]]
+            best_distance[closer] = depth[closer]
+    return colors, int(np.count_nonzero(np.isfinite(best_distance)))
+
+
+def _mesh_points(
+    capture_dir: Path,
+    capture: dict[str, Any],
+    frames: list[Any],
+    voxel_size: float,
+    max_points: int,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    relative = capture.get("arkit_mesh_file", "geometry/arkit_mesh.ply")
+    mesh_path = capture_dir / relative if isinstance(relative, str) else capture_dir / "geometry/arkit_mesh.ply"
+    if not mesh_path.exists():
+        return np.empty((0, 3)), np.empty((0, 3), dtype=np.uint8), {"reason": "arkit_mesh_missing"}
+    report_relative = capture.get("arkit_mesh_report_file", "geometry/arkit_mesh_report.json")
+    report_path = (
+        capture_dir / report_relative
+        if isinstance(report_relative, str)
+        else capture_dir / "geometry/arkit_mesh_report.json"
+    )
+    if not report_path.exists():
+        return np.empty((0, 3)), np.empty((0, 3), dtype=np.uint8), {"reason": "arkit_mesh_report_missing"}
+    report = load_json_strict(report_path)
+    if (
+        report.get("status") != "finite_mesh_written"
+        or report.get("ply_written") is not True
+        or int(report.get("non_finite_vertex_count", 0)) != 0
+    ):
+        return np.empty((0, 3)), np.empty((0, 3), dtype=np.uint8), {"reason": "arkit_mesh_report_not_finite"}
+    stats = inspect_ply(mesh_path)
+    if not stats["finite"]:
+        return np.empty((0, 3)), np.empty((0, 3), dtype=np.uint8), {"reason": "arkit_mesh_non_finite"}
+    samples = load_ply_scalar_samples(mesh_path, ["x", "y", "z"], limit=500_000)
+    points = np.stack([samples["x"], samples["y"], samples["z"]], axis=1)
+    finite = np.all(np.isfinite(points), axis=1)
+    points = points[finite]
+    points, _ = _voxel_downsample(
+        points,
+        np.zeros((len(points), 3), dtype=np.uint8),
+        voxel_size,
+        max_points,
+    )
+    colors, colored_count = _color_mesh_points(capture_dir, capture, frames, points)
+    return points, colors, {
+        "reason": "mesh_vertices_projected_to_rgb",
+        "source_vertex_count": stats["vertex_count"],
+        "sampled_point_count": int(len(points)),
+        "rgb_colored_point_count": colored_count,
+        "default_gray_point_count": int(len(points) - colored_count),
+        "mesh": _file_evidence(mesh_path, capture_dir),
+        "mesh_report": _file_evidence(report_path, capture_dir),
+    }
+
+
 def _voxel_downsample(points: np.ndarray, colors: np.ndarray, voxel: float, maximum: int) -> tuple[np.ndarray, np.ndarray]:
     keys = np.floor(points / voxel).astype(np.int64)
     _, indices = np.unique(keys, axis=0, return_index=True)
@@ -376,6 +469,7 @@ def build_rgbd_metric_seed(
     confidence_minimum: int = 1,
     voxel_size: float = 0.02,
     max_points: int = 250_000,
+    seed_source: str = "auto",
 ) -> dict[str, Any]:
     capture_dir = capture_dir.resolve()
     package_dir = package_dir.resolve()
@@ -397,6 +491,8 @@ def build_rgbd_metric_seed(
         raise ValueError("confidence minimum must be 0, 1, or 2")
     if voxel_size <= 0 or max_points <= 0:
         raise ValueError("voxel size and max points must be positive")
+    if seed_source not in {"auto", "depth", "mesh"}:
+        raise ValueError("seed source must be auto, depth, or mesh")
     output_package = out_dir / "package"
     out_dir.mkdir(parents=True, exist_ok=True)
     shutil.copytree(package_dir, output_package)
@@ -413,10 +509,13 @@ def build_rgbd_metric_seed(
         "alignment": alignment,
         "seed_ply": None,
         "seed_point_count": 0,
+        "seed_source_requested": seed_source,
+        "seed_source_resolved": None,
         "package_augmented": False,
         "decision": "hold",
         "authority": {
-            "arkit_depth_prior": True,
+            "arkit_depth_prior": False,
+            "arkit_mesh_prior": False,
             "colmap_refined_cameras_remain_baseline": True,
             "metric_seed_is_proposal": True,
             "quality_claim": False,
@@ -438,26 +537,54 @@ def build_rgbd_metric_seed(
     point_chunks: list[np.ndarray] = []
     color_chunks: list[np.ndarray] = []
     consumed_assets: dict[str, dict[str, Any]] = {}
-    for frame in frames:
-        raw = capture["frames"][frame.source_index - 1]
-        points, colors = _frame_points(
-            capture_dir, frame, raw, points_per_frame, confidence_minimum, depth_scale
+    if seed_source in {"auto", "depth"}:
+        for frame in frames:
+            raw = capture["frames"][frame.source_index - 1]
+            points, colors = _frame_points(
+                capture_dir, frame, raw, points_per_frame, confidence_minimum, depth_scale
+            )
+            if len(points):
+                point_chunks.append(points)
+                color_chunks.append(colors)
+                for key in ("rgb", "depth", "confidence"):
+                    relative = raw.get(key)
+                    if isinstance(relative, str):
+                        path = capture_dir / relative
+                        if path.exists():
+                            consumed_assets.setdefault(relative, _file_evidence(path, capture_dir))
+    mesh_details: dict[str, Any] | None = None
+    if point_chunks:
+        resolved_source = "depth"
+        points = np.concatenate(point_chunks)
+        colors = np.concatenate(color_chunks)
+    elif seed_source in {"auto", "mesh"}:
+        points, colors, mesh_details = _mesh_points(
+            capture_dir, capture, frames, voxel_size, max_points
         )
-        if len(points):
-            point_chunks.append(points)
-            color_chunks.append(colors)
-            for key in ("rgb", "depth", "confidence"):
-                relative = raw.get(key)
-                if isinstance(relative, str):
-                    path = capture_dir / relative
-                    if path.exists():
-                        consumed_assets.setdefault(relative, _file_evidence(path, capture_dir))
-    if not point_chunks:
-        summary["alignment"]["seed_reason"] = "no_confidence_filtered_depth_points"
+        resolved_source = "mesh" if len(points) else None
+        if isinstance(mesh_details.get("mesh"), dict):
+            evidence = mesh_details["mesh"]
+            consumed_assets.setdefault(str(evidence["path"]), evidence)
+        if isinstance(mesh_details.get("mesh_report"), dict):
+            evidence = mesh_details["mesh_report"]
+            consumed_assets.setdefault(str(evidence["path"]), evidence)
+    else:
+        points = np.empty((0, 3))
+        colors = np.empty((0, 3), dtype=np.uint8)
+        resolved_source = None
+    if not len(points):
+        summary["alignment"]["seed_reason"] = (
+            mesh_details.get("reason")
+            if mesh_details is not None
+            else "no_confidence_filtered_depth_points"
+        )
         write_json_strict(out_dir / "capture_splat_rgbd_seed_summary.json", summary)
         return summary
-    points = np.concatenate(point_chunks)
-    colors = np.concatenate(color_chunks)
+    summary["seed_source_resolved"] = resolved_source
+    summary["authority"]["arkit_depth_prior"] = resolved_source == "depth"
+    summary["authority"]["arkit_mesh_prior"] = resolved_source == "mesh"
+    if mesh_details is not None:
+        summary["mesh_seed"] = mesh_details
     scale, rotation, translation = transform
     meters_per_colmap_unit = 1.0 / scale
     points = apply_sim3(points, scale, rotation, translation)
@@ -522,6 +649,7 @@ def build_rgbd_metric_seed(
             "source_units": "colmap_units",
             "target_units": "meters",
             "scale_authority": scale_authority,
+            "seed_source": resolved_source,
             "depth_scale_to_meters": depth_scale,
             "colmap_units_per_meter": scale,
             "meters_per_colmap_unit": meters_per_colmap_unit,
@@ -548,6 +676,7 @@ def build_rgbd_metric_seed(
     summary.update({
         "seed_ply": str(seed_ply),
         "seed_point_count": int(len(points)),
+        "seed_source_resolved": resolved_source,
         "voxel_size": voxel_size,
         "confidence_minimum": confidence_minimum,
         "first_colmap_point_id": first_point_id,

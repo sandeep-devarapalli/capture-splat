@@ -24,6 +24,7 @@ IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 STAGE_CONFIG_KEYS = {
     "prepare": ("capture_manifest", "capture_manifest_checksum", "recipe"),
     "sfm": ("allow_cpu_matching", "retrieval_top_k"),
+    "seed": ("seed_source",),
     "train": ("backend", "backend_root", "steps", "stop_reset_at", "normalization", "mcmc_refine_every"),
     "prune": ("prune_alpha", "max_pruned_fraction"),
     "qa": (
@@ -252,6 +253,7 @@ def _dry_run(
     qa_render_dir: Path | None,
     normalization: str,
     mcmc_refine_every: str | int,
+    seed_source: str,
 ) -> dict[str, Any]:
     capture = load_capture(capture_dir)
     recipe_name, recipe_source = resolve_recipe(capture, recipe)
@@ -260,7 +262,7 @@ def _dry_run(
     planned = [
         _stage("prepare", "planned", output=str((out_dir / "01_prepare").resolve())),
         _stage("sfm", "planned", route="from_prepare_summary", method="global"),
-        _stage("seed", "planned", policy="arkit_rgbd_if_sim3_gate_passes"),
+        _stage("seed", "planned", policy="arkit_sensor_prior_if_sim3_gate_passes", source=seed_source),
         _stage(
             "train",
             "blocked" if training_blocked else "planned",
@@ -288,6 +290,7 @@ def _dry_run(
         "steps": steps,
         "normalization": normalization,
         "mcmc_refine_every": str(mcmc_refine_every),
+        "seed_source": seed_source,
         "resume": False,
         "dry_run": True,
         "stop_after": stop_after,
@@ -319,6 +322,7 @@ def reconstruct_capture(
     stop_reset_at: int | None = None,
     normalization: str = "auto",
     mcmc_refine_every: str | int = "auto",
+    seed_source: str = "auto",
 ) -> dict[str, Any]:
     capture_dir = capture_dir.resolve()
     out_dir = out_dir.resolve()
@@ -337,6 +341,8 @@ def reconstruct_capture(
         raise ValueError(f"stop-after must be one of {', '.join(STAGES)}")
     if normalization not in {"auto", "on", "off"}:
         raise ValueError("normalization must be auto, on, or off")
+    if seed_source not in {"auto", "depth", "mesh"}:
+        raise ValueError("seed source must be auto, depth, or mesh")
     if not step_values or any(step <= 0 for step in step_values):
         raise ValueError("training steps must be positive")
     if resume and dry_run:
@@ -364,13 +370,14 @@ def reconstruct_capture(
         "stop_reset_at": stop_reset_at,
         "normalization": normalization,
         "mcmc_refine_every": str(mcmc_refine_every),
+        "seed_source": seed_source,
     }
     if out_dir.exists() and any(out_dir.iterdir()) and not resume:
         raise FileExistsError(f"reconstruction output is not empty: {out_dir}")
     out_dir.mkdir(parents=True, exist_ok=True)
     if dry_run:
         return _dry_run(
-            capture_dir, out_dir, backend, backend_root, recipe, step_values, stop_after, qa_render_dir, normalization, mcmc_refine_every
+            capture_dir, out_dir, backend, backend_root, recipe, step_values, stop_after, qa_render_dir, normalization, mcmc_refine_every, seed_source
         )
     prior: dict[str, Any] = {}
     completed_stages: dict[str, dict[str, Any]] = {}
@@ -492,7 +499,12 @@ def reconstruct_capture(
     )
     seed_resumed = seed is not None
     try:
-        seed = seed or build_rgbd_metric_seed(prepare_dir / "frames", sfm_dir, seed_dir)
+        seed = seed or build_rgbd_metric_seed(
+            prepare_dir / "frames",
+            sfm_dir,
+            seed_dir,
+            seed_source=seed_source,
+        )
     except Exception as error:
         seed = {"decision": "hold", "package_augmented": False, "error": str(error)}
     record(_stage("seed", str(seed.get("decision", "hold")), seed_path if seed_path.exists() else None, resumed=seed_resumed, package_augmented=bool(seed.get("package_augmented")), error=seed.get("error")))
