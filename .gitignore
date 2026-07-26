@@ -29,8 +29,9 @@ external/
 # Xcode
 DerivedData/
 *.xcuserstate
-*.xcworkspace/xcuserdata/
-*.xcodeproj/xcuserdata/
+**/*.xcworkspace/xcuserdata/
+**/*.xcodeproj/xcuserdata/
+**/*.local.xcconfig
 *.xcarchive
 *.ipa
 

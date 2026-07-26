@@ -28,6 +28,8 @@
 		100000000000000000000008 /* CaptureSplat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CaptureSplat.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		100000000000000000000009 /* CaptureVideoRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureVideoRecorder.swift; sourceTree = "<group>"; };
 		100000000000000000000010 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		100000000000000000000011 /* CaptureSplat.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = CaptureSplat.xcconfig; sourceTree = "<group>"; };
+		100000000000000000000012 /* CaptureSplat.local.xcconfig.example */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = CaptureSplat.local.xcconfig.example; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -54,6 +56,7 @@
 			children = (
 				100000000000000000000304 /* Sources */,
 				100000000000000000000305 /* Resources */,
+				100000000000000000000306 /* Config */,
 			);
 			path = CaptureSplat;
 			sourceTree = "<group>";
@@ -87,6 +90,15 @@
 				100000000000000000000007 /* Info.plist */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		100000000000000000000306 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000011 /* CaptureSplat.xcconfig */,
+				100000000000000000000012 /* CaptureSplat.local.xcconfig.example */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -294,6 +306,7 @@
 		};
 		100000000000000000000903 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 100000000000000000000011 /* CaptureSplat.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
@@ -305,7 +318,6 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.CaptureSplat;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -318,6 +330,7 @@
 		};
 		100000000000000000000904 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 100000000000000000000011 /* CaptureSplat.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
@@ -329,7 +342,6 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.CaptureSplat;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;

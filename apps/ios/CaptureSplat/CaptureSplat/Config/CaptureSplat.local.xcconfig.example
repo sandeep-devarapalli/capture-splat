@@ -1,0 +1,4 @@
+// Copy this file to CaptureSplat.local.xcconfig and set local signing values.
+// CaptureSplat.local.xcconfig is ignored by Git.
+CAPTURE_SPLAT_BUNDLE_IDENTIFIER = com.example.CaptureSplat
+CAPTURE_SPLAT_DEVELOPMENT_TEAM =

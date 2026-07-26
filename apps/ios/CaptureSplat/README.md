@@ -4,7 +4,12 @@ Capture Splat is a native iPhone capture app for recording Video 3DGS input. It 
 
 ## Build
 
-Open `CaptureSplat.xcodeproj` in Xcode, select a physical iPhone, set your development team, and run the `CaptureSplat` scheme.
+Open `CaptureSplat.xcodeproj` in Xcode, select a physical iPhone, and run the
+`CaptureSplat` scheme. For physical-device signing, copy
+`CaptureSplat/Config/CaptureSplat.local.xcconfig.example` to
+`CaptureSplat/Config/CaptureSplat.local.xcconfig`, then set a unique bundle
+identifier and your development team. The local file is ignored by Git, so
+device signing no longer dirties the shared Xcode project.
 
 The simulator cannot validate camera, LiDAR, motion, or real capture timing.
 Use the [iPhone Xcode diagnostics](../../../docs/iphone_xcode_diagnostics.md)
