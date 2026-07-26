@@ -1,26 +1,78 @@
 # Roadmap
 
-## Current Carry-Forward Focus
+## Current Status
 
-- Preserve VkSplat/Vulkan as the default baseline while keeping OpenSplat/MPS as a comparison backend.
-- Turn field validation learnings into reproducible CLI reports: finite PLY, radius/outlier checks, raw-canvas source matching, and per-frame quality summaries.
-- Do not promote longer training runs unless the same input package passes alignment and per-frame quality gates.
-- Improve iPhone capture guidance so accepted frames are driven by overlap, parallax, blur, exposure, tracking, and coverage contribution.
-- Finish physical acceptance of thermal guidance with explicit mesh-pause reasons, honest throttling/drop counters, and duration evidence for mesh, map-only, and pose-only operation.
-- Compare observable outputs from Capture Splat, SplatKing, KIRI Engine, and similar apps to improve iPhone-level capture guidance without claiming proprietary internals.
+Capture Splat has implemented the core public capture-to-3DGS path:
 
-## Capture Splat App
+- Video 3DGS Max records quality-gated RGB-D keyframes, indexed continuous
+  HEVC video, per-frame ARKit poses/intrinsics, exposure telemetry, person
+  masks, mesh evidence, and capture events.
+- Intent-aware guidance covers Room, Desk / Cluster, Object Orbit, Corridor,
+  Wall / Facade, Outdoor, RoomPlan + 3DGS, and Detail Repair. Only Object
+  Orbit permits an explicit subject lock.
+- The host pipeline prepares captures, runs integrated global COLMAP or HLOC
+  retrieval, preserves per-frame camera and mask evidence, builds a gated
+  RGB-D metric seed, and trains controlled VkSplat or gsplat ladders.
+- Strict capture, camera, photometric, PLY, weak-frame, raw-render, and
+  World Studio handoff reports preserve `promote|hold|reject` decisions.
+- Package orientation and trainer normalization are recorded as separate
+  transforms so viewers do not have to guess how a trained PLY relates to
+  source cameras.
 
-- v0.1: Video 3DGS capture, export folder, basic blur/exposure/motion feedback.
-- v0.2: Guided capture with haptics, coverage prompts, loop guidance, and less intrusive UI.
-- v0.3: Video 3DGS capture intents, explicit Object Orbit lock, live LiDAR/trajectory guidance, shared-session RoomPlan semantics, and conservative completeness reports.
-- v0.4: TestFlight-ready distribution and project library.
-- v1.0: Reliable capture scoring, export presets, and on-device preview checks.
+These are implemented capabilities, not a blanket high-quality claim. A
+physical capture, finite PLY, viewer load, or aligned frame remains evidence
+for one gate only.
 
-## 3DGS Pipeline
+## Acceptance Gates
 
-- v0.1: Capture ingest, COLMAP package generation, VkSplat training, finite `.ply` validation.
-- v0.2: Linux, Windows, and cloud NVIDIA setup maturity.
-- v0.3: Quality gates for sharpness, overlap, registration, render/source correspondence, and weak-frame filtering.
-- v0.4: Integrated global COLMAP, per-frame camera evidence, canonical masks, depth/pose priors, loop-closure diagnostics, and controlled training ladders.
-- v1.0: Benchmarked sample captures, viewer-ready release packages, and adapters for common 3DGS tools.
+- Finish physical acceptance of live spatial guidance and shared-session
+  RoomPlan using a controlled 90-120 second capture.
+- Verify mesh/map update p95, keyframe throughput, thermal downgrade duration,
+  RoomPlan coordinate continuity, and absence of retained-frame warnings.
+- Run every retained capture through global SfM, fixed-camera `3000 -> 7000`
+  render QA, and only then consider `15000 -> 30000`.
+- Compare observable Capture Splat, SplatKing, KIRI Engine, and similar
+  outputs without claiming access to proprietary internals.
+
+## Remaining Public Work
+
+### Capture App
+
+- Replace the debug scene-understanding wireframe with a bounded,
+  class-colored production mesh renderer after the physical throughput gate.
+- Complete TestFlight packaging and project-library polish.
+- Add release-level startup, long-session thermal, and two-cycle finalization
+  evidence across supported LiDAR iPhones.
+
+### Reconstruction
+
+- Preserve ARKit metric scale through trainer normalization policy and expose
+  controlled seed/refinement options without overriding COLMAP-refined cameras.
+- Add a genuine equirectangular 360-camera importer with perspective
+  projections and explicit camera-rig provenance.
+- Add optional AprilTag scale calibration.
+- Add compact SPZ/web distribution with round-trip orientation, color, camera,
+  and viewer checks before evaluating tiled LOD formats.
+- Keep VGGT preview and splat-to-mesh as optional experiments behind explicit
+  runtime and authority gates.
+
+### World Studio
+
+- Honor handoff `world_up`, `initial_camera`, and capture profile end to end.
+- Accept a coverage-preserving collision candidate only after floor continuity,
+  wall retention, and splat/mesh registration pass.
+- Add metric surface picking, distance/height/polyline/area measurement,
+  uncertainty, and JSON export. The Gaussian remains a visual proposal.
+- Add worker-backed compact-asset loading and mobile performance validation
+  before claiming large-scene web readiness.
+
+## Stable Policy
+
+- VkSplat/Vulkan remains the public baseline; gsplat/CUDA is the cloud
+  alternative. OpenSplat/MPS remains comparison-only.
+- COLMAP-refined cameras remain the visual reconstruction baseline. ARKit
+  pose/depth is a prior and metric evidence.
+- Short runs are smoke tests. Serious quality gates remain
+  `3000 -> 7000 -> 15000 -> 30000`.
+- Longer training cannot repair weak capture, poor registration, bad
+  intrinsics, blur, exposure discontinuity, or missing viewpoint support.
