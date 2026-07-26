@@ -10,8 +10,10 @@ import numpy as np
 
 from .json_utils import write_json_strict
 
-SIDECAR_SCHEMA = "capture_splat.scene_transform.v0.1"
+SIDECAR_SCHEMA = "capture_splat.scene_transform.v0.2"
 SIDECAR_NAME = "capture_splat_scene_transform.json"
+PACKAGE_ORIENTATION_SCHEMA = "capture_splat.package_orientation_transform.v0.1"
+PACKAGE_ORIENTATION_NAME = "package_orientation_transform.json"
 
 
 def quaternion_wxyz_to_matrix(qw: float, qx: float, qy: float, qz: float) -> np.ndarray:
@@ -49,6 +51,111 @@ def load_camera_to_worlds(sparse_dir: Path) -> np.ndarray:
     if not poses:
         raise ValueError(f"no registered camera poses in {images_txt}")
     return np.stack(poses)
+
+
+def load_named_camera_to_worlds(sparse_dir: Path) -> dict[str, np.ndarray]:
+    images_txt = sparse_dir / "images.txt"
+    if not images_txt.exists():
+        raise FileNotFoundError(f"images.txt missing: {images_txt}")
+    poses: dict[str, np.ndarray] = {}
+    for line in images_txt.read_text(encoding="utf-8").splitlines():
+        parts = line.split()
+        if len(parts) < 10 or line.startswith("#"):
+            continue
+        try:
+            int(parts[0])
+            int(parts[8])
+            qw, qx, qy, qz, tx, ty, tz = (float(value) for value in parts[1:8])
+        except ValueError:
+            continue
+        rotation_w2c = quaternion_wxyz_to_matrix(qw, qx, qy, qz)
+        c2w = np.eye(4)
+        c2w[:3, :3] = rotation_w2c.T
+        c2w[:3, 3] = -rotation_w2c.T @ np.array([tx, ty, tz])
+        poses[parts[9]] = c2w
+    if not poses:
+        raise ValueError(f"no registered camera poses in {images_txt}")
+    return poses
+
+
+def estimate_package_orientation_transform(
+    before_sparse: Path,
+    after_sparse: Path,
+) -> dict[str, Any]:
+    before = load_named_camera_to_worlds(before_sparse)
+    after = load_named_camera_to_worlds(after_sparse)
+    names = sorted(set(before) & set(after))
+    if len(names) < 3:
+        raise ValueError("at least three matched cameras are required for orientation provenance")
+    source = np.stack([before[name][:3, 3] for name in names])
+    target = np.stack([after[name][:3, 3] for name in names])
+    source_center = source.mean(axis=0)
+    target_center = target.mean(axis=0)
+    source_zero = source - source_center
+    target_zero = target - target_center
+    variance = float(np.mean(np.sum(source_zero * source_zero, axis=1)))
+    if not math.isfinite(variance) or variance <= 1e-12:
+        raise ValueError("camera centers are degenerate")
+    covariance = target_zero.T @ source_zero / len(names)
+    u, singular, vt = np.linalg.svd(covariance)
+    signs = np.ones(3)
+    if np.linalg.det(u @ vt) < 0:
+        signs[-1] = -1
+    rotation = u @ np.diag(signs) @ vt
+    scale = float(np.sum(singular * signs) / variance)
+    translation = target_center - scale * rotation @ source_center
+    transform = np.eye(4)
+    transform[:3, :3] = scale * rotation
+    transform[:3, 3] = translation
+    predicted = transform_points(transform, source)
+    residuals = np.linalg.norm(predicted - target, axis=1)
+    return {
+        "schema": PACKAGE_ORIENTATION_SCHEMA,
+        "transform": transform.tolist(),
+        "source_coordinate_frame": "colmap_world_before_orientation",
+        "target_coordinate_frame": "colmap_world",
+        "matched_camera_count": len(names),
+        "scale": scale,
+        "median_camera_center_residual": float(np.median(residuals)),
+        "max_camera_center_residual": float(np.max(residuals)),
+        "authority": {
+            "orientation_alignment_evidence": True,
+            "metric_scale_claim": False,
+            "quality_claim": False,
+        },
+    }
+
+
+def write_package_orientation_transform(
+    before_sparse: Path,
+    after_sparse: Path,
+    output: Path,
+) -> dict[str, Any]:
+    report = estimate_package_orientation_transform(before_sparse, after_sparse)
+    write_json_strict(output, report)
+    return report
+
+
+def load_package_orientation_transform(sparse_dir: Path | None) -> dict[str, Any] | None:
+    if sparse_dir is None:
+        return None
+    path = sparse_dir.resolve().parent.parent / "metadata" / PACKAGE_ORIENTATION_NAME
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    matrix = payload.get("transform")
+    try:
+        array = np.asarray(matrix, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if payload.get("schema") != PACKAGE_ORIENTATION_SCHEMA or array.shape != (4, 4):
+        return None
+    if not np.isfinite(array).all():
+        return None
+    return payload
 
 
 def load_points(sparse_dir: Path) -> np.ndarray:
@@ -241,11 +348,27 @@ def write_scene_transform_sidecar(
         "ply": ply_path.name,
         "trainer_transform": None,
         "trainer_transform_source": None,
+        "package_orientation_transform": None,
+        "package_orientation_transform_source": None,
         "authority": {
             "maps_package_world_to_trained_world": True,
             "quality_claim": False,
         },
     }
+    package_orientation = load_package_orientation_transform(sparse_dir)
+    if package_orientation is not None:
+        sidecar["package_orientation_transform"] = package_orientation["transform"]
+        sidecar["package_orientation_transform_source"] = PACKAGE_ORIENTATION_NAME
+        sidecar["package_orientation_evidence"] = {
+            key: package_orientation[key]
+            for key in (
+                "matched_camera_count",
+                "scale",
+                "median_camera_center_residual",
+                "max_camera_center_residual",
+            )
+            if key in package_orientation
+        }
     train_json_transform = load_train_json_transform(ply_path)
     if train_json_transform is not None:
         sidecar["trainer_transform"] = train_json_transform
