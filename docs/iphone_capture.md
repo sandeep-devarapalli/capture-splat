@@ -140,7 +140,13 @@ recovery/debug path during physical validation.
 Every finalized capture also writes
 `metadata/spatial_guidance_report.json`. It records the resolved sensor mode,
 surface-cell and trajectory evidence, update timing, thermal downgrades, and
-RoomPlan status. Its measurement, collision, semantic-ground-truth,
+RoomPlan status. Report v0.2 separates processed anchor updates from
+intentionally throttled/coalesced updates, policy-disabled updates, actual
+drops, and processing-budget overruns. It also records seconds spent in each
+thermal state, guidance policy, and render state, plus the reason a live mesh
+was paused. A high throttled count is expected when ARKit updates anchors more
+frequently than the 5 Hz or 2 Hz guidance budget; it is not by itself a
+renderer failure. Its measurement, collision, semantic-ground-truth,
 navigation, and quality authority flags are all false. Treat RoomPlan and live
 coverage as capture guidance and scale/context evidence only; neither proves
 COLMAP registration, collision geometry, complete coverage, or 3DGS quality.

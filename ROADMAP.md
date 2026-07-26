@@ -6,6 +6,7 @@
 - Turn field validation learnings into reproducible CLI reports: finite PLY, radius/outlier checks, raw-canvas source matching, and per-frame quality summaries.
 - Do not promote longer training runs unless the same input package passes alignment and per-frame quality gates.
 - Improve iPhone capture guidance so accepted frames are driven by overlap, parallax, blur, exposure, tracking, and coverage contribution.
+- Finish physical acceptance of thermal guidance with explicit mesh-pause reasons, honest throttling/drop counters, and duration evidence for mesh, map-only, and pose-only operation.
 - Compare observable outputs from Capture Splat, SplatKing, KIRI Engine, and similar apps to improve iPhone-level capture guidance without claiming proprietary internals.
 
 ## Capture Splat App

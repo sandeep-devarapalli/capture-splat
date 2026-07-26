@@ -502,14 +502,30 @@ final class CaptureController: NSObject, ObservableObject {
     private var lastSpatialPathPosition: SIMD2<Float>?
     private var lastSpatialPoseTimestamp: TimeInterval = -.infinity
     private var spatialGuidanceUpdateDurationsMs: [Double] = []
+    private var spatialGuidanceReceivedUpdateCount = 0
     private var spatialGuidanceUpdateCount = 0
     private var spatialGuidanceDroppedUpdateCount = 0
+    private var spatialGuidanceThrottledUpdateCount = 0
+    private var spatialGuidancePolicyDisabledUpdateCount = 0
+    private var spatialGuidanceOverBudgetProcessingCount = 0
     private var lastSpatialAnchorUpdateTimestamp: [UUID: TimeInterval] = [:]
     private var spatialGuidanceThermalTransitions: [[String: Any]] = []
+    private var spatialGuidanceCaptureStartUptime: TimeInterval?
+    private var spatialGuidanceCaptureEndUptime: TimeInterval?
+    private var spatialGuidancePolicyStartUptime: TimeInterval?
+    private var spatialGuidanceThermalStartUptime: TimeInterval?
+    private var spatialGuidanceRenderStateStartUptime: TimeInterval?
+    private var spatialGuidancePolicyDurationsSeconds: [String: Double] = [:]
+    private var spatialGuidanceThermalDurationsSeconds: [String: Double] = [:]
+    private var spatialGuidanceRenderStateDurationsSeconds: [String: Double] = [:]
+    private var currentSpatialGuidanceThermalState: String?
+    private var currentSpatialGuidanceRenderState: String?
+    private var lastSpatialGuidanceMeshPauseReason = "not_started"
     private var lastSpatialGuidancePolicy = ""
     private let spatialGuidanceCellSizeMeters: Float = 0.5
     private let maxSpatialGuidancePathPoints = 240
     private let maxSpatialGuidanceDurationSamples = 600
+    private let spatialGuidanceUpdateBudgetMs = 12.0
     private var sharedRoomCaptureSession: RoomCaptureSession?
     private var sharedRoomPlanGeneration: UUID?
     private var sharedRoomPlanDirectory: URL?
@@ -919,10 +935,25 @@ final class CaptureController: NSObject, ObservableObject {
             lastLiveGuidanceTimestamp = -.infinity
             spatialCellObservationCounts.removeAll()
             spatialGuidanceUpdateDurationsMs.removeAll()
+            spatialGuidanceReceivedUpdateCount = 0
             spatialGuidanceUpdateCount = 0
             spatialGuidanceDroppedUpdateCount = 0
+            spatialGuidanceThrottledUpdateCount = 0
+            spatialGuidancePolicyDisabledUpdateCount = 0
+            spatialGuidanceOverBudgetProcessingCount = 0
             lastSpatialAnchorUpdateTimestamp.removeAll()
             spatialGuidanceThermalTransitions.removeAll()
+            spatialGuidancePolicyDurationsSeconds.removeAll()
+            spatialGuidanceThermalDurationsSeconds.removeAll()
+            spatialGuidanceRenderStateDurationsSeconds.removeAll()
+            spatialGuidancePolicyStartUptime = nil
+            spatialGuidanceThermalStartUptime = nil
+            spatialGuidanceRenderStateStartUptime = nil
+            currentSpatialGuidanceThermalState = nil
+            currentSpatialGuidanceRenderState = nil
+            lastSpatialGuidanceMeshPauseReason = "not_started"
+            spatialGuidanceCaptureStartUptime = ProcessInfo.processInfo.systemUptime
+            spatialGuidanceCaptureEndUptime = nil
             publishSpatialGuidanceCells()
             rgbRateSamples.removeAll()
             depthRateSamples.removeAll()
@@ -972,6 +1003,9 @@ final class CaptureController: NSObject, ObservableObject {
 
     func stopRecording() {
         guard isRecording, !isFinalizing else { return }
+        let stoppedAt = ProcessInfo.processInfo.systemUptime
+        finishSpatialGuidanceSegments(at: stoppedAt)
+        spatialGuidanceCaptureEndUptime = stoppedAt
         isRecording = false
         isFinalizing = true
         capturePackageState = .finalizing
@@ -2332,19 +2366,108 @@ final class CaptureController: NSObject, ObservableObject {
             spatialGuidanceUpdateHz = 2
             spatialGuidanceShowsMesh = false
         }
+        let now = ProcessInfo.processInfo.systemUptime
+        let thermalState = thermalStateLabel(state)
+        let renderState = spatialGuidanceRenderState(for: policy)
+        lastSpatialGuidanceMeshPauseReason = spatialGuidanceMeshPauseReason(
+            policy: policy,
+            thermalState: thermalState
+        )
+        if isRecording {
+            transitionSpatialGuidancePolicy(to: policy, at: now)
+            transitionSpatialGuidanceThermalState(to: thermalState, at: now)
+            transitionSpatialGuidanceRenderState(to: renderState, at: now)
+        }
         guard policy != lastSpatialGuidancePolicy else { return }
+        let previousPolicy = lastSpatialGuidancePolicy.isEmpty ? nil : lastSpatialGuidancePolicy
         lastSpatialGuidancePolicy = policy
         if isRecording {
             let transition: [String: Any] = [
                 "policy": policy,
-                "thermal_state": thermalStateLabel(state),
+                "previous_policy": previousPolicy ?? NSNull(),
+                "thermal_state": thermalState,
                 "face_budget": spatialGuidanceFaceBudget,
                 "update_hz": spatialGuidanceUpdateHz,
                 "video_target_fps": videoRecorder.targetFPS,
+                "capture_elapsed_seconds": spatialGuidanceCaptureStartUptime.map {
+                    max(0, now - $0)
+                } ?? 0,
+                "render_state": renderState,
+                "mesh_pause_reason": lastSpatialGuidanceMeshPauseReason,
             ]
             spatialGuidanceThermalTransitions.append(transition)
             appendSessionEvent("spatial_guidance_policy_changed", details: transition)
         }
+    }
+
+    private func spatialGuidanceRenderState(for policy: String) -> String {
+        guard isSpatialGuidanceVisible else { return "hidden" }
+        if spatialGuidanceShowsMesh { return "mesh_visible" }
+        if policy == "pose_only" { return "pose_only" }
+        if policy == "map_only" { return "map_only" }
+        if spatialGuidanceMode == "depth_points" { return "depth_points" }
+        if spatialGuidanceFaceBudget > 0 { return "features_and_map" }
+        return "map_only"
+    }
+
+    private func spatialGuidanceMeshPauseReason(policy: String, thermalState: String) -> String {
+        guard isSpatialGuidanceVisible else { return "guidance_hidden_by_user" }
+        guard spatialGuidanceMode == "lidar_mesh" || spatialGuidanceMode == "roomplan_shared" else {
+            return "mesh_unavailable_for_capability_mode"
+        }
+        if spatialGuidanceShowsMesh { return "none" }
+        if thermalState == "serious" || policy == "map_only" {
+            return "serious_thermal_map_only"
+        }
+        if thermalState == "critical" || policy == "pose_only" {
+            return "critical_thermal_pose_only"
+        }
+        return "mesh_disabled_by_guidance_policy"
+    }
+
+    private func transitionSpatialGuidancePolicy(to policy: String, at now: TimeInterval) {
+        guard lastSpatialGuidancePolicy != policy || spatialGuidancePolicyStartUptime == nil else { return }
+        if !lastSpatialGuidancePolicy.isEmpty, let startedAt = spatialGuidancePolicyStartUptime {
+            spatialGuidancePolicyDurationsSeconds[lastSpatialGuidancePolicy, default: 0] += max(0, now - startedAt)
+        }
+        spatialGuidancePolicyStartUptime = now
+    }
+
+    private func transitionSpatialGuidanceThermalState(to state: String, at now: TimeInterval) {
+        guard currentSpatialGuidanceThermalState != state || spatialGuidanceThermalStartUptime == nil else { return }
+        if let current = currentSpatialGuidanceThermalState,
+           let startedAt = spatialGuidanceThermalStartUptime {
+            spatialGuidanceThermalDurationsSeconds[current, default: 0] += max(0, now - startedAt)
+        }
+        currentSpatialGuidanceThermalState = state
+        spatialGuidanceThermalStartUptime = now
+    }
+
+    private func transitionSpatialGuidanceRenderState(to state: String, at now: TimeInterval) {
+        guard currentSpatialGuidanceRenderState != state || spatialGuidanceRenderStateStartUptime == nil else { return }
+        if let current = currentSpatialGuidanceRenderState,
+           let startedAt = spatialGuidanceRenderStateStartUptime {
+            spatialGuidanceRenderStateDurationsSeconds[current, default: 0] += max(0, now - startedAt)
+        }
+        currentSpatialGuidanceRenderState = state
+        spatialGuidanceRenderStateStartUptime = now
+    }
+
+    private func finishSpatialGuidanceSegments(at now: TimeInterval) {
+        if !lastSpatialGuidancePolicy.isEmpty, let startedAt = spatialGuidancePolicyStartUptime {
+            spatialGuidancePolicyDurationsSeconds[lastSpatialGuidancePolicy, default: 0] += max(0, now - startedAt)
+        }
+        if let current = currentSpatialGuidanceThermalState,
+           let startedAt = spatialGuidanceThermalStartUptime {
+            spatialGuidanceThermalDurationsSeconds[current, default: 0] += max(0, now - startedAt)
+        }
+        if let current = currentSpatialGuidanceRenderState,
+           let startedAt = spatialGuidanceRenderStateStartUptime {
+            spatialGuidanceRenderStateDurationsSeconds[current, default: 0] += max(0, now - startedAt)
+        }
+        spatialGuidancePolicyStartUptime = nil
+        spatialGuidanceThermalStartUptime = nil
+        spatialGuidanceRenderStateStartUptime = nil
     }
 
     private func updateSpatialGuidancePose(from frame: ARFrame) {
@@ -2374,14 +2497,16 @@ final class CaptureController: NSObject, ObservableObject {
     }
 
     private func recordSpatialGuidanceAnchor(_ anchor: ARAnchor) {
+        guard anchor is ARMeshAnchor || anchor is ARPlaneAnchor else { return }
+        spatialGuidanceReceivedUpdateCount += 1
         guard spatialGuidanceUpdateHz > 0 else {
-            spatialGuidanceDroppedUpdateCount += 1
+            spatialGuidancePolicyDisabledUpdateCount += 1
             return
         }
         let now = ProcessInfo.processInfo.systemUptime
         if let lastUpdate = lastSpatialAnchorUpdateTimestamp[anchor.identifier],
            now - lastUpdate < 1 / spatialGuidanceUpdateHz {
-            spatialGuidanceDroppedUpdateCount += 1
+            spatialGuidanceThrottledUpdateCount += 1
             return
         }
         lastSpatialAnchorUpdateTimestamp[anchor.identifier] = now
@@ -2408,6 +2533,9 @@ final class CaptureController: NSObject, ObservableObject {
         publishSpatialGuidanceCells()
         let duration = (ProcessInfo.processInfo.systemUptime - started) * 1_000
         spatialGuidanceUpdateCount += 1
+        if duration > spatialGuidanceUpdateBudgetMs {
+            spatialGuidanceOverBudgetProcessingCount += 1
+        }
         spatialGuidanceUpdateDurationsMs.append(duration)
         if spatialGuidanceUpdateDurationsMs.count > maxSpatialGuidanceDurationSamples {
             spatialGuidanceUpdateDurationsMs.removeFirst()
@@ -3367,7 +3495,7 @@ final class CaptureController: NSObject, ObservableObject {
         let sourceTriangleCount = meshAnchors.values.reduce(0) { $0 + $1.geometry.faces.count }
 
         return [
-            "schema": "capture_splat.spatial_guidance.v0.1",
+            "schema": "capture_splat.spatial_guidance.v0.2",
             "capture_intent": captureIntent,
             "capability_mode": spatialGuidanceMode,
             "guidance_visible": isSpatialGuidanceVisible,
@@ -3402,10 +3530,29 @@ final class CaptureController: NSObject, ObservableObject {
             ],
             "performance": [
                 "target_update_hz": spatialGuidanceUpdateHz,
+                "received_anchor_update_count": spatialGuidanceReceivedUpdateCount,
                 "update_count": spatialGuidanceUpdateCount,
                 "dropped_update_count": spatialGuidanceDroppedUpdateCount,
+                "throttled_update_count": spatialGuidanceThrottledUpdateCount,
+                "policy_disabled_update_count": spatialGuidancePolicyDisabledUpdateCount,
+                "over_budget_processing_count": spatialGuidanceOverBudgetProcessingCount,
+                "processing_budget_ms": spatialGuidanceUpdateBudgetMs,
                 "average_update_ms": averageDuration,
                 "p95_update_ms": p95Duration,
+            ],
+            "thermal_summary": [
+                "capture_duration_seconds": max(
+                    0,
+                    (spatialGuidanceCaptureEndUptime ?? ProcessInfo.processInfo.systemUptime)
+                        - (spatialGuidanceCaptureStartUptime ?? ProcessInfo.processInfo.systemUptime)
+                ),
+                "thermal_state_seconds": spatialGuidanceThermalDurationsSeconds,
+                "guidance_policy_seconds": spatialGuidancePolicyDurationsSeconds,
+                "render_state_seconds": spatialGuidanceRenderStateDurationsSeconds,
+                "mesh_preview_visible_seconds": spatialGuidanceRenderStateDurationsSeconds["mesh_visible", default: 0],
+                "map_only_seconds": spatialGuidanceRenderStateDurationsSeconds["map_only", default: 0],
+                "final_render_state": currentSpatialGuidanceRenderState ?? "unavailable",
+                "mesh_pause_reason": lastSpatialGuidanceMeshPauseReason,
             ],
             "thermal_transitions": spatialGuidanceThermalTransitions,
             "room_plan": [

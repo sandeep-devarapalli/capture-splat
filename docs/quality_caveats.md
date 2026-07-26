@@ -66,3 +66,6 @@ Visible or colored cells do not prove complete surface coverage, accurate
 geometry, registration, measurement, collision safety, navigation, or a sharp
 3DGS result. Thermal downgrades and unsupported sensors are recorded in
 `metadata/spatial_guidance_report.json` rather than silently overstated.
+Guidance callbacks intentionally coalesced to the configured update rate are
+reported separately from real drops and processing-budget overruns; do not
+interpret a large throttled-update count as lost capture evidence.

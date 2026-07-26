@@ -61,6 +61,12 @@ workflow and export `room_plan/room.usdz`, `room_plan/room_plan_report.json`,
 and `room_plan/room_semantics.json`. This is capture guidance and semantic
 proposal evidence for layout coverage, not a 3DGS quality claim.
 
+`metadata/spatial_guidance_report.json` records live-guidance coverage and
+performance evidence. Version 0.2 distinguishes intentional anchor-update
+throttling from actual drops, records processing-budget overruns, and reports
+time spent with mesh, map-only, pose-only, or hidden guidance under each thermal
+policy.
+
 Saved frames include `capture_quality` metadata. The host pipeline uses accepted
 keyframes for ingest and COLMAP export, so rejected candidates remain diagnostic
 evidence rather than trainer input.
