@@ -1040,37 +1040,6 @@ final class CaptureController: NSObject, ObservableObject {
         }
     }
 
-    func finalizeSession() {
-        guard !isRecording, !isFinalizing else { return }
-        isFinalizing = true
-        capturePackageState = .finalizing
-        writeMetadata()
-        writeSessionSidecars()
-        do {
-            let directory = try writeCaptureManifest()
-            writeFinalizationReport(
-                status: "finalized",
-                videoStatus: "previously_finalized",
-                videoError: nil,
-                manifestWritten: true,
-                finalizationError: nil
-            )
-            statusText = "Finalized \(directory.lastPathComponent)"
-            capturePackageState = .ready
-        } catch {
-            writeFinalizationReport(
-                status: "failed",
-                videoStatus: "previously_finalized",
-                videoError: nil,
-                manifestWritten: false,
-                finalizationError: error.localizedDescription
-            )
-            statusText = "Finalize failed: \(error.localizedDescription)"
-            capturePackageState = .partial
-        }
-        isFinalizing = false
-    }
-
     private func completeCaptureFinalization(
         videoResult: CaptureVideoRecorder.FinishResult,
         meshResult: MeshExportResult
