@@ -63,9 +63,11 @@ Every serious training run should record and reject on these before claiming pro
 ## Carry-Forward From The vid2scene Comparison (2026-07-08)
 
 - Frame budget dominates: production video->3DGS pipelines extract hundreds
-  of frames per capture; our ~24 accepted keyframes are the first
-  bottleneck. `extract-frames` closes this on the host; app-side continuous
-  video capture is the remaining unlock.
+  of frames per capture. Capture Splat now records quality-gated RGB-D
+  keyframes plus indexed continuous video, and `prepare-capture` selects the
+  intent budget while preserving timestamped camera evidence. The remaining
+  gate is whether a specific capture provides enough sharp, connected
+  viewpoints for strong registration; raw frame count alone is not progress.
 - Gsplat ladder rungs must compress the whole schedule (`steps_scaler`),
   not truncate a 30000-step one; truncated rungs under-train refine/reset
   behavior and mislead comparisons.
