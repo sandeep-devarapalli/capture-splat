@@ -292,10 +292,21 @@ def _alpha_histogram(alphas: list[float]) -> list[dict[str, float | int]]:
     return buckets
 
 
-def prune_ply_by_alpha(path: Path, out_path: Path | None = None, min_alpha: float = 12.0, max_dropped_fraction: float = 0.6) -> dict[str, Any]:
+def prune_ply_by_alpha(
+    path: Path,
+    out_path: Path | None = None,
+    min_alpha: float = 12.0,
+    max_dropped_fraction: float = 0.6,
+    max_radius: float | None = None,
+) -> dict[str, Any]:
     path = path.resolve()
     alpha_tag = f"{min_alpha:g}".replace(".", "p")
-    out_path = (out_path or path.with_name(f"{path.stem}.pruned_a{alpha_tag}.ply")).resolve()
+    radius_tag = ""
+    if max_radius is not None:
+        if not math.isfinite(max_radius) or max_radius <= 0.0:
+            raise ValueError("max_radius must be a positive finite value")
+        radius_tag = f"_r{max_radius:g}".replace(".", "p")
+    out_path = (out_path or path.with_name(f"{path.stem}.pruned_a{alpha_tag}{radius_tag}.ply")).resolve()
     with path.open("rb") as handle:
         raw_header: list[bytes] = []
         while True:
@@ -321,12 +332,57 @@ def prune_ply_by_alpha(path: Path, out_path: Path | None = None, min_alpha: floa
     opacity_index = next((index for index, prop in enumerate(vertex_properties) if prop["kind"] == "scalar" and prop["name"] == "opacity"), None)
     if opacity_index is None:
         raise ValueError("PLY has no scalar opacity property; not a 3DGS splat PLY")
+    radius_indexes: list[int] = []
+    if max_radius is not None:
+        for name in ("scale_0", "scale_1", "scale_2"):
+            index = next(
+                (
+                    property_index
+                    for property_index, prop in enumerate(vertex_properties)
+                    if prop["kind"] == "scalar" and prop["name"] == name
+                ),
+                None,
+            )
+            if index is None:
+                raise ValueError(f"PLY has no scalar {name} property required by max_radius")
+            radius_indexes.append(index)
 
     kept_rows: list[bytes | str] = []
     alphas: list[float] = []
     opacity_min = math.inf
     opacity_max = -math.inf
     dropped_count = 0
+    alpha_dropped_count = 0
+    radius_dropped_count = 0
+    both_dropped_count = 0
+
+    def should_keep(values: list[float] | tuple[Any, ...]) -> bool:
+        nonlocal opacity_min, opacity_max
+        nonlocal dropped_count, alpha_dropped_count, radius_dropped_count, both_dropped_count
+        logit = float(values[opacity_index])
+        alpha = _alpha_from_logit(logit) if math.isfinite(logit) else 0.0
+        alphas.append(alpha)
+        if math.isfinite(logit):
+            opacity_min = min(opacity_min, logit)
+            opacity_max = max(opacity_max, logit)
+        alpha_rejected = alpha < min_alpha
+        radius_rejected = False
+        if max_radius is not None:
+            scales = [float(values[index]) for index in radius_indexes]
+            radius_rejected = any(not math.isfinite(scale) or scale >= 80.0 for scale in scales)
+            if not radius_rejected:
+                radius_rejected = max(math.exp(scale) for scale in scales) > max_radius
+        if alpha_rejected:
+            alpha_dropped_count += 1
+        if radius_rejected:
+            radius_dropped_count += 1
+        if alpha_rejected and radius_rejected:
+            both_dropped_count += 1
+        if alpha_rejected or radius_rejected:
+            dropped_count += 1
+            return False
+        return True
+
     if header["format"] == "ascii":
         text = path.read_text(encoding="ascii")
         body = text[text.index("end_header") + len("end_header"):].strip().splitlines()
@@ -334,16 +390,9 @@ def prune_ply_by_alpha(path: Path, out_path: Path | None = None, min_alpha: floa
             parts = line.split()
             if len(parts) < len(vertex_properties):
                 raise ValueError(f"vertex row {row_index + 1} has too few columns")
-            logit = float(parts[opacity_index])
-            alpha = _alpha_from_logit(logit) if math.isfinite(logit) else 0.0
-            alphas.append(alpha)
-            if math.isfinite(logit):
-                opacity_min = min(opacity_min, logit)
-                opacity_max = max(opacity_max, logit)
-            if alpha >= min_alpha:
+            values = [float(part) for part in parts[:len(vertex_properties)]]
+            if should_keep(values):
                 kept_rows.append(line)
-            else:
-                dropped_count += 1
     else:
         endian = "<" if header["format"] == "binary_little_endian" else ">"
         row_format_parts = []
@@ -361,16 +410,9 @@ def prune_ply_by_alpha(path: Path, out_path: Path | None = None, min_alpha: floa
                 raw = handle.read(row_size)
                 if len(raw) != row_size:
                     raise ValueError("PLY binary data ended early")
-                logit = float(struct.unpack(row_format, raw)[opacity_index])
-                alpha = _alpha_from_logit(logit) if math.isfinite(logit) else 0.0
-                alphas.append(alpha)
-                if math.isfinite(logit):
-                    opacity_min = min(opacity_min, logit)
-                    opacity_max = max(opacity_max, logit)
-                if alpha >= min_alpha:
+                values = struct.unpack(row_format, raw)
+                if should_keep(values):
                     kept_rows.append(raw)
-                else:
-                    dropped_count += 1
 
     dropped_fraction = dropped_count / vertex_count if vertex_count else 0.0
     warnings = []
@@ -381,13 +423,23 @@ def prune_ply_by_alpha(path: Path, out_path: Path | None = None, min_alpha: floa
         "schema": "capture_splat.ply_prune_report.v0.1",
         "source": str(path),
         "output": str(out_path) if not refused else None,
-        "method": "drop_vertices_below_alpha_threshold",
+        "method": (
+            "drop_vertices_below_alpha_or_above_radius_threshold"
+            if max_radius is not None
+            else "drop_vertices_below_alpha_threshold"
+        ),
         "opacity_interpretation": "logit_sigmoid_255",
         "min_alpha": min_alpha,
+        "max_radius": max_radius,
+        "radius_interpretation": "max(exp(scale_0), exp(scale_1), exp(scale_2))",
+        "radius_unit": "trainer_scene_units",
         "max_dropped_fraction": max_dropped_fraction,
         "source_vertex_count": vertex_count,
         "output_vertex_count": len(kept_rows),
         "dropped_vertex_count": dropped_count,
+        "alpha_dropped_vertex_count": alpha_dropped_count,
+        "radius_dropped_vertex_count": radius_dropped_count,
+        "alpha_and_radius_dropped_vertex_count": both_dropped_count,
         "dropped_fraction": dropped_fraction,
         "alpha_histogram": _alpha_histogram(alphas),
         "warnings": warnings,
@@ -400,8 +452,9 @@ def prune_ply_by_alpha(path: Path, out_path: Path | None = None, min_alpha: floa
     report_path = out_path.with_suffix(out_path.suffix + ".prune_report.json")
     write_json_strict(report_path, report)
     if refused:
+        radius_detail = f" or exceed radius {max_radius:g}" if max_radius is not None else ""
         raise RuntimeError(
-            f"refusing to prune: {dropped_fraction:.1%} of splats fall below alpha {min_alpha:g} "
+            f"refusing to prune: {dropped_fraction:.1%} of splats fall below alpha {min_alpha:g}{radius_detail} "
             f"(limit {max_dropped_fraction:.0%}); the training run is the problem, not the tail. Report: {report_path}"
         )
 

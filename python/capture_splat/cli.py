@@ -245,10 +245,15 @@ def main() -> None:
     p_triangulate.add_argument("--background-sphere", action="store_true")
     p_triangulate.add_argument("--allow-cpu-matching", action="store_true", help="Run without CUDA COLMAP; recorded in the summary as cpu_matching_override")
     p_triangulate.add_argument("--dry-run", action="store_true")
-    p_prune = sub.add_parser("prune-ply", help="Drop near-transparent splats below an alpha threshold for viewer hygiene")
+    p_prune = sub.add_parser("prune-ply", help="Drop near-transparent or extreme-radius splats for viewer hygiene")
     p_prune.add_argument("--input", type=Path, required=True)
     p_prune.add_argument("--out", type=Path)
     p_prune.add_argument("--min-alpha", type=float, default=12.0, help="Keep splats with sigmoid(opacity)*255 >= this value")
+    p_prune.add_argument(
+        "--max-radius",
+        type=float,
+        help="Optionally keep splats whose largest exp(scale_0..2) radius is at most this many trainer-scene units",
+    )
     p_prune.add_argument("--max-dropped-fraction", type=float, default=0.6)
     p_weak = sub.add_parser("qa-weak-frames-report", help="Diagnose weak render/source QA frames")
     p_weak.add_argument("--qa-summary", type=Path, required=True)
@@ -542,7 +547,13 @@ def main() -> None:
             dry_run=args.dry_run,
         )
     elif args.command == "prune-ply":
-        payload = prune_ply_by_alpha(args.input, args.out, min_alpha=args.min_alpha, max_dropped_fraction=args.max_dropped_fraction)
+        payload = prune_ply_by_alpha(
+            args.input,
+            args.out,
+            min_alpha=args.min_alpha,
+            max_radius=args.max_radius,
+            max_dropped_fraction=args.max_dropped_fraction,
+        )
     elif args.command == "qa-weak-frames-report":
         payload = run_weak_frames_report(
             args.qa_summary,

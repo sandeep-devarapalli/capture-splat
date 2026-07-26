@@ -47,6 +47,11 @@ pass `--frame-exclusions` with a strict
 untouched, and the prepared package records the applied one-based source-frame
 indices and reason.
 
+For viewer-only cleanup, `prune-ply` can combine its alpha threshold with an
+optional `--max-radius` in trainer-scene units. This writes a separate PLY and
+strict report; it does not modify the trained PLY or improve reconstruction
+quality.
+
 For a resumable end-to-end run, use:
 
 ```bash

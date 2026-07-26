@@ -100,3 +100,40 @@ def test_prune_warns_when_opacity_looks_activated(tmp_path: Path) -> None:
     report = prune_ply_by_alpha(ply)
 
     assert "opacity_values_all_within_0_1_may_already_be_activated" in report["warnings"]
+
+
+def test_prune_can_drop_extreme_radius_splats(tmp_path: Path) -> None:
+    ply = tmp_path / "large_radius.ply"
+    properties = [
+        *HEADER_PROPERTIES,
+        "property float scale_0",
+        "property float scale_1",
+        "property float scale_2",
+    ]
+    write_ascii_ply(
+        ply,
+        [
+            "0 0 0 3.0 -4.0 -4.0 -4.0",
+            "0.5 0.5 0.5 3.0 -3.0 -3.0 -3.0",
+            "1 1 1 3.0 -0.2 -4.0 -4.0",
+            "2 2 2 -5.0 -0.1 -4.0 -4.0",
+        ],
+        properties=properties,
+    )
+
+    report = prune_ply_by_alpha(ply, max_radius=0.5)
+
+    assert report["method"] == "drop_vertices_below_alpha_or_above_radius_threshold"
+    assert report["output_vertex_count"] == 2
+    assert report["alpha_dropped_vertex_count"] == 1
+    assert report["radius_dropped_vertex_count"] == 2
+    assert report["alpha_and_radius_dropped_vertex_count"] == 1
+    assert report["output_ply_stats"]["radius_summary"]["max"] < 0.5
+
+
+def test_prune_max_radius_requires_scale_properties(tmp_path: Path) -> None:
+    ply = tmp_path / "plain_splat.ply"
+    write_ascii_ply(ply, ["0 0 0 3.0"])
+
+    with pytest.raises(ValueError, match="scale_0"):
+        prune_ply_by_alpha(ply, max_radius=0.5)
