@@ -173,7 +173,8 @@ capture-splat sfm --images runs/scan/prepared/frames/images \
 capture-splat build-rgbd-seed \
   --capture runs/scan/prepared/frames \
   --package runs/scan/colmap_package \
-  --out runs/scan/rgbd_seed
+  --out runs/scan/rgbd_seed \
+  --seed-source auto
 # or, to keep ARKit poses as the prior:
 capture-splat triangulate --package runs/scan/colmap_package --out runs/scan/triangulate
 capture-splat train-gsplat-ladder ... # bilateral grid + random background are
@@ -223,16 +224,20 @@ unless COLMAP exposes the Caspar options and the result uses only `PINHOLE` or
 `SIMPLE_RADIAL`. Caspar is not the global solver and does not use ARKit pose
 priors in this path.
 `build-rgbd-seed` estimates a Sim(3) from shared ARKit and COLMAP camera
-centers and proceeds only when median and tail residual gates pass. It applies
-the recorded depth-unit scale and adapts camera intrinsics when the depth grid
-differs from the stored intrinsics resolution. When the capture also asserts
+centers and proceeds only when median and tail residual gates pass.
+`--seed-source auto` prefers confidence-filtered RGB-D points and falls back to
+finite ARKit mesh vertices whose strict mesh report passes; `depth` and `mesh`
+make either source explicit. Mesh vertices receive RGB only where they project
+into an accepted source frame. The command applies the recorded depth-unit
+scale and adapts camera intrinsics when the depth grid differs from the stored
+intrinsics resolution. When the capture also asserts
 `arkit_vio_metric` scale authority, the copied COLMAP camera translations,
-sparse points, and RGB-D seed are written in meters with a checksum-bound
+sparse points, and sensor seed are written in meters with a checksum-bound
 `metadata/metric_scale_report.json`. Older captures without explicit scale
 authority retain compatible seed augmentation in COLMAP units and report that
 metric continuity is unavailable. The command keeps an unmodified sparse-model
 backup. A failed fit is held and training can continue from the original
-COLMAP package; ARKit depth is a metric prior, not a substitute for
+COLMAP package; ARKit depth or mesh is a metric prior, not a substitute for
 COLMAP-refined image support.
 
 Package scale and trainer scale are reported independently. All trainer

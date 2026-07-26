@@ -12,7 +12,8 @@ Capture Splat has implemented the core public capture-to-3DGS path:
   Orbit permits an explicit subject lock.
 - The host pipeline prepares captures, runs integrated global COLMAP or HLOC
   retrieval, preserves per-frame camera and mask evidence, builds a gated
-  RGB-D metric seed, and trains controlled VkSplat or gsplat ladders.
+  RGB-D or ARKit mesh metric seed, and trains controlled VkSplat or gsplat
+  ladders.
 - Strict capture, camera, photometric, PLY, weak-frame, raw-render, and
   World Studio handoff reports preserve `promote|hold|reject` decisions.
 - Package orientation and trainer normalization are recorded as separate

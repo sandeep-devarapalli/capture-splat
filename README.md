@@ -152,14 +152,16 @@ ALIKED-N16, LightGlue, COLMAP geometric verification, and the requested mapper.
 Missing HLOC is `hloc_missing`; Capture Splat does not silently substitute
 exhaustive matching.
 
-After SfM, an optional RGB-D seed can align confidence-filtered iPhone depth
-to the COLMAP camera frame and augment a copied package:
+After SfM, an optional sensor seed can align confidence-filtered iPhone depth
+or a report-validated ARKit mesh to the COLMAP camera frame and augment a
+copied package:
 
 ```bash
 capture-splat build-rgbd-seed \
   --capture /path/to/capture \
   --package runs/my_scan/colmap_package \
-  --out runs/my_scan/rgbd_seed
+  --out runs/my_scan/rgbd_seed \
+  --seed-source auto
 ```
 
 The command requires at least eight shared camera centers and gates the fitted

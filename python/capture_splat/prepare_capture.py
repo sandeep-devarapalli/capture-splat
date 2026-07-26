@@ -250,6 +250,28 @@ def _copy(path: Path, destination: Path) -> None:
     shutil.copy2(path, destination)
 
 
+def _copy_capture_asset(
+    capture_dir: Path,
+    output_dir: Path,
+    capture: dict[str, Any],
+    manifest: dict[str, Any],
+    key: str,
+    default: str,
+) -> bool:
+    relative = capture.get(key, default)
+    if not isinstance(relative, str):
+        return False
+    path = Path(relative)
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"{key} must be a relative capture path")
+    source = capture_dir / path
+    if not source.exists():
+        return False
+    _copy(source, output_dir / path)
+    manifest[key] = path.as_posix()
+    return True
+
+
 def _write_valid_mask(
     output_dir: Path,
     prepared: dict[str, Any],
@@ -482,6 +504,18 @@ def prepare_capture(
     }
     if capture.get("depth_scale") is not None:
         prepared_manifest["depth_scale"] = capture["depth_scale"]
+    for key, default in (
+        ("arkit_mesh_file", "geometry/arkit_mesh.ply"),
+        ("arkit_mesh_report_file", "geometry/arkit_mesh_report.json"),
+    ):
+        _copy_capture_asset(
+            capture_dir,
+            out_dir / "frames",
+            capture,
+            prepared_manifest,
+            key,
+            default,
+        )
     write_json_strict(out_dir / "frames/capture.json", prepared_manifest)
     frame_evidence = load_frame_evidence(out_dir / "frames/capture.json")
     camera_report = camera_evidence_report(out_dir / "frames/images", frame_evidence)
