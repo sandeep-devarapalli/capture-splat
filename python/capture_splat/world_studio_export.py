@@ -12,7 +12,7 @@ import numpy as np
 from .json_utils import load_json_strict, write_json_strict
 from .ply_stats import inspect_ply
 from .rgbd_seed import camera_alignment_report
-from .scene_transform import SIDECAR_NAME
+from .scene_transform import SIDECAR_NAME, metric_package_status
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 MANIFEST_NAME = "capture-splat.world-studio.json"
@@ -87,7 +87,7 @@ def _scene_transform_sidecar(gaussian: Path | None) -> dict[str, Any] | None:
     return sidecar if isinstance(sidecar, dict) else None
 
 
-def _first_frame_camera_center(sparse_dir: Path | None) -> list[float] | None:
+def _first_frame_camera(sparse_dir: Path | None) -> dict[str, list[float]] | None:
     if sparse_dir is None:
         return None
     images_txt = sparse_dir / "images.txt"
@@ -110,11 +110,19 @@ def _first_frame_camera_center(sparse_dir: Path | None) -> list[float] | None:
             [2 * (qx * qy + qw * qz), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qw * qx)],
             [2 * (qx * qz - qw * qy), 2 * (qy * qz + qw * qx), 1 - 2 * (qx * qx + qy * qy)],
         ]
-        return [
+        center = np.asarray([
             -(rotation[0][0] * tx + rotation[1][0] * ty + rotation[2][0] * tz),
             -(rotation[0][1] * tx + rotation[1][1] * ty + rotation[2][1] * tz),
             -(rotation[0][2] * tx + rotation[1][2] * ty + rotation[2][2] * tz),
-        ]
+        ])
+        rotation_array = np.asarray(rotation, dtype=np.float64)
+        forward = rotation_array.T @ np.asarray([0.0, 0.0, 1.0])
+        up = rotation_array.T @ np.asarray([0.0, -1.0, 0.0])
+        return {
+            "position": center.tolist(),
+            "look_at": (center + forward).tolist(),
+            "up": up.tolist(),
+        }
     return None
 
 
@@ -233,6 +241,46 @@ def _metric_asset_ref(
     if units is not None:
         ref["units"] = units
     return ref
+
+
+def _measurement_eligibility(
+    points: Path | None,
+    coordinate_frame: str,
+    units: str,
+    package: Path,
+    sparse_dir_name: str,
+) -> dict[str, Any]:
+    authority = {
+        "measurement_authority": False,
+        "collision_authority": False,
+        "quality_claim": False,
+    }
+    if points is None:
+        return {"status": "missing", "reason": "measurement_points_missing", "authority": authority}
+    try:
+        stats = inspect_ply(points)
+    except (OSError, ValueError) as error:
+        return {"status": "held", "reason": f"measurement_points_invalid:{error}", "authority": authority}
+    if not stats["finite"]:
+        return {"status": "held", "reason": "measurement_points_non_finite", "authority": authority}
+    if coordinate_frame != "metric_colmap_world" or units != "meters":
+        return {"status": "held", "reason": "metric_coordinate_frame_unavailable", "authority": authority}
+    metric = metric_package_status(package, sparse_dir_name)
+    if not metric["accepted"]:
+        return {"status": "held", "reason": metric["reason"], "authority": authority}
+    report = load_json_strict(Path(metric["report"]))
+    checksum = (report.get("output_checksums") or {}).get("metric_seed_ply")
+    if checksum != _sha256(points):
+        return {"status": "held", "reason": "metric_seed_checksum_mismatch", "authority": authority}
+    return {
+        "status": "held",
+        "reason": "physical_known_distance_validation_pending",
+        "software_prerequisites": True,
+        "point_count": stats["vertex_count"],
+        "coordinate_frame": coordinate_frame,
+        "units": units,
+        "authority": authority,
+    }
 
 
 def _mesh_walk_evidence(report_path: Path | None) -> dict[str, Any]:
@@ -428,6 +476,8 @@ def export_world_studio_handoff(
     mesh_report: Path | None = None,
     room_semantics: Path | None = None,
     camera_trajectory: Path | None = None,
+    planes: Path | None = None,
+    metric_scale_report: Path | None = None,
     render_source_qa: Path | None = None,
     measurement_points: Path | None = None,
     measurement_points_frame: str = "colmap_world",
@@ -438,7 +488,7 @@ def export_world_studio_handoff(
 ) -> dict[str, Any]:
     package = package.resolve()
     out_dir = out_dir.resolve()
-    if measurement_points_frame not in {"arkit_world", "colmap_world", "trainer_world"}:
+    if measurement_points_frame not in {"arkit_world", "colmap_world", "metric_colmap_world", "trainer_world"}:
         raise ValueError(f"unsupported measurement points frame: {measurement_points_frame}")
     out_dir.mkdir(parents=True, exist_ok=True)
     images = _find_images(package, image_dir_name)
@@ -473,10 +523,31 @@ def export_world_studio_handoff(
     camera_trajectory = camera_trajectory or _capture_asset(
         capture_manifest, capture_data, "frame_index_file", "metadata/frame_index.jsonl"
     )
+    planes = planes or _capture_asset(
+        capture_manifest, capture_data, "planes_file", "metadata/planes.json"
+    )
     spatial_guidance = _capture_asset(
         capture_manifest, capture_data, "spatial_guidance_report_file", "metadata/spatial_guidance_report.json"
     )
+    source_capture_manifest = _capture_asset(
+        capture_manifest, capture_data, "source_capture_manifest_file", "metadata/source_capture.json"
+    )
+    room_plan = _capture_asset(
+        capture_manifest, capture_data, "room_plan_file", "room_plan/room.usdz"
+    )
+    room_plan_report = _capture_asset(
+        capture_manifest, capture_data, "room_plan_report_file", "room_plan/room_plan_report.json"
+    )
+    metric_scale_report = metric_scale_report or _first_existing(
+        package, ("metadata/metric_scale_report.json",)
+    )
     measurement_points = measurement_points or _first_existing(package, ("metric_seed.ply",))
+    measurement_units = {
+        "arkit_world": "meters",
+        "colmap_world": "colmap_units",
+        "metric_colmap_world": "meters",
+        "trainer_world": "normalized_scene_units",
+    }[measurement_points_frame]
 
     copied_images = _copy_images(images, out_dir, copy_files)
     copied_sparse = _copy_sparse_dir(package, out_dir, sparse_dir_name, copy_files)
@@ -492,6 +563,13 @@ def export_world_studio_handoff(
     copied_mesh_report = _copy_asset(mesh_report, out_dir, "navigation_mesh_report.json", copy_files)
     copied_room_semantics = _copy_asset(room_semantics, out_dir, "room_semantics.json", copy_files)
     copied_camera_trajectory = _copy_asset(camera_trajectory, out_dir, "camera_trajectory.jsonl", copy_files)
+    copied_planes = _copy_asset(planes, out_dir, "planes.json", copy_files)
+    copied_source_capture = _copy_asset(source_capture_manifest, out_dir, "source_capture.json", copy_files)
+    copied_room_plan = _copy_asset(room_plan, out_dir, "room_plan.usdz", copy_files)
+    copied_room_plan_report = _copy_asset(room_plan_report, out_dir, "room_plan_report.json", copy_files)
+    copied_metric_scale_report = _copy_asset(
+        metric_scale_report, out_dir, "metric_scale_report.json", copy_files
+    )
     copied_render_source_qa = (
         _write_quality_json(
             out_dir / "quality/render_source_qa.json",
@@ -521,6 +599,8 @@ def export_world_studio_handoff(
         assets["gaussian_ply" if copied_gaussian.suffix.lower() == ".ply" else "gaussian"] = gaussian_ref
     if copied_capture:
         assets["capture_manifest"] = _file_ref(copied_capture, out_dir)
+    if copied_source_capture:
+        assets["source_capture_manifest"] = _file_ref(copied_source_capture, out_dir)
     if copied_transforms:
         assets["transforms"] = _file_ref(copied_transforms, out_dir)
     if copied_poses:
@@ -549,9 +629,25 @@ def export_world_studio_handoff(
         assets["room_semantics"] = _metric_asset_ref(
             copied_room_semantics, out_dir, "roomplan_world_unregistered", "semantic_proposal", "meters"
         )
+    if copied_room_plan:
+        assets["room_plan"] = _metric_asset_ref(
+            copied_room_plan, out_dir, "roomplan_world_unregistered", "semantic_geometry_proposal", "meters"
+        )
+    if copied_room_plan_report:
+        assets["room_plan_report"] = _metric_asset_ref(
+            copied_room_plan_report, out_dir, "roomplan_world_unregistered", "capture_evidence_report", "meters"
+        )
     if copied_camera_trajectory:
         assets["camera_trajectory"] = _metric_asset_ref(
             copied_camera_trajectory, out_dir, "arkit_world", "metric_capture_evidence", "meters"
+        )
+    if copied_planes:
+        assets["planes"] = _metric_asset_ref(
+            copied_planes, out_dir, "arkit_world", "capture_guidance_evidence", "meters"
+        )
+    if copied_metric_scale_report:
+        assets["metric_scale_report"] = _metric_asset_ref(
+            copied_metric_scale_report, out_dir, "metric_colmap_world", "metric_scale_evidence", "meters"
         )
     if copied_render_source_qa:
         assets["render_source_qa"] = _file_ref(copied_render_source_qa, out_dir)
@@ -563,7 +659,11 @@ def export_world_studio_handoff(
         )
     if copied_measurement_points:
         assets["measurement_points"] = _metric_asset_ref(
-            copied_measurement_points, out_dir, measurement_points_frame, "metric_seed_proposal"
+            copied_measurement_points,
+            out_dir,
+            measurement_points_frame,
+            "metric_seed_proposal",
+            measurement_units,
         )
 
     manifest = {
@@ -606,6 +706,13 @@ def export_world_studio_handoff(
         manifest.get("dataparser_transform"),
     )
     manifest["metric_registration"] = registration
+    manifest["measurement_eligibility"] = _measurement_eligibility(
+        copied_measurement_points,
+        measurement_points_frame,
+        measurement_units,
+        package,
+        sparse_dir_name,
+    )
     mesh_walk_evidence = _mesh_walk_evidence(copied_mesh_report)
     manifest["mesh_walk_evidence"] = mesh_walk_evidence
     if (
@@ -649,10 +756,19 @@ def export_world_studio_handoff(
             profile = None
     if profile in CAPTURE_PROFILES:
         manifest["capture_profile"] = profile
-    first_center = _first_frame_camera_center(out_dir / sparse_dir_name if copied_sparse else None)
-    if first_center is not None:
+    session_config = capture_data.get("session_config") if isinstance(capture_data, dict) else None
+    up_axis = session_config.get("up_axis") if isinstance(session_config, dict) else None
+    if (
+        isinstance(up_axis, list)
+        and len(up_axis) == 3
+        and all(isinstance(value, (int, float)) and math.isfinite(float(value)) for value in up_axis)
+    ):
+        manifest["world_up"] = [float(value) for value in up_axis]
+        manifest["world_up_coordinate_frame"] = "arkit_world"
+    first_camera = _first_frame_camera(out_dir / sparse_dir_name if copied_sparse else None)
+    if first_camera is not None:
         manifest["initial_camera"] = {
-            "position": first_center,
+            **first_camera,
             "coordinate_frame": "colmap_world",
             "mode": "orbit" if profile == "object" else "inside",
         }

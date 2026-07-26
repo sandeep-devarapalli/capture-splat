@@ -672,6 +672,12 @@ def reconstruct_capture(
         "capture_splat.world_studio_handoff.v0.2",
     )
     export_resumed = handoff is not None
+    measurement_frame = seed.get("output_coordinate_frame")
+    if measurement_frame not in {"arkit_world", "colmap_world", "metric_colmap_world", "trainer_world"}:
+        measurement_frame = "colmap_world"
+    measurement_path = Path(seed["seed_ply"]).resolve() if isinstance(seed.get("seed_ply"), str) else None
+    if measurement_path is not None and not measurement_path.exists():
+        measurement_path = None
     try:
         if handoff is not None and not _handoff_assets_valid(handoff, selected, export_dir):
             raise ValueError("resumed World Studio handoff assets are missing, corrupted, or stale")
@@ -680,6 +686,8 @@ def reconstruct_capture(
             export_dir,
             gaussian=selected,
             capture_manifest=prepare_dir / "frames/capture.json",
+            measurement_points=measurement_path,
+            measurement_points_frame=measurement_frame,
             copy_files=True,
         )
     except Exception as error:

@@ -335,9 +335,14 @@ This writes `capture-splat.world-studio.json` with schema
 `capture_splat.world_studio_handoff.v0.2`. When a Gaussian PLY is present, the
 exporter computes finite/splat statistics from that exact packaged PLY. An
 optional strict render/source QA summary is copied as validation evidence.
-Source frames are visual evidence;
-trained splats are review proposals, not metric, collision, semantic, or
-navigation authority. Finite PLY and QA decisions are not high-quality claims.
+Prepared iPhone packages also preserve available ARKit mesh, planes, camera
+trajectory, spatial-guidance, RoomPlan, source-capture, and metric-scale
+sidecars. A checksum-bound `metric_colmap_world` seed may be included as
+meter-unit measurement evidence, but `measurement_eligibility` remains held
+until a physical known-distance validation passes. Source frames are visual
+evidence; trained splats are review proposals, not metric, collision, semantic,
+or navigation authority. Finite PLY and QA decisions are not high-quality
+claims.
 
 ## Linux, Windows, And Cloud GPUs
 

@@ -504,18 +504,30 @@ def prepare_capture(
     }
     if capture.get("depth_scale") is not None:
         prepared_manifest["depth_scale"] = capture["depth_scale"]
+    copied_capture_assets = []
     for key, default in (
         ("arkit_mesh_file", "geometry/arkit_mesh.ply"),
         ("arkit_mesh_report_file", "geometry/arkit_mesh_report.json"),
+        ("planes_file", "metadata/planes.json"),
+        ("spatial_guidance_report_file", "metadata/spatial_guidance_report.json"),
+        ("frame_index_file", "metadata/frame_index.jsonl"),
+        ("room_plan_file", "room_plan/room.usdz"),
+        ("room_plan_report_file", "room_plan/room_plan_report.json"),
+        ("room_plan_semantics_file", "room_plan/room_semantics.json"),
     ):
-        _copy_capture_asset(
+        if _copy_capture_asset(
             capture_dir,
             out_dir / "frames",
             capture,
             prepared_manifest,
             key,
             default,
-        )
+        ):
+            copied_capture_assets.append(key)
+    source_manifest_relative = Path("metadata/source_capture.json")
+    _copy(capture_dir / "capture.json", out_dir / "frames" / source_manifest_relative)
+    prepared_manifest["source_capture_manifest_file"] = source_manifest_relative.as_posix()
+    copied_capture_assets.append("source_capture_manifest_file")
     write_json_strict(out_dir / "frames/capture.json", prepared_manifest)
     frame_evidence = load_frame_evidence(out_dir / "frames/capture.json")
     camera_report = camera_evidence_report(out_dir / "frames/images", frame_evidence)
@@ -575,6 +587,7 @@ def prepare_capture(
         "selection": "temporal_bins_ranked_by_parallax_blur_features",
         "prepared_frames": actual_count,
         "copied_sidecars": copied,
+        "copied_capture_assets": copied_capture_assets,
         "camera_evidence": camera_report,
         "photometric_evidence": photometric_report,
         "valid_masks": mask_report,

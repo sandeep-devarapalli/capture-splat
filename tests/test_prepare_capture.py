@@ -74,9 +74,24 @@ def test_prepare_capture_preserves_mesh_and_report_for_metric_seed(tmp_path: Pat
     geometry.mkdir()
     (geometry / "arkit_mesh.ply").write_bytes(b"ply")
     write_json_strict(geometry / "arkit_mesh_report.json", {"status": "finite_mesh_written"})
+    metadata = capture / "metadata"
+    metadata.mkdir()
+    write_json_strict(metadata / "planes.json", {"floor_y_estimate": 0.0})
+    write_json_strict(metadata / "spatial_guidance_report.json", {"schema": "capture_splat.spatial_guidance.v0.2"})
+    (metadata / "frame_index.jsonl").write_text('{"video_frame_index":0}\n', encoding="utf-8")
+    room_plan = capture / "room_plan"
+    room_plan.mkdir()
+    (room_plan / "room.usdz").write_bytes(b"usdz")
+    write_json_strict(room_plan / "room_plan_report.json", {"status": "exported"})
+    write_json_strict(room_plan / "room_semantics.json", {"schema": "capture_splat.room_semantics.v0.1"})
     manifest = load_json_strict(capture / "capture.json")
     manifest["arkit_mesh_file"] = "geometry/arkit_mesh.ply"
     manifest["arkit_mesh_report_file"] = "geometry/arkit_mesh_report.json"
+    manifest["spatial_guidance_report_file"] = "metadata/spatial_guidance_report.json"
+    manifest["frame_index_file"] = "metadata/frame_index.jsonl"
+    manifest["room_plan_file"] = "room_plan/room.usdz"
+    manifest["room_plan_report_file"] = "room_plan/room_plan_report.json"
+    manifest["room_plan_semantics_file"] = "room_plan/room_semantics.json"
     write_json_strict(capture / "capture.json", manifest)
 
     prepare_capture(capture, tmp_path / "prepared", target_frames=2)
@@ -84,8 +99,12 @@ def test_prepare_capture_preserves_mesh_and_report_for_metric_seed(tmp_path: Pat
 
     assert prepared["arkit_mesh_file"] == "geometry/arkit_mesh.ply"
     assert prepared["arkit_mesh_report_file"] == "geometry/arkit_mesh_report.json"
+    assert prepared["planes_file"] == "metadata/planes.json"
+    assert prepared["source_capture_manifest_file"] == "metadata/source_capture.json"
     assert (tmp_path / "prepared/frames/geometry/arkit_mesh.ply").read_bytes() == b"ply"
     assert (tmp_path / "prepared/frames/geometry/arkit_mesh_report.json").exists()
+    assert (tmp_path / "prepared/frames/metadata/frame_index.jsonl").exists()
+    assert (tmp_path / "prepared/frames/room_plan/room.usdz").read_bytes() == b"usdz"
 
 
 def test_prepare_capture_refuses_non_empty_output(tmp_path: Path) -> None:

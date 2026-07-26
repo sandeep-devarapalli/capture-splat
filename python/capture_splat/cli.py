@@ -172,11 +172,13 @@ def main() -> None:
     p_world_studio.add_argument("--mesh-report", type=Path)
     p_world_studio.add_argument("--room-semantics", type=Path)
     p_world_studio.add_argument("--camera-trajectory", type=Path)
+    p_world_studio.add_argument("--planes", type=Path)
+    p_world_studio.add_argument("--metric-scale-report", type=Path)
     p_world_studio.add_argument("--render-source-qa", type=Path)
     p_world_studio.add_argument("--measurement-points", type=Path)
     p_world_studio.add_argument(
         "--measurement-points-frame",
-        choices=["arkit_world", "colmap_world", "trainer_world"],
+        choices=["arkit_world", "colmap_world", "metric_colmap_world", "trainer_world"],
         default="colmap_world",
     )
     p_world_studio.add_argument("--image-dir", default="images")
@@ -513,6 +515,8 @@ def main() -> None:
             mesh_report=args.mesh_report,
             room_semantics=args.room_semantics,
             camera_trajectory=args.camera_trajectory,
+            planes=args.planes,
+            metric_scale_report=args.metric_scale_report,
             render_source_qa=args.render_source_qa,
             measurement_points=args.measurement_points,
             measurement_points_frame=args.measurement_points_frame,

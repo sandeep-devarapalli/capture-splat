@@ -62,11 +62,14 @@ for one gate only.
 
 ### World Studio
 
-- Honor handoff `world_up`, `initial_camera`, and capture profile end to end.
+- Consume the shipped handoff `world_up`, frame-aware `initial_camera`, source
+  capture, planes, RoomPlan, trajectory, and metric-evidence sidecars end to
+  end.
 - Accept a coverage-preserving collision candidate only after floor continuity,
   wall retention, and splat/mesh registration pass.
 - Add metric surface picking, distance/height/polyline/area measurement,
-  uncertainty, and JSON export. The Gaussian remains a visual proposal.
+  uncertainty, and JSON export after the handoff's checksum-bound metric points
+  pass a physical known-distance gate. The Gaussian remains a visual proposal.
 - Add worker-backed compact-asset loading and mobile performance validation
   before claiming large-scene web readiness.
 
