@@ -10,6 +10,9 @@ Capture Splat has implemented the core public capture-to-3DGS path:
 - Intent-aware guidance covers Room, Desk / Cluster, Object Orbit, Corridor,
   Wall / Facade, Outdoor, RoomPlan + 3DGS, and Detail Repair. Only Object
   Orbit permits an explicit subject lock.
+- The on-device Projects library persists finalized, partial, and invalid
+  capture evidence across launches and supports historical preview/share
+  without fabricating a re-finalization.
 - The host pipeline prepares captures, runs integrated global COLMAP or HLOC
   retrieval, preserves per-frame camera and mask evidence, builds a gated
   RGB-D or ARKit mesh metric seed, and trains controlled VkSplat or gsplat
@@ -41,7 +44,7 @@ for one gate only.
 
 - Replace the debug scene-understanding wireframe with a bounded,
   class-colored production mesh renderer after the physical throughput gate.
-- Complete TestFlight packaging and project-library polish.
+- Complete TestFlight packaging and distribution metadata.
 - Add release-level startup, long-session thermal, and two-cycle finalization
   evidence across supported LiDAR iPhones.
 

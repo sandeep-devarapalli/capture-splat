@@ -163,7 +163,9 @@ with `PYTHON_BIN=.venv/bin/python scripts/setup_sfm.sh external`, then use
 `--features hloc --matcher retrieval`. This runs NetVLAD top-32 retrieval,
 ALIKED-N16, LightGlue, COLMAP geometric verification, and the requested mapper.
 Missing HLOC is `hloc_missing`; Capture Splat does not silently substitute
-exhaustive matching.
+exhaustive matching. The setup script does not build standalone GLOMAP unless
+`INSTALL_GLOMAP=1` is set; integrated COLMAP `global_mapper` remains the
+default.
 
 After SfM, an optional sensor seed can align confidence-filtered iPhone depth
 or a report-validated ARKit mesh to the COLMAP camera frame and augment a

@@ -1,6 +1,7 @@
 #!/bin/bash
-# Install optional SfM upgrades for `capture-splat sfm`: GLOMAP (global
-# mapper) and HLOC (NetVLAD retrieval + ALIKED + LightGlue features).
+# Install HLOC retrieval for `capture-splat sfm`. Standalone GLOMAP remains an
+# optional comparison mapper through INSTALL_GLOMAP=1; integrated COLMAP
+# `global_mapper` is the default.
 # Retrieval writes an explicit blocker when these are missing; it never
 # silently falls back to exhaustive matching.
 set -euo pipefail
@@ -15,18 +16,22 @@ if ! command -v colmap >/dev/null 2>&1; then
   exit 1
 fi
 
-if command -v glomap >/dev/null 2>&1; then
-  echo "glomap already installed: $(command -v glomap)"
-else
-  if [ ! -d "$EXTERNAL_DIR/glomap" ]; then
-    git clone https://github.com/colmap/glomap.git "$EXTERNAL_DIR/glomap"
+if [ "${INSTALL_GLOMAP:-0}" = "1" ]; then
+  if command -v glomap >/dev/null 2>&1; then
+    echo "glomap already installed: $(command -v glomap)"
+  else
+    if [ ! -d "$EXTERNAL_DIR/glomap" ]; then
+      git clone https://github.com/colmap/glomap.git "$EXTERNAL_DIR/glomap"
+    fi
+    echo "Building optional standalone GLOMAP..."
+    cmake -S "$EXTERNAL_DIR/glomap" -B "$EXTERNAL_DIR/glomap/build" -DCMAKE_BUILD_TYPE=Release
+    cmake --build "$EXTERNAL_DIR/glomap/build" -j "$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
+    echo "GLOMAP built at $EXTERNAL_DIR/glomap/build/glomap/glomap"
+    echo "Add it to PATH or symlink it, e.g.:"
+    echo "  ln -s \"\$PWD/$EXTERNAL_DIR/glomap/build/glomap/glomap\" /usr/local/bin/glomap"
   fi
-  echo "Building GLOMAP (requires cmake + the COLMAP build dependencies)..."
-  cmake -S "$EXTERNAL_DIR/glomap" -B "$EXTERNAL_DIR/glomap/build" -DCMAKE_BUILD_TYPE=Release
-  cmake --build "$EXTERNAL_DIR/glomap/build" -j "$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
-  echo "GLOMAP built at $EXTERNAL_DIR/glomap/build/glomap/glomap"
-  echo "Add it to PATH or symlink it, e.g.:"
-  echo "  ln -s \"\$PWD/$EXTERNAL_DIR/glomap/build/glomap/glomap\" /usr/local/bin/glomap"
+else
+  echo "Skipping optional standalone GLOMAP (set INSTALL_GLOMAP=1 to build it)."
 fi
 
 if "$PYTHON_BIN" -c "import hloc, pycolmap" >/dev/null 2>&1; then
