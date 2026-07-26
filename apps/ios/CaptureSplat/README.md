@@ -38,6 +38,13 @@ the bundle finalized cleanly, while `capture_policy.json` and
 `sensor_capabilities.json` preserve the active quality policy and device
 fallback evidence.
 
+The **Projects** tab scans saved `capture_splat_*` folders on launch, foreground,
+and after finalization. It lists finalized, partial, and malformed bundles
+separately, opens an available LiDAR point preview, reports RoomPlan
+availability, and shares the selected folder. Partial folders remain recovery
+evidence; the app does not claim it can reconstruct missing in-memory frame
+state or re-finalize them after relaunch.
+
 On supported devices the quality-first capture configuration also samples
 non-empty ARKit person stencils at up to 5 Hz and snapshots a capped classified
 ARKit mesh during finalization. These derived sidecars are mask/geometry

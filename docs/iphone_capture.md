@@ -121,12 +121,16 @@ camera-lock, loop, fallback, and finalization transitions are written to
 `metadata/session_events.jsonl`. Mask or mesh pressure never relaxes the RGB-D
 quality gate; optional writes are dropped or held and reported instead.
 
-After capture, the Projects tab shows a lightweight review summary with kept and
-held keyframe counts, current coverage sectors, and the latest blocker detail.
-It also opens a native LiDAR preview backed by
-`pointcloud_preview/preview.json`, a capped set of sampled RGB-colored depth
-points from accepted keyframes. Use it as capture guidance evidence; full mesh
-or splat quality still needs host validation.
+After capture, the Projects tab scans the app Documents directory for saved
+`capture_splat_*` folders and keeps them available across app launches.
+Finalized, partial, and malformed bundles are labeled separately. Selecting a
+capture shows its accepted-frame count, finalization evidence, RoomPlan
+availability, and a native LiDAR preview backed by
+`pointcloud_preview/preview.json` when present. Finalized and partial folders
+can be shared directly. A partial folder remains recovery evidence: the app
+does not fabricate missing in-memory frame state or claim it can re-finalize
+that folder after relaunch. Use the preview as capture guidance evidence; full
+mesh or splat quality still needs host validation.
 
 For the **RoomPlan + 3DGS** intent, Apple's RoomPlan processing shares the
 existing Video 3DGS AR session instead of opening a second camera. Stopping
