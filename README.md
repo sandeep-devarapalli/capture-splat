@@ -97,6 +97,21 @@ capture-splat import-transforms \
   --out runs/imported_capture
 ```
 
+Equirectangular images, image folders, and videos can be projected into a
+deterministic 14-view perspective set:
+
+```bash
+capture-splat import-360 \
+  --input /path/to/panorama_or_video \
+  --out runs/imported_360
+```
+
+The command preserves full-resolution source panoramas and writes perspective
+images, canonical white-valid masks, and
+`metadata/equirectangular_rig.json`. It intentionally does not write
+`capture.json`: the virtual rotations are projection provenance, not recovered
+world poses. Rig-constrained SfM remains a separate gate.
+
 `sfm` now defaults to COLMAP's integrated `global_mapper`. Prepared Capture
 Splat packages use per-frame ARKit pinhole intrinsics, complete white-valid
 masks, and skip view-graph calibration. Generic image folders retain a

@@ -4,6 +4,11 @@ High-quality 3DGS needs high-quality input. Common failure modes include blur, l
 
 The host tools should report these as quality blockers rather than hiding them behind a generated `.ply`.
 
+Perspective views from one equirectangular panorama share one optical center.
+Their recorded rotations are projection provenance, not recovered camera
+motion or triangulation evidence. Do not treat `import-360` output as a posed
+capture until a rig-aware SfM stage has established camera motion.
+
 ## Lessons From Field Validation
 
 - Alignment proof is not visual-quality proof.

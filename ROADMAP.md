@@ -46,10 +46,12 @@ for one gate only.
 
 ### Reconstruction
 
-- Preserve ARKit metric scale through trainer normalization policy and expose
-  controlled seed/refinement options without overriding COLMAP-refined cameras.
-- Add a genuine equirectangular 360-camera importer with perspective
-  projections and explicit camera-rig provenance.
+- Extend the shipped metric-package and trainer-normalization policy with
+  controlled depth/normal refinement options without overriding
+  COLMAP-refined cameras.
+- Add rig-constrained SfM for the shipped equirectangular image-stage importer;
+  its perspective projections and virtual-camera provenance do not yet recover
+  world poses.
 - Add optional AprilTag scale calibration.
 - Add compact SPZ/web distribution with round-trip orientation, color, camera,
   and viewer checks before evaluating tiled LOD formats.
