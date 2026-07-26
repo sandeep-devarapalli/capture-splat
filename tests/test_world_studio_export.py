@@ -7,6 +7,7 @@ from capture_splat.json_utils import load_json_strict, write_json_strict
 from capture_splat.world_studio_export import (
     MANIFEST_NAME,
     _mesh_walk_evidence,
+    _sha256,
     export_world_studio_handoff,
 )
 
@@ -364,19 +365,44 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
         "arkit_mesh_file": "geometry/arkit_mesh.ply",
         "arkit_mesh_report_file": "geometry/arkit_mesh_report.json",
         "room_plan_semantics_file": "room_plan/room_semantics.json",
+        "room_plan_file": "room_plan/room.usdz",
+        "room_plan_report_file": "room_plan/room_plan_report.json",
         "frame_index_file": "metadata/frame_index.jsonl",
+        "planes_file": "metadata/planes.json",
         "spatial_guidance_report_file": "metadata/spatial_guidance_report.json",
+        "source_capture_manifest_file": "metadata/source_capture.json",
+        "session_config": {"up_axis": [0, 1, 0], "scale_authority": "arkit_vio_metric"},
         "frames": capture_frames,
     })
     write_ascii_ply(capture / "geometry" / "arkit_mesh.ply")
     write_json_strict(capture / "geometry" / "arkit_mesh_report.json", {"status": "finite_mesh_written"})
     write_json_strict(capture / "room_plan" / "room_semantics.json", {"schema": "capture_splat.room_semantics.v0.1"})
+    (capture / "room_plan" / "room.usdz").write_bytes(b"usdz")
+    write_json_strict(capture / "room_plan" / "room_plan_report.json", {"status": "exported"})
     frame_index = capture / "metadata" / "frame_index.jsonl"
     frame_index.parent.mkdir(parents=True, exist_ok=True)
     frame_index.write_text('{"video_frame_index":0}\n', encoding="utf-8")
+    write_json_strict(capture / "metadata" / "planes.json", {"floor_y_estimate": 0.0})
+    write_json_strict(capture / "metadata" / "source_capture.json", {"schema": "capture_splat.v0.3"})
     write_json_strict(capture / "metadata" / "spatial_guidance_report.json", {
         "schema": "capture_splat.spatial_guidance.v0.1",
         "authority": {"measurement": False, "collision": False, "navigation": False},
+    })
+    metric_seed = tmp_path / "metric_seed.ply"
+    write_ascii_ply(metric_seed)
+    write_json_strict(package / "metadata" / "metric_scale_report.json", {
+        "schema": "capture_splat.metric_scale_report.v0.1",
+        "status": "accepted",
+        "target_units": "meters",
+        "target_coordinate_frame": "metric_colmap_world",
+        "meters_per_colmap_unit": 1.0,
+        "authority": {"metric_scale_evidence": True},
+        "output_checksums": {
+            "cameras_txt": _sha256(sparse / "cameras.txt"),
+            "images_txt": _sha256(sparse / "images.txt"),
+            "points3D_txt": _sha256(sparse / "points3D.txt"),
+            "metric_seed_ply": _sha256(metric_seed),
+        },
     })
 
     export_world_studio_handoff(
@@ -384,6 +410,8 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
         tmp_path / "world_studio",
         gaussian=run / "splat.ply",
         capture_manifest=capture / "capture.json",
+        measurement_points=metric_seed,
+        measurement_points_frame="metric_colmap_world",
         copy_files=True,
     )
     manifest = load_json_strict(tmp_path / "world_studio" / MANIFEST_NAME)
@@ -396,6 +424,12 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
     assert manifest["assets"]["camera_trajectory"]["path"] == "camera_trajectory.jsonl"
     assert manifest["assets"]["spatial_guidance_report"]["path"] == "spatial_guidance_report.json"
     assert manifest["assets"]["spatial_guidance_report"]["authority"] == "capture_guidance_evidence"
+    assert manifest["assets"]["planes"]["coordinate_frame"] == "arkit_world"
+    assert manifest["assets"]["room_plan"]["authority"] == "semantic_geometry_proposal"
+    assert manifest["assets"]["source_capture_manifest"]["path"] == "source_capture.json"
+    assert manifest["assets"]["metric_scale_report"]["units"] == "meters"
+    assert manifest["assets"]["measurement_points"]["coordinate_frame"] == "metric_colmap_world"
+    assert manifest["assets"]["measurement_points"]["units"] == "meters"
     assert manifest["metric_registration"]["status"] == "accepted"
     assert manifest["metric_registration"]["matched_cameras"] == 8
     assert manifest["metric_registration"]["arkit_to_target"] == [
@@ -406,6 +440,12 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
     ]
     assert manifest["metric_registration"]["meters_per_target_unit"] == 1.0
     assert manifest["walk_eligibility"]["status"] == "eligible"
+    assert manifest["measurement_eligibility"]["status"] == "held"
+    assert manifest["measurement_eligibility"]["software_prerequisites"] is True
+    assert manifest["measurement_eligibility"]["reason"] == "physical_known_distance_validation_pending"
+    assert manifest["world_up"] == [0.0, 1.0, 0.0]
+    assert manifest["initial_camera"]["look_at"] == [0.0, 0.0, 1.0]
+    assert manifest["initial_camera"]["up"] == [0.0, -1.0, 0.0]
     assert manifest["authority"]["navigation_authority"] is False
 
 

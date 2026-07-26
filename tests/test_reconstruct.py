@@ -90,15 +90,21 @@ def test_reconstruct_runs_and_resumes_the_evidence_stages(tmp_path: Path, monkey
         write_json_strict(out_dir / "capture_splat_sfm_summary.json", summary)
         return summary
 
+    export_options = {}
+
     def fake_seed(capture_dir, package_dir, out_dir, seed_source="auto"):
         assert seed_source == "auto"
         package = out_dir / "package"
         package.mkdir(parents=True)
+        seed_ply = out_dir / "metric_seed.ply"
+        seed_ply.write_bytes(b"ply")
         summary = {
             "schema": "capture_splat.rgbd_seed_summary.v0.1",
             "decision": "promote",
             "package_augmented": True,
             "output_package": str(package),
+            "seed_ply": str(seed_ply),
+            "output_coordinate_frame": "metric_colmap_world",
         }
         write_json_strict(out_dir / "capture_splat_rgbd_seed_summary.json", summary)
         return summary
@@ -145,6 +151,7 @@ def test_reconstruct_runs_and_resumes_the_evidence_stages(tmp_path: Path, monkey
         return summary
 
     def fake_export(package, out_dir, **kwargs):
+        export_options.update(kwargs)
         gaussian = kwargs["gaussian"]
         out_dir.mkdir(parents=True)
         copied_gaussian = out_dir / "splat.ply"
@@ -188,6 +195,8 @@ def test_reconstruct_runs_and_resumes_the_evidence_stages(tmp_path: Path, monkey
 
     assert summary["decision"] == "promote"
     assert ladder_options["normalization"] == "auto"
+    assert export_options["measurement_points"].name == "metric_seed.ply"
+    assert export_options["measurement_points_frame"] == "metric_colmap_world"
     assert [stage["name"] for stage in summary["stages"]] == [
         "prepare", "sfm", "seed", "train", "prune", "qa", "export"
     ]

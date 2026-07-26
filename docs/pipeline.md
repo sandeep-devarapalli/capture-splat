@@ -405,15 +405,22 @@ For a Gaussian PLY, the exporter always writes
 `quality/render_source_qa.json`. These sidecars support `promote|hold|reject`
 review decisions; they do not establish high quality or metric authority.
 
-When `--capture-manifest` points to an iPhone `capture.json`, the exporter also
-copies the available ARKit navigation mesh, mesh report, RoomPlan semantic
-proposal, and continuous camera trajectory. It estimates an
+When `--capture-manifest` points to an iPhone or prepared `capture.json`, the
+exporter also copies the available ARKit navigation mesh, mesh report, planes,
+RoomPlan USDZ/report/semantic proposal, spatial-guidance report, source capture
+manifest, and continuous camera trajectory. It estimates an
 `arkit_world -> colmap_world` Sim(3) from matched camera centers and composes it
 with the trainer transform. The strict registration report records matched
 cameras, residuals, units, scale conversion, and `accepted|held|unavailable`.
 Walk is only marked eligible when a navigation mesh exists and registration is
-accepted. This is interaction eligibility from capture evidence, not validated
-collision or navigation authority.
+accepted; that eligibility is capture evidence, not collision validation.
+
+Use `--measurement-points` with
+`--measurement-points-frame metric_colmap_world` only for a seed whose accepted
+metric-scale report is bound to the same sparse model and exact PLY checksum.
+The handoff records meter units and software prerequisites, but keeps
+`measurement_eligibility.status = held` until a physical known-distance check
+passes. COLMAP-unit or trainer-normalized points are not labeled metric.
 
 When a rung is finite but render/source QA still holds, diagnose weak and tail
 frames before spending a longer run:

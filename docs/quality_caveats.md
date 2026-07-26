@@ -84,3 +84,8 @@ geometry, registration, measurement, collision safety, navigation, or a sharp
 Guidance callbacks intentionally coalesced to the configured update rate are
 reported separately from real drops and processing-budget overruns; do not
 interpret a large throttled-update count as lost capture evidence.
+
+World Studio handoffs may carry a checksum-bound metric seed in
+`metric_colmap_world` with meter units. That continuity proves neither surface
+accuracy nor measurement readiness. Capture Splat therefore holds measurement
+eligibility until a physical known-distance validation is recorded.
