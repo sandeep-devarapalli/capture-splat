@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 from .app_output_compare import compare_app_outputs
+from .apriltag_scale import apriltag_status, validate_apriltag_scale
 from .background_remove import remove_background
 from .backend_render_compare import compare_backend_renders
 from .capture_quality_report import run_capture_quality_report
@@ -175,6 +176,7 @@ def main() -> None:
     p_world_studio.add_argument("--camera-trajectory", type=Path)
     p_world_studio.add_argument("--planes", type=Path)
     p_world_studio.add_argument("--metric-scale-report", type=Path)
+    p_world_studio.add_argument("--known-scale-report", type=Path)
     p_world_studio.add_argument("--collision-candidate", type=Path)
     p_world_studio.add_argument("--collision-report", type=Path)
     p_world_studio.add_argument("--render-source-qa", type=Path)
@@ -263,6 +265,22 @@ def main() -> None:
     p_collision.add_argument("--max-faces", type=int, default=100_000)
     p_collision.add_argument("--cell-size", type=float, default=0.5)
     p_collision.add_argument("--intent", choices=["room", "object"], default="room")
+    p_apriltag = sub.add_parser(
+        "validate-apriltag-scale",
+        help="Validate COLMAP metric scale from a measured AprilTag without modifying the package",
+    )
+    p_apriltag.add_argument("--package", type=Path, required=True)
+    p_apriltag.add_argument("--out", type=Path, required=True)
+    p_apriltag.add_argument("--tag-size-meters", type=float, required=True)
+    p_apriltag.add_argument("--detections-json", type=Path)
+    p_apriltag.add_argument("--artifact", type=Path)
+    p_apriltag.add_argument("--family", default="tagStandard41h12")
+    p_apriltag.add_argument("--min-views", type=int, default=3)
+    p_apriltag.add_argument("--max-reprojection-p95", type=float, default=3.0)
+    p_apriltag.add_argument("--max-edge-cv", type=float, default=0.15)
+    p_apriltag.add_argument("--max-scale-error-fraction", type=float, default=0.05)
+    p_apriltag.add_argument("--image-dir", default="images")
+    p_apriltag.add_argument("--sparse-dir", default="sparse/0")
     p_frames = sub.add_parser("extract-frames", help="Extract training frames from a capture video")
     p_frames.add_argument("--video", type=Path, required=True)
     p_frames.add_argument("--out", type=Path, required=True)
@@ -530,6 +548,7 @@ def main() -> None:
             camera_trajectory=args.camera_trajectory,
             planes=args.planes,
             metric_scale_report=args.metric_scale_report,
+            known_scale_report=args.known_scale_report,
             collision_candidate=args.collision_candidate,
             collision_report=args.collision_report,
             render_source_qa=args.render_source_qa,
@@ -609,6 +628,21 @@ def main() -> None:
             max_faces=args.max_faces,
             cell_size=args.cell_size,
             intent=args.intent,
+        )
+    elif args.command == "validate-apriltag-scale":
+        payload = validate_apriltag_scale(
+            args.package,
+            args.out,
+            tag_size_meters=args.tag_size_meters,
+            detections_json=args.detections_json,
+            artifact=args.artifact,
+            family=args.family,
+            min_views=args.min_views,
+            max_reprojection_p95=args.max_reprojection_p95,
+            max_edge_cv=args.max_edge_cv,
+            max_scale_error_fraction=args.max_scale_error_fraction,
+            image_dir_name=args.image_dir,
+            sparse_dir_name=args.sparse_dir,
         )
     elif args.command == "extract-frames":
         payload = run_extract_frames(
@@ -763,7 +797,7 @@ def main() -> None:
         )
     elif args.command == "doctor":
         payload = {
-            "schema": "capture_splat.doctor.v0.4",
+            "schema": "capture_splat.doctor.v0.5",
             "tools": {
                 name: shutil.which(name)
                 for name in ("colmap", "glomap", "ffmpeg", "ffprobe", "splat-transform")
@@ -771,6 +805,7 @@ def main() -> None:
             "colmap_cuda": colmap_has_cuda(),
             "colmap_capabilities": colmap_capabilities(),
             "hloc": hloc_status(),
+            "apriltag": apriltag_status(),
             "vksplat": vksplat_doctor(args.vksplat_root),
             "gsplat": gsplat_doctor(args.gsplat_root),
             "three_dgs_cpp": _external_source_status(args.three_dgs_cpp_root, ["CMakeLists.txt"]),

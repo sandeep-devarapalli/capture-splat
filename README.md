@@ -334,6 +334,26 @@ preserves meter units and checksums, and writes a strict `hold` report. It does
 not grant collision or navigation authority; floor/wall continuity and
 splat/mesh overlap still require physical review.
 
+Optionally validate an already metric COLMAP package against a measured
+`tagStandard41h12` AprilTag visible in at least three registered views:
+
+```bash
+python -m pip install -e '.[apriltag]'
+capture-splat validate-apriltag-scale \
+  --package runs/my_scan/colmap_package_metric \
+  --tag-size-meters 0.150 \
+  --artifact runs/my_scan/rgbd_seed/metric_seed.ply \
+  --out runs/my_scan/apriltag_scale
+```
+
+The validator triangulates the four tag corners from the registered PINHOLE
+cameras, checks reprojection, square-edge consistency, and meter-scale error,
+and writes a strict report without modifying the package. Use
+`--detections-json` to replay checksum-bound detections without installing the
+optional detector. A `promote` decision validates only the known-scale evidence
+and exact artifact; it does not establish reconstruction quality, collision
+safety, or survey-grade measurement.
+
 To hand a run to World Studio, write a local package with relative references
 and conservative authority metadata:
 
@@ -343,6 +363,7 @@ capture-splat export-world-studio \
   --gaussian runs/my_scan/vksplat_ladder/step_0007000/splat.ply \
   --collision-candidate runs/my_scan/collision_candidate/collision_candidate.ply \
   --collision-report runs/my_scan/collision_candidate/capture_splat_collision_candidate_report.json \
+  --known-scale-report runs/my_scan/apriltag_scale/capture_splat_apriltag_scale_report.json \
   --render-source-qa runs/my_scan/render_qa/step_0007000/capture_splat_render_source_qa_summary.json \
   --transforms runs/my_scan/ingest/nerfstudio_dataset/transforms.json \
   --out runs/my_scan/world_studio_package

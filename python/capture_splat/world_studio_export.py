@@ -249,6 +249,7 @@ def _measurement_eligibility(
     units: str,
     package: Path,
     sparse_dir_name: str,
+    known_scale_report: Path | None,
 ) -> dict[str, Any]:
     authority = {
         "measurement_authority": False,
@@ -272,14 +273,44 @@ def _measurement_eligibility(
     checksum = (report.get("output_checksums") or {}).get("metric_seed_ply")
     if checksum != _sha256(points):
         return {"status": "held", "reason": "metric_seed_checksum_mismatch", "authority": authority}
+    if known_scale_report is None:
+        return {
+            "status": "held",
+            "reason": "physical_known_distance_validation_pending",
+            "software_prerequisites": True,
+            "point_count": stats["vertex_count"],
+            "coordinate_frame": coordinate_frame,
+            "units": units,
+            "authority": authority,
+        }
+    try:
+        known = load_json_strict(known_scale_report)
+    except (OSError, ValueError):
+        return {"status": "held", "reason": "known_scale_report_invalid", "authority": authority}
+    artifact = known.get("validated_artifact")
+    sparse_checksums = known.get("sparse_checksums")
+    sparse = package / sparse_dir_name
+    if (
+        known.get("schema") != "capture_splat.apriltag_scale_validation.v0.1"
+        or known.get("decision") != "promote"
+        or (known.get("authority") or {}).get("known_scale_validation") is not True
+        or not isinstance(artifact, dict)
+        or artifact.get("checksum") != _sha256(points)
+        or artifact.get("coordinate_frame") != coordinate_frame
+        or artifact.get("units") != units
+        or not isinstance(sparse_checksums, dict)
+        or sparse_checksums.get("cameras_txt") != _sha256(sparse / "cameras.txt")
+        or sparse_checksums.get("images_txt") != _sha256(sparse / "images.txt")
+    ):
+        return {"status": "held", "reason": "known_scale_evidence_not_bound", "authority": authority}
     return {
-        "status": "held",
-        "reason": "physical_known_distance_validation_pending",
+        "status": "eligible",
+        "reason": "known_scale_validation_accepted",
         "software_prerequisites": True,
         "point_count": stats["vertex_count"],
         "coordinate_frame": coordinate_frame,
         "units": units,
-        "authority": authority,
+        "authority": {**authority, "known_scale_validation": True},
     }
 
 
@@ -505,6 +536,7 @@ def export_world_studio_handoff(
     camera_trajectory: Path | None = None,
     planes: Path | None = None,
     metric_scale_report: Path | None = None,
+    known_scale_report: Path | None = None,
     collision_candidate: Path | None = None,
     collision_report: Path | None = None,
     render_source_qa: Path | None = None,
@@ -570,6 +602,9 @@ def export_world_studio_handoff(
     metric_scale_report = metric_scale_report or _first_existing(
         package, ("metadata/metric_scale_report.json",)
     )
+    known_scale_report = known_scale_report or _first_existing(
+        package, ("metadata/apriltag_scale_report.json",)
+    )
     collision_candidate = collision_candidate or _first_existing(
         package, ("collision_candidate.ply", "geometry/collision_candidate.ply")
     )
@@ -608,6 +643,9 @@ def export_world_studio_handoff(
     copied_room_plan_report = _copy_asset(room_plan_report, out_dir, "room_plan_report.json", copy_files)
     copied_metric_scale_report = _copy_asset(
         metric_scale_report, out_dir, "metric_scale_report.json", copy_files
+    )
+    copied_known_scale_report = _copy_asset(
+        known_scale_report, out_dir, "apriltag_scale_report.json", copy_files
     )
     copied_collision_candidate = _copy_asset(
         collision_candidate, out_dir, "collision_candidate.ply", copy_files
@@ -694,6 +732,10 @@ def export_world_studio_handoff(
         assets["metric_scale_report"] = _metric_asset_ref(
             copied_metric_scale_report, out_dir, "metric_colmap_world", "metric_scale_evidence", "meters"
         )
+    if copied_known_scale_report:
+        assets["known_scale_report"] = _metric_asset_ref(
+            copied_known_scale_report, out_dir, "metric_colmap_world", "known_scale_validation", "meters"
+        )
     if copied_collision_candidate:
         assets["collision_candidate"] = _metric_asset_ref(
             copied_collision_candidate, out_dir, "arkit_world", "collision_candidate_evidence", "meters"
@@ -765,6 +807,7 @@ def export_world_studio_handoff(
         measurement_units,
         package,
         sparse_dir_name,
+        copied_known_scale_report,
     )
     manifest["collision_eligibility"] = _collision_eligibility(
         copied_collision_candidate,

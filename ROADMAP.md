@@ -53,7 +53,8 @@ for one gate only.
 - Add rig-constrained SfM for the shipped equirectangular image-stage importer;
   its perspective projections and virtual-camera provenance do not yet recover
   world poses.
-- Add optional AprilTag scale calibration.
+- Physically validate the shipped optional AprilTag scale checker on a measured
+  target before using its checksum-bound report for World Studio measurement.
 - Validate the shipped strict SPZ export on World Studio and mobile browsers,
   then evaluate worker-backed SOG/tiled LOD only after orientation, color,
   camera, and viewer checks pass.
