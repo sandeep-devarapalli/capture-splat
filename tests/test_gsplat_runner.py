@@ -4,6 +4,7 @@ import pytest
 
 from capture_splat.gsplat_runner import run_gsplat
 from capture_splat.json_utils import write_json_strict
+from capture_splat.scene_transform import _sha256
 
 
 def make_package(root: Path) -> Path:
@@ -15,6 +16,7 @@ def make_package(root: Path) -> Path:
     write_json_strict(package / "capture.json", {"source": "capture_splat.prepare_capture"})
     (sparse / "cameras.txt").write_text("# cameras\n", encoding="utf-8")
     (sparse / "images.txt").write_text("# images\n", encoding="utf-8")
+    (sparse / "points3D.txt").write_text("# points\n", encoding="utf-8")
     return package
 
 
@@ -24,11 +26,31 @@ def make_gsplat_root(root: Path, support_masks: bool = False) -> Path:
     examples.mkdir(parents=True)
     (examples / "simple_trainer.py").write_text(
         "post_processing: str | None = None\n"
+        "normalize_world_space: bool = True\n"
         "steps_scaler = 1.0\nrandom_bkgd = False\ncap_max = 1000000\n"
         f"print('--post-processing {{None,bilateral_grid,ppisp}} --random-bkgd --steps-scaler --strategy.cap-max{' --mask-dir' if support_masks else ''}')\n",
         encoding="utf-8",
     )
     return gsplat
+
+
+def make_metric_package(package: Path) -> None:
+    sparse = package / "sparse" / "0"
+    metadata = package / "metadata"
+    metadata.mkdir()
+    write_json_strict(metadata / "metric_scale_report.json", {
+        "schema": "capture_splat.metric_scale_report.v0.1",
+        "status": "accepted",
+        "target_units": "meters",
+        "target_coordinate_frame": "metric_colmap_world",
+        "meters_per_colmap_unit": 0.42,
+        "authority": {"metric_scale_evidence": True},
+        "output_checksums": {
+            "cameras_txt": _sha256(sparse / "cameras.txt"),
+            "images_txt": _sha256(sparse / "images.txt"),
+            "points3D_txt": _sha256(sparse / "points3D.txt"),
+        },
+    })
 
 
 def test_gsplat_dry_run_scales_schedule_instead_of_truncating(tmp_path: Path) -> None:
@@ -146,3 +168,37 @@ def test_gsplat_required_masks_block_incomplete_frame_coverage(tmp_path: Path) -
 
     with pytest.raises(RuntimeError, match="required masks"):
         run_gsplat(package, tmp_path / "out", gsplat, masks="required", dry_run=True)
+
+
+def test_gsplat_auto_disables_normalization_for_checksum_bound_metric_package(tmp_path: Path) -> None:
+    package = make_package(tmp_path)
+    make_metric_package(package)
+    gsplat = make_gsplat_root(tmp_path)
+
+    summary = run_gsplat(package, tmp_path / "out", gsplat, dry_run=True)
+
+    assert summary["normalization"]["resolved"] == "off"
+    assert summary["normalization"]["metric_package"]["accepted"] is True
+    assert "--no-normalize-world-space" in summary["command"]
+
+
+def test_gsplat_normalization_off_requires_accepted_metric_package(tmp_path: Path) -> None:
+    package = make_package(tmp_path)
+    gsplat = make_gsplat_root(tmp_path)
+
+    with pytest.raises(RuntimeError, match="accepted metric package"):
+        run_gsplat(package, tmp_path / "out", gsplat, normalization="off", dry_run=True)
+
+
+def test_gsplat_auto_rejects_stale_metric_binding_and_normalizes(tmp_path: Path) -> None:
+    package = make_package(tmp_path)
+    make_metric_package(package)
+    (package / "sparse/0/images.txt").write_text("# changed\n", encoding="utf-8")
+    gsplat = make_gsplat_root(tmp_path)
+
+    summary = run_gsplat(package, tmp_path / "out", gsplat, dry_run=True)
+
+    assert summary["normalization"]["resolved"] == "on"
+    assert summary["normalization"]["metric_package"]["accepted"] is False
+    assert "checksum_mismatch:images_txt" in summary["normalization"]["metric_package"]["reason"]
+    assert "--no-normalize-world-space" not in summary["command"]

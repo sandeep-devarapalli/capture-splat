@@ -59,6 +59,11 @@ preserves registration and stays within the same render-QA thresholds.
 The background sphere and scene-transform sidecar are packaging aids: seeds
 and coordinate metadata, not reconstruction improvements.
 
+Metric input evidence does not imply meter-native trainer output. The
+normalization decision must be checksum-bound to the current sparse model and
+recorded by the trainer summary. Capture Splat blocks an unsupported explicit
+no-normalization request instead of writing an identity transform claim.
+
 CUDA fallback is a backend choice, not a shortcut around evidence. If gsplat runs where Vulkan is unavailable, keep the same conservative language: finite output, render/source QA decision, weak-frame count, and explicit hold/reject/promote.
 
 The live spatial-guidance wireframe and map are also capture evidence only.

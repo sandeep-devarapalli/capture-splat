@@ -41,6 +41,7 @@ def test_reconstruct_dry_run_writes_explicit_blockers_and_skips(tmp_path: Path) 
     by_name = {stage["name"]: stage for stage in summary["stages"]}
     assert by_name["sfm"]["method"] == "global"
     assert by_name["train"]["decision"] == "blocked"
+    assert by_name["train"]["normalization"] == "auto"
     assert by_name["qa"]["decision"] == "blocked"
     saved = load_json_strict(tmp_path / "run/capture_splat_reconstruction_summary.json")
     assert saved["authority"]["quality_claim"] is False
@@ -101,7 +102,10 @@ def test_reconstruct_runs_and_resumes_the_evidence_stages(tmp_path: Path, monkey
         write_json_strict(out_dir / "capture_splat_rgbd_seed_summary.json", summary)
         return summary
 
-    def fake_ladder(package_dir, out_dir, root, steps, stop_reset_at=None):
+    ladder_options = {}
+
+    def fake_ladder(package_dir, out_dir, root, steps, stop_reset_at=None, normalization="auto"):
+        ladder_options["normalization"] = normalization
         ply = out_dir / "step_0003000/splat.ply"
         ply.parent.mkdir(parents=True)
         ply.write_bytes(b"ply")
@@ -182,6 +186,7 @@ def test_reconstruct_runs_and_resumes_the_evidence_stages(tmp_path: Path, monkey
     )
 
     assert summary["decision"] == "promote"
+    assert ladder_options["normalization"] == "auto"
     assert [stage["name"] for stage in summary["stages"]] == [
         "prepare", "sfm", "seed", "train", "prune", "qa", "export"
     ]

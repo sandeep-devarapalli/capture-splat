@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .json_utils import load_json_strict, write_json_strict
-from .scene_transform import SIDECAR_NAME, write_scene_transform_sidecar
+from .scene_transform import SIDECAR_NAME, resolve_normalization_policy, write_scene_transform_sidecar
 from .vksplat_runner import validate_package
 
 
@@ -61,6 +61,11 @@ def probe_trainer_capabilities(trainer: Path, strategy: str) -> dict[str, Any]:
     }
     modern_post = "--post-processing" in help_text or "post_processing:" in source
     legacy_bilateral = "--use-bilateral-grid" in help_text or "--use_bilateral_grid" in help_text
+    normalization_disable = (
+        "--no-normalize-world-space"
+        if "--no-normalize-world-space" in help_text or "normalize_world_space: bool = True" in source
+        else None
+    )
     choices = []
     if modern_post:
         if "bilateral_grid" in help_text or "bilateral_grid" in source:
@@ -76,6 +81,7 @@ def probe_trainer_capabilities(trainer: Path, strategy: str) -> dict[str, Any]:
         "post_processing_choices": choices,
         "legacy_bilateral_grid": legacy_bilateral,
         "mask_dir_option": "--mask-dir" if "--mask-dir" in help_text else None,
+        "normalization_disable_option": normalization_disable,
         "source_probe_used": returncode != 0,
         "dependencies": {
             "bilateral_grid": _probe_import(trainer, "import lib_bilagrid"),
@@ -114,6 +120,7 @@ def build_command(
     random_bkgd: bool = True,
     max_gaussians: int = 1_000_000,
     mask_dir: Path | None = None,
+    normalize_world_space: bool = True,
 ) -> list[str]:
     flags = supported_flags if supported_flags is not None else set(RECIPE_FLAGS)
     capabilities = capabilities or {
@@ -168,6 +175,11 @@ def build_command(
         if not option:
             raise RuntimeError("gsplat trainer does not expose a mask directory option")
         command += [str(option), str(mask_dir)]
+    if not normalize_world_space:
+        option = capabilities.get("normalization_disable_option")
+        if not option:
+            raise RuntimeError("gsplat trainer does not expose a normalization-disable option")
+        command.append(str(option))
     return command
 
 
@@ -179,7 +191,7 @@ def find_gsplat_ply(output_root: Path, steps: int) -> Path | None:
     return candidates[0] if candidates else None
 
 
-def run_gsplat(package_dir: Path, output_root: Path, gsplat_root: Path, steps: int = 30000, strategy: str = "mcmc", image_dir: str = "images", sparse_dir: str = "sparse/0", data_factor: int = 1, dry_run: bool = False, use_bilateral_grid: bool | None = None, random_bkgd: bool = True, max_gaussians: int = 1_000_000, photometric: str | None = None, masks: str = "auto") -> dict[str, Any]:
+def run_gsplat(package_dir: Path, output_root: Path, gsplat_root: Path, steps: int = 30000, strategy: str = "mcmc", image_dir: str = "images", sparse_dir: str = "sparse/0", data_factor: int = 1, dry_run: bool = False, use_bilateral_grid: bool | None = None, random_bkgd: bool = True, max_gaussians: int = 1_000_000, photometric: str | None = None, masks: str = "auto", normalization: str = "auto") -> dict[str, Any]:
     package_dir = package_dir.resolve()
     output_root = output_root.resolve()
     gsplat_root = gsplat_root.resolve()
@@ -199,6 +211,12 @@ def run_gsplat(package_dir: Path, output_root: Path, gsplat_root: Path, steps: i
         raise RuntimeError("gsplat PPISP requires the mcmc strategy")
     capabilities = probe_trainer_capabilities(trainer, strategy)
     supported_flags = set(capabilities["supported_recipe_flags"])
+    normalization_state = resolve_normalization_policy(
+        package_dir,
+        sparse_dir,
+        normalization,
+        capabilities.get("normalization_disable_option") is not None,
+    )
     mask_dir = package_dir / "masks" / "valid"
     mask_files = sorted(mask_dir.glob("*.png")) if mask_dir.is_dir() else []
     image_names = sorted(path.name for path in (package_dir / image_dir).iterdir() if path.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif", ".tiff"})
@@ -226,6 +244,7 @@ def run_gsplat(package_dir: Path, output_root: Path, gsplat_root: Path, steps: i
         random_bkgd=random_bkgd,
         max_gaussians=max_gaussians,
         mask_dir=resolved_mask_dir,
+        normalize_world_space=normalization_state["enabled"],
     )
     summary: dict[str, Any] = {
         "schema": "capture_splat.gsplat_run_summary.v0.1",
@@ -238,6 +257,7 @@ def run_gsplat(package_dir: Path, output_root: Path, gsplat_root: Path, steps: i
         "data_factor": data_factor,
         "photometric": photometric,
         "trainer_capabilities": capabilities,
+        "normalization": normalization_state,
         "masks": {
             "requested": masks,
             "available": len(mask_files),
@@ -265,7 +285,12 @@ def run_gsplat(package_dir: Path, output_root: Path, gsplat_root: Path, steps: i
     splat = find_gsplat_ply(output_root, steps)
     summary["splat_ply"] = str(splat) if splat else None
     if splat is not None:
-        sidecar = write_scene_transform_sidecar(splat, package_dir / sparse_dir, "gsplat", normalized=True)
+        sidecar = write_scene_transform_sidecar(
+            splat,
+            package_dir / sparse_dir,
+            "gsplat",
+            normalized=normalization_state["enabled"],
+        )
         summary["scene_transform_sidecar"] = str(splat.parent / SIDECAR_NAME) if sidecar else None
     write_json_strict(output_root / "capture_splat_gsplat_summary.json", summary)
     if completed.returncode != 0:
@@ -320,6 +345,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--data-factor", type=int, default=1)
     parser.add_argument("--photometric", choices=["none", "bilateral-grid", "ppisp"])
     parser.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
+    parser.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
     parser.add_argument("--no-bilateral-grid", action="store_true")
     parser.add_argument("--no-random-bkgd", action="store_true")
     parser.add_argument("--max-gaussians", type=int, default=1_000_000)
@@ -330,7 +356,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     photometric = "none" if args.no_bilateral_grid else args.photometric
-    summary = run_gsplat(args.package, args.out, args.gsplat_root, args.steps, args.strategy, args.image_dir, args.sparse_dir, args.data_factor, args.dry_run, random_bkgd=not args.no_random_bkgd, max_gaussians=args.max_gaussians, photometric=photometric, masks=args.masks)
+    summary = run_gsplat(args.package, args.out, args.gsplat_root, args.steps, args.strategy, args.image_dir, args.sparse_dir, args.data_factor, args.dry_run, random_bkgd=not args.no_random_bkgd, max_gaussians=args.max_gaussians, photometric=photometric, masks=args.masks, normalization=args.normalization)
     print(json.dumps(summary, indent=2))
 
 

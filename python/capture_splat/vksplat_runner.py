@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .json_utils import write_json_strict
-from .scene_transform import SIDECAR_NAME, write_scene_transform_sidecar
+from .scene_transform import SIDECAR_NAME, resolve_normalization_policy, write_scene_transform_sidecar
 
 
 def find_simple_trainer(vksplat_root: Path) -> Path:
@@ -64,12 +64,18 @@ def find_latest_splat(output_root: Path) -> Path | None:
     return candidates[0] if candidates else None
 
 
-def run_vksplat(package_dir: Path, output_root: Path, vksplat_root: Path, steps: int = 30000, image_dir: str = "images", sparse_dir: str = "sparse/0", strategy: str = "mcmc", dry_run: bool = False, save_train_renders: bool = False, stop_reset_at: int | None = None, masks: str = "auto") -> dict[str, Any]:
+def run_vksplat(package_dir: Path, output_root: Path, vksplat_root: Path, steps: int = 30000, image_dir: str = "images", sparse_dir: str = "sparse/0", strategy: str = "mcmc", dry_run: bool = False, save_train_renders: bool = False, stop_reset_at: int | None = None, masks: str = "auto", normalization: str = "auto") -> dict[str, Any]:
     package_dir = package_dir.resolve()
     output_root = output_root.resolve()
     vksplat_root = vksplat_root.resolve()
     validate_package(package_dir, image_dir, sparse_dir)
     simple_trainer = find_simple_trainer(vksplat_root)
+    normalization_state = resolve_normalization_policy(
+        package_dir,
+        sparse_dir,
+        normalization,
+        backend_supports_disable=False,
+    )
     if masks not in {"auto", "off", "required"}:
         raise ValueError(f"unsupported mask policy: {masks}")
     mask_supported = "mask_dir" in simple_trainer.read_text(encoding="utf-8", errors="ignore")
@@ -94,6 +100,7 @@ def run_vksplat(package_dir: Path, output_root: Path, vksplat_root: Path, steps:
         "strategy": strategy,
         "save_train_renders": save_train_renders,
         "stop_reset_at": stop_reset_at,
+        "normalization": normalization_state,
         "masks": {
             "requested": masks,
             "available": len(mask_files),
@@ -117,7 +124,12 @@ def run_vksplat(package_dir: Path, output_root: Path, vksplat_root: Path, steps:
     splat = find_latest_splat(output_root)
     summary["splat_ply"] = str(splat) if splat else None
     if splat is not None:
-        sidecar = write_scene_transform_sidecar(splat, package_dir / sparse_dir, "vksplat", normalized=True)
+        sidecar = write_scene_transform_sidecar(
+            splat,
+            package_dir / sparse_dir,
+            "vksplat",
+            normalized=normalization_state["enabled"],
+        )
         summary["scene_transform_sidecar"] = str(splat.parent / SIDECAR_NAME) if sidecar else None
     write_json_strict(output_root / "capture_splat_vksplat_summary.json", summary)
     if completed.returncode != 0:
@@ -134,6 +146,7 @@ def doctor(vksplat_root: Path | None = None) -> dict[str, Any]:
         "colmap": shutil.which("colmap"),
         "vulkaninfo": shutil.which("vulkaninfo"),
         "vksplat_importable": False,
+        "normalization_disable_supported": False,
     }
     try:
         __import__("vksplat")
@@ -162,13 +175,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--save-train-renders", action="store_true")
     parser.add_argument("--stop-reset-at", type=int, help="Stop VkSplat opacity resets after this step; useful for longer quality rungs that otherwise destabilize.")
     parser.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
+    parser.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
-    summary = run_vksplat(args.package, args.out, args.vksplat_root, args.steps, args.image_dir, args.sparse_dir, args.strategy, args.dry_run, save_train_renders=args.save_train_renders, stop_reset_at=args.stop_reset_at, masks=args.masks)
+    summary = run_vksplat(args.package, args.out, args.vksplat_root, args.steps, args.image_dir, args.sparse_dir, args.strategy, args.dry_run, save_train_renders=args.save_train_renders, stop_reset_at=args.stop_reset_at, masks=args.masks, normalization=args.normalization)
     print(json.dumps(summary, indent=2))
 
 

@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from capture_splat.json_utils import write_json_strict
+from capture_splat.scene_transform import _sha256
 from capture_splat.vksplat_ladder import run_vksplat_ladder
 from capture_splat.vksplat_runner import run_vksplat
 
@@ -15,6 +16,7 @@ def make_package(root: Path) -> Path:
     (package / "images" / "000001.jpg").write_bytes(b"fixture")
     (sparse / "cameras.txt").write_text("# cameras\n", encoding="utf-8")
     (sparse / "images.txt").write_text("# images\n", encoding="utf-8")
+    (sparse / "points3D.txt").write_text("# points\n", encoding="utf-8")
     return package
 
 
@@ -39,6 +41,23 @@ def write_qa(path: Path, psnr: float, ssim: float, mae: float, correlation: floa
             "ssim": {"mean": ssim, "min": ssim, "max": ssim},
             "mae": {"mean": mae, "min": mae, "max": mae},
             "normalized_correlation": {"mean": correlation, "min": correlation, "max": correlation},
+        },
+    })
+
+
+def make_metric_package(package: Path) -> None:
+    sparse = package / "sparse" / "0"
+    metadata = package / "metadata"
+    metadata.mkdir()
+    write_json_strict(metadata / "metric_scale_report.json", {
+        "schema": "capture_splat.metric_scale_report.v0.1",
+        "status": "accepted",
+        "target_units": "meters",
+        "authority": {"metric_scale_evidence": True},
+        "output_checksums": {
+            "cameras_txt": _sha256(sparse / "cameras.txt"),
+            "images_txt": _sha256(sparse / "images.txt"),
+            "points3D_txt": _sha256(sparse / "points3D.txt"),
         },
     })
 
@@ -174,3 +193,24 @@ def test_vksplat_required_masks_block_incomplete_frame_coverage(tmp_path: Path) 
 
     with pytest.raises(RuntimeError, match="required masks"):
         run_vksplat(package, tmp_path / "out", vksplat, masks="required", dry_run=True)
+
+
+def test_vksplat_auto_records_metric_normalization_limitation(tmp_path: Path) -> None:
+    package = make_package(tmp_path)
+    make_metric_package(package)
+    vksplat = make_vksplat_root(tmp_path)
+
+    summary = run_vksplat(package, tmp_path / "out", vksplat, dry_run=True)
+
+    assert summary["normalization"]["resolved"] == "on"
+    assert summary["normalization"]["metric_package"]["accepted"] is True
+    assert summary["normalization"]["warning"] == "metric_package_normalized_backend_cannot_disable"
+
+
+def test_vksplat_normalization_off_rejects_unsupported_backend(tmp_path: Path) -> None:
+    package = make_package(tmp_path)
+    make_metric_package(package)
+    vksplat = make_vksplat_root(tmp_path)
+
+    with pytest.raises(RuntimeError, match="real normalization-disable capability"):
+        run_vksplat(package, tmp_path / "out", vksplat, normalization="off", dry_run=True)
