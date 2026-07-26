@@ -53,8 +53,9 @@ for one gate only.
   its perspective projections and virtual-camera provenance do not yet recover
   world poses.
 - Add optional AprilTag scale calibration.
-- Add compact SPZ/web distribution with round-trip orientation, color, camera,
-  and viewer checks before evaluating tiled LOD formats.
+- Validate the shipped strict SPZ export on World Studio and mobile browsers,
+  then evaluate worker-backed SOG/tiled LOD only after orientation, color,
+  camera, and viewer checks pass.
 - Keep VGGT preview and splat-to-mesh as optional experiments behind explicit
   runtime and authority gates.
 

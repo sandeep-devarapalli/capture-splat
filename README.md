@@ -128,6 +128,23 @@ a `.ply` with a few non-finite splats, `capture-splat sanitize-ply` can write a
 strict report and a finite copy that drops only non-finite vertex rows. The
 ladder only uses that repair when `--sanitize-non-finite-ply` is set.
 
+For optional web distribution, install the external
+[`@playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform)
+CLI and export a finite Gaussian PLY through the strict SPZ round-trip gate:
+
+```bash
+npm install -g @playcanvas/splat-transform
+capture-splat export-spz \
+  --input runs/my_scan/splat.finite.ply \
+  --out runs/my_scan/scene.spz
+```
+
+The command writes SPZ v4, converts it back to PLY, checks splat count,
+finiteness, sampled position error, and sampled base-color error, then remains
+`hold` until optional checksum-bound viewer evidence confirms load,
+orientation, color, and source-camera alignment. Compression does not establish
+visual quality, metric scale, collision authority, or correct viewer cameras.
+
 For prepared packages over 250 frames, install the optional HLOC tools
 with `PYTHON_BIN=.venv/bin/python scripts/setup_sfm.sh external`, then use
 `--features hloc --matcher retrieval`. This runs NetVLAD top-32 retrieval,

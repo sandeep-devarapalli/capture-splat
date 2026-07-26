@@ -9,6 +9,11 @@ Their recorded rotations are projection provenance, not recovered camera
 motion or triangulation evidence. Do not treat `import-360` output as a posed
 capture until a rig-aware SfM stage has established camera motion.
 
+SPZ compression is lossy and coordinate-system aware. A finite reverse
+conversion with low sampled coordinate/color error is necessary but does not
+prove that a target viewer used the intended up axis or source cameras.
+`export-spz` therefore stays held until checksum-bound viewer checks pass.
+
 ## Lessons From Field Validation
 
 - Alignment proof is not visual-quality proof.
