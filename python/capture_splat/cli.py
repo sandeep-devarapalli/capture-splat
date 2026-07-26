@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 from .app_output_compare import compare_app_outputs
+from .background_remove import remove_background
 from .backend_render_compare import compare_backend_renders
 from .capture_quality_report import run_capture_quality_report
 from .colmap_export import export_colmap_text
@@ -84,6 +85,21 @@ def main() -> None:
         type=Path,
         help="Strict JSON manifest of accepted source-frame indices to omit non-destructively",
     )
+    p_remove_background = sub.add_parser(
+        "remove-background",
+        help="Write non-destructive premultiplied object images from valid masks or optional InSPyReNet",
+    )
+    p_remove_background.add_argument("--images", type=Path, required=True)
+    p_remove_background.add_argument("--out", type=Path, required=True)
+    p_remove_background.add_argument("--mask-dir", type=Path)
+    p_remove_background.add_argument("--mode", choices=["auto", "prior", "inspyrenet"], default="auto")
+    p_remove_background.add_argument("--threshold", type=float, default=0.5)
+    p_remove_background.add_argument(
+        "--model-mode",
+        choices=["fast", "base", "base-nightly"],
+        default="fast",
+    )
+    p_remove_background.add_argument("--dry-run", action="store_true")
     p_seed = sub.add_parser("build-rgbd-seed", help="Align ARKit RGB-D to COLMAP and augment a copied package")
     p_seed.add_argument("--capture", type=Path, required=True)
     p_seed.add_argument("--package", type=Path, required=True)
@@ -377,6 +393,16 @@ def main() -> None:
             max_edge=args.max_edge,
             dedup_tolerance_seconds=args.dedup_tolerance,
             frame_exclusions=args.frame_exclusions,
+        )
+    elif args.command == "remove-background":
+        payload = remove_background(
+            args.images,
+            args.out,
+            mask_dir=args.mask_dir,
+            mode=args.mode,
+            threshold=args.threshold,
+            model_mode=args.model_mode,
+            dry_run=args.dry_run,
         )
     elif args.command == "build-rgbd-seed":
         payload = build_rgbd_metric_seed(

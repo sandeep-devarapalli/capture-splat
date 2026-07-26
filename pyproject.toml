@@ -19,6 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 vision = ["opencv-python>=4.8"]
+matting = ["transparent-background>=1.3.4"]
 
 [project.scripts]
 capture-splat = "capture_splat.cli:main"
