@@ -111,8 +111,19 @@ def test_reconstruct_runs_and_resumes_the_evidence_stages(tmp_path: Path, monkey
 
     ladder_options = {}
 
-    def fake_ladder(package_dir, out_dir, root, steps, stop_reset_at=None, normalization="auto"):
+    def fake_ladder(
+        package_dir,
+        out_dir,
+        root,
+        steps,
+        stop_reset_at=None,
+        normalization="auto",
+        depth_supervision="auto",
+        normal_supervision="auto",
+    ):
         ladder_options["normalization"] = normalization
+        ladder_options["depth_supervision"] = depth_supervision
+        ladder_options["normal_supervision"] = normal_supervision
         ply = out_dir / "step_0003000/splat.ply"
         ply.parent.mkdir(parents=True)
         ply.write_bytes(b"ply")
@@ -195,6 +206,8 @@ def test_reconstruct_runs_and_resumes_the_evidence_stages(tmp_path: Path, monkey
 
     assert summary["decision"] == "promote"
     assert ladder_options["normalization"] == "auto"
+    assert ladder_options["depth_supervision"] == "auto"
+    assert ladder_options["normal_supervision"] == "auto"
     assert export_options["measurement_points"].name == "metric_seed.ply"
     assert export_options["measurement_points_frame"] == "metric_colmap_world"
     assert [stage["name"] for stage in summary["stages"]] == [

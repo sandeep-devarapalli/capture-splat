@@ -197,6 +197,23 @@ internally, so auto mode records
 `metric_package_normalized_backend_cannot_disable`; `--normalization off`
 blocks rather than pretending the output remained meter-native.
 
+Prepare checksum-bound sensor supervision evidence after SfM or metric seeding:
+
+```bash
+capture-splat prepare-training-supervision \
+  --package runs/my_scan/colmap_package
+```
+
+The command validates NPY depth and confidence maps, applies the recorded
+depth scale, and writes optional depth-derived normal proposals plus
+`metadata/training_supervision.json`. SfM now copies referenced depth and
+confidence sidecars with `capture.json` instead of leaving broken paths.
+Trainer flags `--depth-supervision` and `--normal-supervision` use
+`auto|off|required`: `auto` preserves unsupported evidence with a warning,
+while `required` blocks unless the installed trainer exposes a dedicated
+sensor-manifest input. gsplat's upstream `--depth-loss` samples sparse COLMAP
+points, so Capture Splat does not mislabel it as iPhone LiDAR supervision.
+
 The same stages can be run through one resumable evidence command:
 
 ```bash

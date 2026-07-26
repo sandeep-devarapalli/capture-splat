@@ -10,6 +10,7 @@ from typing import Any
 
 from .json_utils import write_json_strict
 from .scene_transform import SIDECAR_NAME, resolve_normalization_policy, write_scene_transform_sidecar
+from .training_supervision import resolve_supervision_policy
 
 
 def find_simple_trainer(vksplat_root: Path) -> Path:
@@ -32,7 +33,7 @@ def validate_package(package_dir: Path, image_dir: str, sparse_dir: str) -> None
             raise FileNotFoundError(f"COLMAP text file missing: {sparse / name}")
 
 
-def build_runner_script(path: Path, simple_trainer: Path, package_dir: Path, output_root: Path, image_dir: str, sparse_dir: str, steps: int, strategy: str, save_train_renders: bool = False, stop_reset_at: int | None = None, mask_dir: str | None = None) -> None:
+def build_runner_script(path: Path, simple_trainer: Path, package_dir: Path, output_root: Path, image_dir: str, sparse_dir: str, steps: int, strategy: str, save_train_renders: bool = False, stop_reset_at: int | None = None, mask_dir: str | None = None, sensor_depth_manifest: str | None = None, sensor_normal_manifest: str | None = None) -> None:
     trainer_dir = simple_trainer.parent
     config_class = "MCMCTrainerConfig" if strategy == "mcmc" else "TrainerConfig"
     lines = [
@@ -51,6 +52,10 @@ def build_runner_script(path: Path, simple_trainer: Path, package_dir: Path, out
     ]
     if mask_dir is not None:
         lines.append("config.mask_dir = %r" % mask_dir)
+    if sensor_depth_manifest is not None:
+        lines.append("config.sensor_depth_manifest = %r" % sensor_depth_manifest)
+    if sensor_normal_manifest is not None:
+        lines.append("config.sensor_normal_manifest = %r" % sensor_normal_manifest)
     if stop_reset_at is not None:
         lines.append("config.stop_reset_at = %d" % int(stop_reset_at))
     lines.extend([
@@ -64,7 +69,7 @@ def find_latest_splat(output_root: Path) -> Path | None:
     return candidates[0] if candidates else None
 
 
-def run_vksplat(package_dir: Path, output_root: Path, vksplat_root: Path, steps: int = 30000, image_dir: str = "images", sparse_dir: str = "sparse/0", strategy: str = "mcmc", dry_run: bool = False, save_train_renders: bool = False, stop_reset_at: int | None = None, masks: str = "auto", normalization: str = "auto") -> dict[str, Any]:
+def run_vksplat(package_dir: Path, output_root: Path, vksplat_root: Path, steps: int = 30000, image_dir: str = "images", sparse_dir: str = "sparse/0", strategy: str = "mcmc", dry_run: bool = False, save_train_renders: bool = False, stop_reset_at: int | None = None, masks: str = "auto", normalization: str = "auto", depth_supervision: str = "auto", normal_supervision: str = "auto") -> dict[str, Any]:
     package_dir = package_dir.resolve()
     output_root = output_root.resolve()
     vksplat_root = vksplat_root.resolve()
@@ -78,7 +83,12 @@ def run_vksplat(package_dir: Path, output_root: Path, vksplat_root: Path, steps:
     )
     if masks not in {"auto", "off", "required"}:
         raise ValueError(f"unsupported mask policy: {masks}")
-    mask_supported = "mask_dir" in simple_trainer.read_text(encoding="utf-8", errors="ignore")
+    trainer_source = simple_trainer.read_text(encoding="utf-8", errors="ignore")
+    mask_supported = "mask_dir" in trainer_source
+    depth_option = "sensor_depth_manifest" if "sensor_depth_manifest" in trainer_source else None
+    normal_option = "sensor_normal_manifest" if "sensor_normal_manifest" in trainer_source else None
+    depth_state = resolve_supervision_policy(package_dir, depth_supervision, "depth", depth_option)
+    normal_state = resolve_supervision_policy(package_dir, normal_supervision, "normal", normal_option)
     mask_path = package_dir / "masks" / "valid"
     mask_files = sorted(mask_path.glob("*.png")) if mask_path.is_dir() else []
     image_names = sorted(path.name for path in (package_dir / image_dir).iterdir() if path.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif", ".tiff"})
@@ -89,7 +99,21 @@ def run_vksplat(package_dir: Path, output_root: Path, vksplat_root: Path, steps:
     resolved_mask_dir = "masks/valid" if masks != "off" and mask_supported and mask_complete else None
     output_root.mkdir(parents=True, exist_ok=True)
     runner = output_root / "capture_splat_vksplat_runner.py"
-    build_runner_script(runner, simple_trainer, package_dir, output_root, image_dir, sparse_dir, steps, strategy, save_train_renders=save_train_renders, stop_reset_at=stop_reset_at, mask_dir=resolved_mask_dir)
+    build_runner_script(
+        runner,
+        simple_trainer,
+        package_dir,
+        output_root,
+        image_dir,
+        sparse_dir,
+        steps,
+        strategy,
+        save_train_renders=save_train_renders,
+        stop_reset_at=stop_reset_at,
+        mask_dir=resolved_mask_dir,
+        sensor_depth_manifest=depth_state["manifest"] if depth_state["applied"] else None,
+        sensor_normal_manifest=normal_state["manifest"] if normal_state["applied"] else None,
+    )
     command = [sys.executable, str(runner)]
     summary: dict[str, Any] = {
         "schema": "capture_splat.vksplat_run_summary.v0.1",
@@ -111,6 +135,10 @@ def run_vksplat(package_dir: Path, output_root: Path, vksplat_root: Path, steps:
             "mask_dir": resolved_mask_dir,
             "semantics": "white_valid_for_training",
             "warning": "incomplete_valid_masks_disabled" if mask_files and missing_masks and masks == "auto" else None,
+        },
+        "sensor_supervision": {
+            "depth": depth_state,
+            "normal": normal_state,
         },
         "command": command,
         "dry_run": dry_run,
@@ -157,7 +185,10 @@ def doctor(vksplat_root: Path | None = None) -> dict[str, Any]:
         try:
             trainer = find_simple_trainer(vksplat_root)
             result["simple_trainer"] = str(trainer)
-            result["mask_dir_supported"] = "mask_dir" in trainer.read_text(encoding="utf-8", errors="ignore")
+            source = trainer.read_text(encoding="utf-8", errors="ignore")
+            result["mask_dir_supported"] = "mask_dir" in source
+            result["sensor_depth_manifest_supported"] = "sensor_depth_manifest" in source
+            result["sensor_normal_manifest_supported"] = "sensor_normal_manifest" in source
         except Exception as exc:
             result["simple_trainer_error"] = str(exc)
     return result
@@ -176,13 +207,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--stop-reset-at", type=int, help="Stop VkSplat opacity resets after this step; useful for longer quality rungs that otherwise destabilize.")
     parser.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
     parser.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
+    parser.add_argument("--depth-supervision", choices=["auto", "off", "required"], default="auto")
+    parser.add_argument("--normal-supervision", choices=["auto", "off", "required"], default="auto")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
-    summary = run_vksplat(args.package, args.out, args.vksplat_root, args.steps, args.image_dir, args.sparse_dir, args.strategy, args.dry_run, save_train_renders=args.save_train_renders, stop_reset_at=args.stop_reset_at, masks=args.masks, normalization=args.normalization)
+    summary = run_vksplat(args.package, args.out, args.vksplat_root, args.steps, args.image_dir, args.sparse_dir, args.strategy, args.dry_run, save_train_renders=args.save_train_renders, stop_reset_at=args.stop_reset_at, masks=args.masks, normalization=args.normalization, depth_supervision=args.depth_supervision, normal_supervision=args.normal_supervision)
     print(json.dumps(summary, indent=2))
 
 

@@ -90,6 +90,8 @@ def run_vksplat_ladder(
     max_correlation_drop: float = 0.03,
     masks: str = "auto",
     normalization: str = "auto",
+    depth_supervision: str = "auto",
+    normal_supervision: str = "auto",
 ) -> dict[str, Any]:
     package_dir = package_dir.resolve()
     out_dir = out_dir.resolve()
@@ -123,6 +125,8 @@ def run_vksplat_ladder(
                 stop_reset_at=stop_reset_at,
                 masks=masks,
                 normalization=normalization,
+                depth_supervision=depth_supervision,
+                normal_supervision=normal_supervision,
             )
             rung["command"] = run_summary.get("command")
             rung["run_summary"] = run_summary
@@ -205,6 +209,8 @@ def run_vksplat_ladder(
         },
         "masks": masks,
         "normalization": normalization,
+        "depth_supervision": depth_supervision,
+        "normal_supervision": normal_supervision,
         "thresholds": {
             "max_psnr_drop": max_psnr_drop,
             "max_ssim_drop": max_ssim_drop,
@@ -235,6 +241,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--stop-reset-at", type=int, help="Stop VkSplat opacity resets after this step; useful for longer quality rungs that otherwise destabilize.")
     parser.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
     parser.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
+    parser.add_argument("--depth-supervision", choices=["auto", "off", "required"], default="auto")
+    parser.add_argument("--normal-supervision", choices=["auto", "off", "required"], default="auto")
     parser.add_argument("--max-psnr-drop", type=float, default=0.5)
     parser.add_argument("--max-ssim-drop", type=float, default=0.02)
     parser.add_argument("--max-mae-increase", type=float, default=0.01)
@@ -258,6 +266,8 @@ def main(argv: list[str] | None = None) -> None:
         stop_reset_at=args.stop_reset_at,
         masks=args.masks,
         normalization=args.normalization,
+        depth_supervision=args.depth_supervision,
+        normal_supervision=args.normal_supervision,
         max_psnr_drop=args.max_psnr_drop,
         max_ssim_drop=args.max_ssim_drop,
         max_mae_increase=args.max_mae_increase,

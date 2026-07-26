@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -171,6 +172,36 @@ def test_run_sfm_auto_uses_per_frame_cameras_only_for_prepared_capture(tmp_path:
     assert "--ImageReader.single_camera_per_image" in summary["commands"][0]
     assert load_json_strict(tmp_path / "out/capture.json")["source"] == "capture_splat.prepare_capture"
     assert default_photometric_mode(tmp_path / "out") == "bilateral-grid"
+
+
+def test_run_sfm_copies_capture_depth_and_confidence_sidecars(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("capture_splat.sfm_runner.find_binary", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("capture_splat.sfm_runner.colmap_has_cuda", lambda: True)
+    capture = tmp_path / "capture"
+    images = capture / "images"
+    write_image(images / "000001.jpg")
+    (capture / "depth").mkdir()
+    (capture / "confidence").mkdir()
+    np.save(capture / "depth/000001.npy", np.ones((3, 4), dtype=np.float32), allow_pickle=False)
+    np.save(capture / "confidence/000001.npy", np.full((3, 4), 2, dtype=np.uint8), allow_pickle=False)
+    write_json_strict(capture / "capture.json", {
+        "schema": "capture_splat.v0.3",
+        "source": "capture_splat.prepare_capture",
+        "frames": [{
+            "rgb": "images/000001.jpg",
+            "depth": "depth/000001.npy",
+            "confidence": "confidence/000001.npy",
+            "transform_matrix": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+            "intrinsics": {"fl_x": 8, "fl_y": 8, "cx": 4, "cy": 3, "w": 8, "h": 6},
+        }],
+    })
+
+    summary = run_sfm(images, tmp_path / "out", dry_run=True)
+
+    assert summary["supervision_copy"]["complete"] is True
+    assert summary["supervision_copy"]["copied"] == 2
+    assert (tmp_path / "out/depth/000001.npy").is_file()
+    assert (tmp_path / "out/confidence/000001.npy").is_file()
 
 
 def test_run_sfm_generic_external_camera_preserves_distortion_options(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -11,6 +11,7 @@ from typing import Any
 
 from .json_utils import load_json_strict, write_json_strict
 from .scene_transform import SIDECAR_NAME, resolve_normalization_policy, write_scene_transform_sidecar
+from .training_supervision import resolve_supervision_policy
 from .vksplat_runner import validate_package
 
 
@@ -88,6 +89,16 @@ def probe_trainer_capabilities(trainer: Path, strategy: str) -> dict[str, Any]:
         "post_processing_choices": choices,
         "legacy_bilateral_grid": legacy_bilateral,
         "mask_dir_option": "--mask-dir" if "--mask-dir" in help_text else None,
+        "sensor_depth_manifest_option": (
+            "--sensor-depth-manifest" if "--sensor-depth-manifest" in help_text else None
+        ),
+        "sensor_normal_manifest_option": (
+            "--sensor-normal-manifest" if "--sensor-normal-manifest" in help_text else None
+        ),
+        "builtin_depth_loss": {
+            "supported": "--depth-loss" in help_text or "depth_loss: bool" in source,
+            "semantics": "colmap_sparse_point_depth_not_sensor_depth",
+        },
         "normalization_disable_option": normalization_disable,
         "source_probe_used": returncode != 0,
         "dependencies": {
@@ -176,6 +187,8 @@ def build_command(
     random_bkgd: bool = True,
     max_gaussians: int = 1_000_000,
     mask_dir: Path | None = None,
+    sensor_depth_manifest: Path | None = None,
+    sensor_normal_manifest: Path | None = None,
     normalize_world_space: bool = True,
     mcmc_refine_every_command: int | None = None,
 ) -> list[str]:
@@ -234,6 +247,16 @@ def build_command(
         if not option:
             raise RuntimeError("gsplat trainer does not expose a mask directory option")
         command += [str(option), str(mask_dir)]
+    if sensor_depth_manifest is not None:
+        option = capabilities.get("sensor_depth_manifest_option")
+        if not option:
+            raise RuntimeError("gsplat trainer does not expose dedicated sensor depth supervision")
+        command += [str(option), str(sensor_depth_manifest)]
+    if sensor_normal_manifest is not None:
+        option = capabilities.get("sensor_normal_manifest_option")
+        if not option:
+            raise RuntimeError("gsplat trainer does not expose dedicated sensor normal supervision")
+        command += [str(option), str(sensor_normal_manifest)]
     if not normalize_world_space:
         option = capabilities.get("normalization_disable_option")
         if not option:
@@ -250,7 +273,7 @@ def find_gsplat_ply(output_root: Path, steps: int) -> Path | None:
     return candidates[0] if candidates else None
 
 
-def run_gsplat(package_dir: Path, output_root: Path, gsplat_root: Path, steps: int = 30000, strategy: str = "mcmc", image_dir: str = "images", sparse_dir: str = "sparse/0", data_factor: int = 1, dry_run: bool = False, use_bilateral_grid: bool | None = None, random_bkgd: bool = True, max_gaussians: int = 1_000_000, photometric: str | None = None, masks: str = "auto", normalization: str = "auto", mcmc_refine_every: str | int = "auto") -> dict[str, Any]:
+def run_gsplat(package_dir: Path, output_root: Path, gsplat_root: Path, steps: int = 30000, strategy: str = "mcmc", image_dir: str = "images", sparse_dir: str = "sparse/0", data_factor: int = 1, dry_run: bool = False, use_bilateral_grid: bool | None = None, random_bkgd: bool = True, max_gaussians: int = 1_000_000, photometric: str | None = None, masks: str = "auto", normalization: str = "auto", mcmc_refine_every: str | int = "auto", depth_supervision: str = "auto", normal_supervision: str = "auto") -> dict[str, Any]:
     package_dir = package_dir.resolve()
     output_root = output_root.resolve()
     gsplat_root = gsplat_root.resolve()
@@ -269,6 +292,18 @@ def run_gsplat(package_dir: Path, output_root: Path, gsplat_root: Path, steps: i
     if photometric == "ppisp" and strategy != "mcmc":
         raise RuntimeError("gsplat PPISP requires the mcmc strategy")
     capabilities = probe_trainer_capabilities(trainer, strategy)
+    depth_state = resolve_supervision_policy(
+        package_dir,
+        depth_supervision,
+        "depth",
+        capabilities.get("sensor_depth_manifest_option"),
+    )
+    normal_state = resolve_supervision_policy(
+        package_dir,
+        normal_supervision,
+        "normal",
+        capabilities.get("sensor_normal_manifest_option"),
+    )
     supported_flags = set(capabilities["supported_recipe_flags"])
     refine_every_state = resolve_mcmc_refine_every(
         package_dir,
@@ -311,6 +346,8 @@ def run_gsplat(package_dir: Path, output_root: Path, gsplat_root: Path, steps: i
         random_bkgd=random_bkgd,
         max_gaussians=max_gaussians,
         mask_dir=resolved_mask_dir,
+        sensor_depth_manifest=Path(depth_state["manifest"]) if depth_state["applied"] else None,
+        sensor_normal_manifest=Path(normal_state["manifest"]) if normal_state["applied"] else None,
         normalize_world_space=normalization_state["enabled"],
         mcmc_refine_every_command=refine_every_state.get("trainer_command_value"),
     )
@@ -339,6 +376,10 @@ def run_gsplat(package_dir: Path, output_root: Path, gsplat_root: Path, steps: i
                 else "incomplete_valid_masks_disabled" if mask_files and missing_masks and masks == "auto"
                 else None
             ),
+        },
+        "sensor_supervision": {
+            "depth": depth_state,
+            "normal": normal_state,
         },
         "supported_recipe_flags": sorted(supported_flags),
         "unsupported_recipe_flags": sorted(set(RECIPE_FLAGS) - supported_flags),
@@ -415,6 +456,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--photometric", choices=["none", "bilateral-grid", "ppisp"])
     parser.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
     parser.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
+    parser.add_argument("--depth-supervision", choices=["auto", "off", "required"], default="auto")
+    parser.add_argument("--normal-supervision", choices=["auto", "off", "required"], default="auto")
     parser.add_argument("--no-bilateral-grid", action="store_true")
     parser.add_argument("--no-random-bkgd", action="store_true")
     parser.add_argument("--max-gaussians", type=int, default=1_000_000)
@@ -426,7 +469,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     photometric = "none" if args.no_bilateral_grid else args.photometric
-    summary = run_gsplat(args.package, args.out, args.gsplat_root, args.steps, args.strategy, args.image_dir, args.sparse_dir, args.data_factor, args.dry_run, random_bkgd=not args.no_random_bkgd, max_gaussians=args.max_gaussians, photometric=photometric, masks=args.masks, normalization=args.normalization, mcmc_refine_every=args.mcmc_refine_every)
+    summary = run_gsplat(args.package, args.out, args.gsplat_root, args.steps, args.strategy, args.image_dir, args.sparse_dir, args.data_factor, args.dry_run, random_bkgd=not args.no_random_bkgd, max_gaussians=args.max_gaussians, photometric=photometric, masks=args.masks, normalization=args.normalization, mcmc_refine_every=args.mcmc_refine_every, depth_supervision=args.depth_supervision, normal_supervision=args.normal_supervision)
     print(json.dumps(summary, indent=2))
 
 

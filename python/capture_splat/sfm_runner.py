@@ -12,6 +12,7 @@ from typing import Any
 from .background_sphere import append_background_sphere
 from .hloc_runner import hloc_status, planned_frontend, run_hloc_frontend
 from .json_utils import load_json_strict, write_json_strict
+from .training_supervision import copy_capture_supervision_assets
 from .scene_transform import PACKAGE_ORIENTATION_NAME, write_package_orientation_transform
 from .sfm_evidence import (
     apply_camera_priors,
@@ -515,11 +516,19 @@ def run_sfm(
     else:
         run_images = images_dir
     package_capture_manifest = capture_manifest
+    supervision_copy = {"copied": 0, "paths": [], "missing": [], "complete": True}
     if capture_manifest is not None and copy_images:
         target_manifest = out_dir / "capture.json"
         if target_manifest.resolve() != capture_manifest:
             shutil.copy2(capture_manifest, target_manifest)
         package_capture_manifest = target_manifest
+        supervision_copy = copy_capture_supervision_assets(
+            capture_manifest.parent,
+            out_dir,
+            capture_metadata,
+        )
+        if supervision_copy["missing"]:
+            warnings.append("capture_supervision_sidecars_missing")
     if resolved_mask_dir is not None and copy_images:
         mask_copy = copy_valid_masks(resolved_mask_dir, out_dir / "masks" / "valid")
         run_mask_dir = out_dir / "masks" / "valid"
@@ -557,6 +566,7 @@ def run_sfm(
         "colmap_capabilities": capabilities,
         "capture_manifest": str(capture_manifest) if capture_manifest else None,
         "package_capture_manifest": str(package_capture_manifest) if package_capture_manifest else None,
+        "supervision_copy": supervision_copy,
         "camera_policy": {"requested": camera_policy, "resolved": resolved_camera_policy},
         "camera_evidence": camera_report,
         "prepared_capture": prepared_capture,
