@@ -1,0 +1,131 @@
+{
+  "$id": "urn:capture-splat:schema:capture_splat.live_session.v0.1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "authority": {
+      "const": "proposal_only"
+    },
+    "coordinate_system": {
+      "additionalProperties": false,
+      "properties": {
+        "camera_forward": {
+          "const": "-Z"
+        },
+        "handedness": {
+          "const": "right"
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "matrix_layout": {
+          "const": "row-major"
+        },
+        "units": {
+          "enum": [
+            "meters",
+            "unknown"
+          ]
+        },
+        "vector_convention": {
+          "const": "column-vector"
+        },
+        "world_up": {
+          "const": "+Y"
+        }
+      },
+      "required": [
+        "id",
+        "units",
+        "handedness",
+        "world_up",
+        "camera_forward",
+        "matrix_layout",
+        "vector_convention"
+      ],
+      "type": "object"
+    },
+    "created_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "expected_frame_count": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "schema": {
+      "const": "capture_splat.live_session.v0.1"
+    },
+    "session_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "type": "string"
+    },
+    "source_manifest": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/safeRelativePath"
+        },
+        "schema": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size_bytes",
+        "schema"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema",
+    "session_id",
+    "created_at",
+    "source_manifest",
+    "coordinate_system",
+    "authority"
+  ],
+  "title": "Capture Splat live session v0.1",
+  "type": "object",
+  "$defs": {
+    "safeRelativePath": {
+      "minLength": 1,
+      "pattern": "^[^\\u0000]+$",
+      "not": {
+        "anyOf": [
+          {
+            "pattern": "^/"
+          },
+          {
+            "pattern": "\\\\"
+          },
+          {
+            "pattern": "//|/$"
+          },
+          {
+            "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:"
+          },
+          {
+            "pattern": "(^|/)\\.\\.?(/|$)"
+          }
+        ]
+      },
+      "type": "string"
+    },
+    "sha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    }
+  }
+}

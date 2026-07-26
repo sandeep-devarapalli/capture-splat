@@ -1,0 +1,356 @@
+{
+  "$id": "urn:capture-splat:schema:capture_splat.live_frame.v0.1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assets": {
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "confidence": {
+          "$ref": "#/$defs/assetReference"
+        },
+        "depth": {
+          "$ref": "#/$defs/assetReference"
+        },
+        "masks": {
+          "items": {
+            "$ref": "#/$defs/maskReference"
+          },
+          "maxItems": 3,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "camera_to_world": {
+      "items": {
+        "type": "number"
+      },
+      "maxItems": 16,
+      "minItems": 16,
+      "type": "array"
+    },
+    "coordinate_frame": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "intrinsics": {
+      "additionalProperties": false,
+      "properties": {
+        "applies_to": {
+          "enum": [
+            "source_frame",
+            "depth",
+            "confidence",
+            "unknown"
+          ]
+        },
+        "calibration_height": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "calibration_width": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "cx": {
+          "type": "number"
+        },
+        "cy": {
+          "type": "number"
+        },
+        "fl_x": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "fl_y": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "model": {
+          "const": "pinhole"
+        }
+      },
+      "required": [
+        "model",
+        "fl_x",
+        "fl_y",
+        "cx",
+        "cy",
+        "calibration_width",
+        "calibration_height",
+        "applies_to"
+      ],
+      "type": "object"
+    },
+    "quality": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "angular_velocity_deg_s": {
+          "type": "number"
+        },
+        "blur_score": {
+          "type": "number"
+        },
+        "clipped_highlight_fraction": {
+          "type": "number"
+        },
+        "clipped_shadow_fraction": {
+          "type": "number"
+        },
+        "colmap_overlap_score": {
+          "type": "number"
+        },
+        "exposure_delta": {
+          "type": "number"
+        },
+        "exposure_mean": {
+          "type": "number"
+        },
+        "feature_grid_coverage": {
+          "type": "number"
+        },
+        "feature_point_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "near_clipped_highlight_fraction": {
+          "type": "number"
+        },
+        "parallax_meters": {
+          "type": "number"
+        },
+        "reason": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "score": {
+          "type": "number"
+        },
+        "translation_speed_m_s": {
+          "type": "number"
+        },
+        "valid_depth_ratio": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "accepted"
+      ],
+      "type": "object"
+    },
+    "schema": {
+      "const": "capture_splat.live_frame.v0.1"
+    },
+    "sequence_id": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "session_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "type": "string"
+    },
+    "source_frame": {
+      "$ref": "#/$defs/dimensionedAssetReference"
+    },
+    "timestamp": {
+      "additionalProperties": false,
+      "properties": {
+        "clock_domain": {
+          "enum": [
+            "arkit_session",
+            "media",
+            "monotonic",
+            "unknown"
+          ]
+        },
+        "value": {
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "value",
+        "clock_domain"
+      ],
+      "type": "object"
+    },
+    "tracking": {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema",
+    "session_id",
+    "sequence_id",
+    "timestamp",
+    "source_frame",
+    "intrinsics",
+    "camera_to_world",
+    "coordinate_frame",
+    "tracking",
+    "quality"
+  ],
+  "title": "Capture Splat live frame v0.1",
+  "type": "object",
+  "$defs": {
+    "assetReference": {
+      "additionalProperties": false,
+      "properties": {
+        "height": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "media_type": {
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$",
+          "type": "string"
+        },
+        "path": {
+          "$ref": "#/$defs/safeRelativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "width": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size_bytes",
+        "media_type"
+      ],
+      "type": "object"
+    },
+    "dimensionedAssetReference": {
+      "additionalProperties": false,
+      "properties": {
+        "height": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "media_type": {
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$",
+          "type": "string"
+        },
+        "path": {
+          "$ref": "#/$defs/safeRelativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "width": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size_bytes",
+        "media_type",
+        "width",
+        "height"
+      ],
+      "type": "object"
+    },
+    "maskReference": {
+      "additionalProperties": false,
+      "properties": {
+        "height": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "person",
+            "valid",
+            "object"
+          ]
+        },
+        "media_type": {
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$",
+          "type": "string"
+        },
+        "path": {
+          "$ref": "#/$defs/safeRelativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "width": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "path",
+        "sha256",
+        "size_bytes",
+        "media_type"
+      ],
+      "type": "object"
+    },
+    "safeRelativePath": {
+      "minLength": 1,
+      "pattern": "^[^\\u0000]+$",
+      "not": {
+        "anyOf": [
+          {
+            "pattern": "^/"
+          },
+          {
+            "pattern": "\\\\"
+          },
+          {
+            "pattern": "//|/$"
+          },
+          {
+            "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:"
+          },
+          {
+            "pattern": "(^|/)\\.\\.?(/|$)"
+          }
+        ]
+      },
+      "type": "string"
+    },
+    "sha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    }
+  }
+}

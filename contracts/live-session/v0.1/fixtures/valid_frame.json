@@ -1,0 +1,78 @@
+{
+  "assets": {
+    "depth": {
+      "height": 192,
+      "media_type": "application/x-npy",
+      "path": "depth/depth_000001.npy",
+      "sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "size_bytes": 196736,
+      "width": 256
+    },
+    "masks": [
+      {
+        "height": 192,
+        "kind": "person",
+        "media_type": "image/png",
+        "path": "masks/person/person_000001.png",
+        "sha256": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "size_bytes": 4096,
+        "width": 256
+      }
+    ]
+  },
+  "camera_to_world": [
+    1.0,
+    0.0,
+    0.0,
+    0.25,
+    0.0,
+    1.0,
+    0.0,
+    1.5,
+    0.0,
+    0.0,
+    1.0,
+    -0.75,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+  ],
+  "coordinate_frame": "arkit_world",
+  "intrinsics": {
+    "applies_to": "depth",
+    "calibration_height": 192,
+    "calibration_width": 256,
+    "cx": 128.0,
+    "cy": 96.0,
+    "fl_x": 210.0,
+    "fl_y": 210.0,
+    "model": "pinhole"
+  },
+  "quality": {
+    "accepted": true,
+    "blur_score": 0.012,
+    "parallax_meters": 0.08,
+    "reason": "useful_keyframe",
+    "score": 0.91,
+    "valid_depth_ratio": 0.84
+  },
+  "schema": "capture_splat.live_frame.v0.1",
+  "sequence_id": 1,
+  "session_id": "fixture-session-01",
+  "source_frame": {
+    "height": 1440,
+    "media_type": "image/jpeg",
+    "path": "rgb/frame_000001.jpg",
+    "sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "size_bytes": 98765,
+    "width": 1920
+  },
+  "timestamp": {
+    "clock_domain": "arkit_session",
+    "value": 12.5
+  },
+  "tracking": {
+    "state": "normal"
+  }
+}
