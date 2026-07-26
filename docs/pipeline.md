@@ -118,6 +118,22 @@ records intrinsics plus virtual-camera rotations in
 or world poses and therefore does not emit `capture.json`. Use the output as
 projection evidence while rig-constrained SfM remains pending.
 
+Finite Gaussian PLYs can be packaged for optional web delivery with the
+external `splat-transform` CLI:
+
+```bash
+capture-splat export-spz --input /path/to/splat.ply --out runs/scene.spz
+```
+
+The strict report checks the SPZ v4 header and mandatory PLY round trip,
+including count, finite values, sampled coordinate error relative to scene
+diagonal, and sampled base-color error. The default decision is `hold`.
+Promotion for distribution additionally requires a
+`capture_splat.spz_viewer_evidence.v0.1` file bound to the SPZ checksum with
+passing viewer load, orientation, color, and source-camera-alignment checks.
+This is a distribution gate, not a reconstruction-quality or metric-authority
+claim.
+
 COLMAP registration and trainer health are quality gates. A successful file export is not the same as a high-quality reconstruction.
 
 ## Evidence Gates

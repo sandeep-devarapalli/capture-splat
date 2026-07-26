@@ -24,6 +24,7 @@ from .rgbd_seed import build_rgbd_metric_seed
 from .reconstruction_recipe import RECIPES, plan_reconstruction
 from .scene_transform import write_scene_transform_sidecar
 from .sfm_runner import colmap_capabilities, colmap_has_cuda, run_sfm, run_triangulate
+from .spz_export import export_spz
 from .transforms_import import import_transforms_package
 from .gsplat_ladder import run_gsplat_ladder
 from .gsplat_runner import doctor as gsplat_doctor
@@ -234,6 +235,15 @@ def main() -> None:
     p_sanitize = sub.add_parser("sanitize-ply", help="Drop non-finite PLY vertices and write a strict report")
     p_sanitize.add_argument("--input", type=Path, required=True)
     p_sanitize.add_argument("--out", type=Path)
+    p_spz = sub.add_parser("export-spz", help="Convert a finite Gaussian PLY to SPZ with strict round-trip evidence")
+    p_spz.add_argument("--input", type=Path, required=True)
+    p_spz.add_argument("--out", type=Path, required=True)
+    p_spz.add_argument("--converter", type=Path)
+    p_spz.add_argument("--viewer-evidence", type=Path)
+    p_spz.add_argument("--sample-limit", type=int, default=50_000)
+    p_spz.add_argument("--max-position-p95-fraction", type=float, default=0.005)
+    p_spz.add_argument("--max-color-mae", type=float, default=0.03)
+    p_spz.add_argument("--dry-run", action="store_true")
     p_frames = sub.add_parser("extract-frames", help="Extract training frames from a capture video")
     p_frames.add_argument("--video", type=Path, required=True)
     p_frames.add_argument("--out", type=Path, required=True)
@@ -552,6 +562,17 @@ def main() -> None:
         )
     elif args.command == "sanitize-ply":
         payload = sanitize_ply_drop_non_finite(args.input, args.out)
+    elif args.command == "export-spz":
+        payload = export_spz(
+            args.input,
+            args.out,
+            converter=args.converter,
+            viewer_evidence=args.viewer_evidence,
+            sample_limit=args.sample_limit,
+            max_position_p95_fraction=args.max_position_p95_fraction,
+            max_color_mae=args.max_color_mae,
+            dry_run=args.dry_run,
+        )
     elif args.command == "extract-frames":
         payload = run_extract_frames(
             args.video,
@@ -705,7 +726,10 @@ def main() -> None:
     elif args.command == "doctor":
         payload = {
             "schema": "capture_splat.doctor.v0.4",
-            "tools": {name: shutil.which(name) for name in ("colmap", "glomap", "ffmpeg", "ffprobe")},
+            "tools": {
+                name: shutil.which(name)
+                for name in ("colmap", "glomap", "ffmpeg", "ffprobe", "splat-transform")
+            },
             "colmap_cuda": colmap_has_cuda(),
             "colmap_capabilities": colmap_capabilities(),
             "hloc": hloc_status(),

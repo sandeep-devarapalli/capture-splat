@@ -162,6 +162,61 @@ def inspect_ply(path: Path) -> dict[str, Any]:
     return summary
 
 
+def ply_vertex_property_names(path: Path) -> list[str]:
+    with path.resolve().open("rb") as handle:
+        header, _ = _parse_header(handle)
+    vertex = next((element for element in header["elements"] if element["name"] == "vertex"), None)
+    if vertex is None:
+        raise ValueError("PLY has no vertex element")
+    return [prop["name"] for prop in vertex["properties"] if prop["kind"] == "scalar"]
+
+
+def load_ply_scalar_samples(path: Path, names: list[str], limit: int = 50_000) -> dict[str, np.ndarray]:
+    if limit <= 0:
+        raise ValueError("sample limit must be positive")
+    path = path.resolve()
+    with path.open("rb") as handle:
+        header, data_offset = _parse_header(handle)
+        vertex = next((element for element in header["elements"] if element["name"] == "vertex"), None)
+        if vertex is None:
+            raise ValueError("PLY has no vertex element")
+        properties = vertex["properties"]
+        indexes = {
+            prop["name"]: index
+            for index, prop in enumerate(properties)
+            if prop["kind"] == "scalar"
+        }
+        missing = [name for name in names if name not in indexes]
+        if missing:
+            raise ValueError(f"PLY is missing sampled properties: {', '.join(missing)}")
+        sample_count = min(int(vertex["count"]), limit)
+        values = {name: [] for name in names}
+        if header["format"] == "ascii":
+            text = path.read_text(encoding="ascii")
+            rows = text[text.index("end_header") + len("end_header"):].strip().splitlines()
+            for row_index, row in enumerate(rows[:sample_count], start=1):
+                parts = row.split()
+                if len(parts) < len(properties):
+                    raise ValueError(f"vertex row {row_index} has too few columns")
+                for name, index in indexes.items():
+                    if name in values:
+                        values[name].append(float(parts[index]))
+        else:
+            handle.seek(data_offset)
+            endian = "<" if header["format"] == "binary_little_endian" else ">"
+            for _ in range(sample_count):
+                for prop in properties:
+                    if prop["kind"] == "list":
+                        count = int(_read_binary_scalar(handle, endian, prop["count_type"]))
+                        for _ in range(count):
+                            _read_binary_scalar(handle, endian, prop["value_type"])
+                        continue
+                    value = _read_binary_scalar(handle, endian, prop["type"])
+                    if prop["name"] in values:
+                        values[prop["name"]].append(float(value))
+    return {name: np.asarray(sample, dtype=np.float64) for name, sample in values.items()}
+
+
 def sanitize_ply_drop_non_finite(path: Path, out_path: Path | None = None) -> dict[str, Any]:
     path = path.resolve()
     out_path = (out_path or path.with_name(f"{path.stem}.finite.ply")).resolve()
