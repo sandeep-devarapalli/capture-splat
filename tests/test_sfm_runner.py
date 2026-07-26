@@ -30,6 +30,8 @@ def test_build_commands_colmap_sequential_with_loop_vocab(tmp_path: Path) -> Non
     assert "--SequentialMatching.loop_detection" in matcher
     assert str(tmp_path / "vocab.bin") in matcher
     assert "--ImageReader.single_camera" in commands[0]
+    assert commands[0][commands[0].index("--FeatureExtraction.use_gpu") + 1] == "1"
+    assert commands[1][commands[1].index("--FeatureMatching.use_gpu") + 1] == "1"
 
 
 def test_build_commands_glomap_appends_registrator(tmp_path: Path) -> None:
@@ -227,6 +229,10 @@ def test_run_sfm_cpu_matching_override_recorded(tmp_path: Path, monkeypatch: pyt
     assert summary["decision"] == "dry_run"
     assert summary["blockers"] == []
     assert summary["cpu_matching_override"] is True
+    assert summary["commands"][0][summary["commands"][0].index("--FeatureExtraction.use_gpu") + 1] == "0"
+    assert summary["commands"][1][summary["commands"][1].index("--FeatureMatching.use_gpu") + 1] == "0"
+    assert summary["commands"][-1][summary["commands"][-1].index("--GlobalMapper.gp_use_gpu") + 1] == "0"
+    assert summary["commands"][-1][summary["commands"][-1].index("--GlobalMapper.ba_ceres_use_gpu") + 1] == "0"
 
 
 def test_run_sfm_retrieval_requires_hloc(tmp_path: Path) -> None:

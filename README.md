@@ -107,10 +107,23 @@ capture-splat import-360 \
 ```
 
 The command preserves full-resolution source panoramas and writes perspective
-images, canonical white-valid masks, and
+images, disjoint white-valid feature masks, and
 `metadata/equirectangular_rig.json`. It intentionally does not write
 `capture.json`: the virtual rotations are projection provenance, not recovered
-world poses. Rig-constrained SfM remains a separate gate.
+world poses. Recover panorama poses with the fixed virtual-camera rig:
+
+```bash
+capture-splat sfm-360-rig \
+  --package runs/imported_360 \
+  --out runs/imported_360_colmap \
+  --method global
+```
+
+This command verifies every projected image and mask against the importer
+checksums, configures the zero-translation virtual cameras before sequential
+matching, and fixes their known rotations and pinhole intrinsics during
+mapping. Its decision is based on registered panorama frames. Registration is
+pose evidence, not metric scale or reconstruction-quality proof.
 
 `sfm` now defaults to COLMAP's integrated `global_mapper`. Prepared Capture
 Splat packages use per-frame ARKit pinhole intrinsics, complete white-valid

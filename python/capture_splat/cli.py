@@ -13,6 +13,7 @@ from .capture_quality_report import run_capture_quality_report
 from .collision_candidate import build_collision_candidate
 from .colmap_export import export_colmap_text
 from .equirectangular_import import import_equirectangular
+from .equirectangular_sfm import run_equirectangular_rig_sfm
 from .frames_extract import run_extract_frames
 from .colmap_focused_repair import run_colmap_focused_repair
 from .colmap_support_delta import compare_colmap_support_delta
@@ -68,6 +69,14 @@ def main() -> None:
     p_import_360.add_argument("--size", type=int, default=1024)
     p_import_360.add_argument("--fov", type=float, default=110.0)
     p_import_360.add_argument("--target-panoramas", type=int, default=12)
+    p_sfm_360 = sub.add_parser("sfm-360-rig", help="Recover panorama poses with a fixed virtual-camera COLMAP rig")
+    p_sfm_360.add_argument("--package", type=Path, required=True)
+    p_sfm_360.add_argument("--out", type=Path, required=True)
+    p_sfm_360.add_argument("--method", choices=["global", "incremental"], default="global")
+    p_sfm_360.add_argument("--overlap", type=int, default=30)
+    p_sfm_360.add_argument("--max-features", type=int, default=8192)
+    p_sfm_360.add_argument("--allow-cpu-matching", action="store_true")
+    p_sfm_360.add_argument("--dry-run", action="store_true")
     p_colmap = sub.add_parser("colmap-export", help="Write COLMAP text package")
     p_colmap.add_argument("--capture", type=Path, required=True)
     p_colmap.add_argument("--out", type=Path, required=True)
@@ -438,6 +447,16 @@ def main() -> None:
             size=args.size,
             fov_degrees=args.fov,
             target_panoramas=args.target_panoramas,
+        )
+    elif args.command == "sfm-360-rig":
+        payload = run_equirectangular_rig_sfm(
+            args.package,
+            args.out,
+            method=args.method,
+            overlap=args.overlap,
+            max_features=args.max_features,
+            allow_cpu_matching=args.allow_cpu_matching,
+            dry_run=args.dry_run,
         )
     elif args.command == "colmap-export":
         payload = export_colmap_text(args.capture, args.out)

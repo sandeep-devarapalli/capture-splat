@@ -68,6 +68,37 @@ def _bilinear_sample(image: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndar
     return top * (1.0 - wy) + bottom * wy
 
 
+def _projection_world_rays(
+    yaw_degrees: float,
+    pitch_degrees: float,
+    size: int,
+    fov_degrees: float,
+) -> np.ndarray:
+    focal = 0.5 * size / math.tan(0.5 * math.radians(fov_degrees))
+    pixels = np.arange(size, dtype=np.float64) + 0.5
+    xx, yy = np.meshgrid((pixels - size / 2.0) / focal, -(pixels - size / 2.0) / focal)
+    camera_rays = np.stack((xx, yy, np.ones_like(xx)), axis=-1)
+    camera_rays /= np.linalg.norm(camera_rays, axis=-1, keepdims=True)
+    return camera_rays @ virtual_camera_rotation(yaw_degrees, pitch_degrees).T
+
+
+def feature_ownership_mask(
+    yaw_degrees: float,
+    pitch_degrees: float,
+    size: int,
+    fov_degrees: float,
+    views: list[tuple[float, float]],
+) -> Image.Image:
+    world_rays = _projection_world_rays(yaw_degrees, pitch_degrees, size, fov_degrees)
+    view_directions = np.asarray([
+        virtual_camera_rotation(yaw, pitch)[:, 2]
+        for yaw, pitch in views
+    ])
+    owner = np.argmax(world_rays @ view_directions.T, axis=-1)
+    view_index = views.index((yaw_degrees, pitch_degrees))
+    return Image.fromarray(np.where(owner == view_index, 255, 0).astype(np.uint8), "L")
+
+
 def project_equirectangular(
     panorama: Image.Image,
     yaw_degrees: float,
@@ -83,12 +114,7 @@ def project_equirectangular(
     height, width = rgba.shape[:2]
     if width < 4 or height < 2:
         raise ValueError("panorama is too small")
-    focal = 0.5 * size / math.tan(0.5 * math.radians(fov_degrees))
-    pixels = np.arange(size, dtype=np.float64) + 0.5
-    xx, yy = np.meshgrid((pixels - size / 2.0) / focal, -(pixels - size / 2.0) / focal)
-    camera_rays = np.stack((xx, yy, np.ones_like(xx)), axis=-1)
-    camera_rays /= np.linalg.norm(camera_rays, axis=-1, keepdims=True)
-    world_rays = camera_rays @ virtual_camera_rotation(yaw_degrees, pitch_degrees).T
+    world_rays = _projection_world_rays(yaw_degrees, pitch_degrees, size, fov_degrees)
     longitude = np.arctan2(world_rays[..., 0], world_rays[..., 2])
     latitude = np.arcsin(np.clip(world_rays[..., 1], -1.0, 1.0))
     sample_x = (longitude / (2.0 * math.pi) + 0.5) * width - 0.5
@@ -175,6 +201,11 @@ def import_equirectangular(
             for view_index, (yaw, pitch) in enumerate(views, start=1):
                 name = f"p{panorama_index:06d}_v{view_index:02d}.png"
                 projected, valid = project_equirectangular(panorama, yaw, pitch, size, fov_degrees)
+                ownership = feature_ownership_mask(yaw, pitch, size, fov_degrees, views)
+                valid = Image.fromarray(
+                    np.minimum(np.asarray(valid), np.asarray(ownership)).astype(np.uint8),
+                    "L",
+                )
                 projected.save(images_dir / name)
                 valid.save(masks_dir / f"{name}.png")
                 image_path = images_dir / name
@@ -211,6 +242,7 @@ def import_equirectangular(
             "positive_yaw": "clockwise_when_viewed_from_above",
             "positive_pitch": "up",
             "rotation_columns": "camera_right_camera_up_camera_forward",
+            "valid_masks": "white_pixels_owned_by_one_virtual_camera_for_feature_extraction",
         },
         "authority": {
             "projection_provenance": True,
@@ -237,7 +269,7 @@ def import_equirectangular(
             "valid_masks": str(masks_dir),
             "rig_metadata": str(rig_path),
         },
-        "warnings": ["rig_constrained_sfm_not_implemented"],
+        "warnings": ["world_poses_require_sfm_360_rig"],
         "authority": {
             "image_stage_import_only": True,
             "recovered_world_poses": False,
