@@ -45,11 +45,16 @@ Every serious training run should record and reject on these before claiming pro
 ## Capture UX Lessons
 
 - Users need guidance about where to move the phone, not just dots on screen.
-- Object mode should lock the subject before capture. Room mode should lock the room/perimeter intent before capture.
+- Object Orbit requires an explicit stable subject lock before Record. Room,
+  Desk, Corridor, Wall, Outdoor, Semantic Room, and Repair remain full-scene
+  captures and never auto-lock a center-depth sample.
 - Auto-capture should trigger on useful keyframes: overlap, parallax, blur, exposure, tracking, and coverage contribution, not a fixed timer alone.
 - Haptics are useful when a frame is accepted, but they must correspond to logged accepted keyframes.
 - The real camera view must stay readable. Dense telemetry belongs in compact, collapsible, or secondary panels.
 - Coverage should be explained as a capture-quality signal, not as proof that the scene is reconstructed well.
+- Saved captures need durable status after relaunch. Projects now distinguishes
+  finalized, partial, and malformed folders and shares preserved evidence
+  without pretending missing in-memory state can be recovered.
 
 ## Pipeline Lessons
 
@@ -58,7 +63,9 @@ Every serious training run should record and reject on these before claiming pro
 - Keep duplicate/weighted packages traceable. If images are duplicated for supervision, the metadata must show the source frame, role, copy index, and non-authoritative status.
 - Compare backends on the exact same input package before drawing conclusions.
 - VkSplat should be the default baseline for this repo, but OpenSplat/MPS remains useful as a sanity-check backend on Apple machines.
-- COLMAP 4.1+ should be evaluated for faster/refined reconstruction paths, but only after the current package gates are reproducible.
+- Integrated global COLMAP is the default mapper. HLOC retrieval is the scaling
+  path for larger packages; Caspar remains an explicit post-global BA
+  experiment rather than the global solver.
 
 ## Carry-Forward From The vid2scene Comparison (2026-07-08)
 
@@ -117,15 +124,27 @@ Every serious training run should record and reject on these before claiming pro
   `sfm` default; CPU runs require an explicit recorded override). A
   matched-holdout, longer-rung ladder comparison remains open.
 
-## Immediate Carry-Forward Work
+## Current Evidence Gates
 
-1. Add a public sample-capture QA ladder to this repo with small fixtures first, then real captures.
-2. Implement raw-canvas render/source comparison as a first-class CLI report.
-3. Add training-ladder commands for `3000`, `7000`, `15000`, and `30000` with finite PLY, radius, and per-frame quality gates.
-4. Add weak-frame diagnostics without automatically increasing duplicate weight.
-5. Investigate why non-target frames can regress after weak-frame weighting.
-6. Improve the iPhone app guidance around object/room lock, keyframe acceptance, haptics, and low-intrusion UI.
-7. Publish example reports that separate startup success, alignment success, and actual visual quality.
+The reusable QA, weak-frame, controlled-ladder, capture-guidance, and
+reconstruction orchestration commands above are implemented. Remaining work is
+evidence-bound:
+
+1. Complete a controlled physical RoomPlan + 3DGS capture and verify shared
+   coordinates, live-guidance throughput, thermal downgrade, and finalization.
+2. Benchmark checksum-bound iPhone depth/normal evidence on a trainer with
+   dedicated metric-sensor supervision before claiming a quality benefit.
+3. Validate rig-constrained `sfm-360-rig` on a real moving 360 sequence.
+4. Validate AprilTag scale on a measured physical target before making World
+   Studio measurement eligible.
+5. Validate SPZ orientation, color, cameras, and mobile/browser load before
+   promoting distribution.
+6. Run release-level startup, long-session thermal, and two-cycle finalization
+   checks across supported LiDAR iPhones, then complete TestFlight packaging.
+
+VGGT preview, splat-to-mesh, SOG/tiled LOD, and Caspar post-global BA remain
+optional experiments. They are not prerequisites for the default public
+capture-to-3DGS path.
 
 ## Physical Desk Capture (2026-07-11)
 
