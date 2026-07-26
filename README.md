@@ -121,7 +121,7 @@ mapping. Caspar is available only as an explicit post-global BA experiment via
 `--post-ba-backend caspar`; it is not the global solver.
 
 The VkSplat ladder runs controlled `3000 -> 7000 -> 15000 -> 30000` rungs and writes
-`capture_splat_vksplat_ladder_summary.json`. The optional `--stop-reset-at` flag records a VkSplat schedule cutoff for opacity resets, useful when longer rungs show late-reset instability; it is a controlled training setting, not a quality claim by itself. On CUDA cloud machines, `capture-splat train-gsplat-ladder` can run the same conservative ladder through gsplat and writes `capture_splat_gsplat_ladder_summary.json`. Single-step training is still
+`capture_splat_vksplat_ladder_summary.json`. The optional `--stop-reset-at` flag records a VkSplat schedule cutoff for opacity resets, useful when longer rungs show late-reset instability; it is a controlled training setting, not a quality claim by itself. On CUDA cloud machines, `capture-splat train-gsplat-ladder` can run the same conservative ladder through gsplat and writes `capture_splat_gsplat_ladder_summary.json`. Its `--mcmc-refine-every auto|N` setting compensates for shortened-rung schedule scaling and records the effective refinement cadence; `auto` uses the package frame count with a 200-step floor. Single-step training is still
 available with `capture-splat train-vksplat --steps 30000`, but a finite `.ply`
 is only validated finite output, not a visual-quality claim. If a trainer writes
 a `.ply` with a few non-finite splats, `capture-splat sanitize-ply` can write a

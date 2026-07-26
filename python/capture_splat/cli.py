@@ -137,6 +137,7 @@ def main() -> None:
     p_reconstruct.add_argument("--max-pruned-fraction", type=float, default=0.6)
     p_reconstruct.add_argument("--stop-reset-at", type=int)
     p_reconstruct.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
+    p_reconstruct.add_argument("--mcmc-refine-every", default="auto", metavar="auto|N")
     p_compare = sub.add_parser("compare-app-output", help="Compare observable outputs from iPhone 3DGS apps")
     p_compare.add_argument("--capture-splat", type=Path)
     p_compare.add_argument("--splatking", type=Path)
@@ -216,6 +217,7 @@ def main() -> None:
     p_train_gsplat.add_argument("--no-bilateral-grid", action="store_true")
     p_train_gsplat.add_argument("--no-random-bkgd", action="store_true")
     p_train_gsplat.add_argument("--max-gaussians", type=int, default=1_000_000)
+    p_train_gsplat.add_argument("--mcmc-refine-every", default="auto", metavar="auto|N")
     p_train_gsplat.add_argument("--dry-run", action="store_true")
     p_scene_transform = sub.add_parser("scene-transform", help="Write the scene transform sidecar next to a trained PLY")
     p_scene_transform.add_argument("--ply", type=Path, required=True)
@@ -354,6 +356,7 @@ def main() -> None:
     p_gsplat_ladder.add_argument("--photometric", choices=["none", "bilateral-grid", "ppisp"])
     p_gsplat_ladder.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
     p_gsplat_ladder.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
+    p_gsplat_ladder.add_argument("--mcmc-refine-every", default="auto", metavar="auto|N")
     p_gsplat_ladder.add_argument("--dry-run", action="store_true")
     p_gsplat_ladder.add_argument("--sanitize-non-finite-ply", action="store_true")
     p_gsplat_ladder.add_argument("--max-psnr-drop", type=float, default=0.5)
@@ -467,6 +470,7 @@ def main() -> None:
             max_pruned_fraction=args.max_pruned_fraction,
             stop_reset_at=args.stop_reset_at,
             normalization=args.normalization,
+            mcmc_refine_every=args.mcmc_refine_every,
         )
     elif args.command == "compare-app-output":
         payload = compare_app_outputs(
@@ -545,6 +549,7 @@ def main() -> None:
             photometric=photometric,
             masks=args.masks,
             normalization=args.normalization,
+            mcmc_refine_every=args.mcmc_refine_every,
         )
     elif args.command == "scene-transform":
         payload = write_scene_transform_sidecar(args.ply, args.sparse_dir, args.trainer, normalized=not args.no_normalize)
@@ -702,6 +707,7 @@ def main() -> None:
             photometric=args.photometric,
             masks=args.masks,
             normalization=args.normalization,
+            mcmc_refine_every=args.mcmc_refine_every,
         )
     elif args.command == "train-vksplat-ladder":
         payload = run_vksplat_ladder(

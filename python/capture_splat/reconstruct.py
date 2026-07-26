@@ -24,7 +24,7 @@ IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 STAGE_CONFIG_KEYS = {
     "prepare": ("capture_manifest", "capture_manifest_checksum", "recipe"),
     "sfm": ("allow_cpu_matching", "retrieval_top_k"),
-    "train": ("backend", "backend_root", "steps", "stop_reset_at", "normalization"),
+    "train": ("backend", "backend_root", "steps", "stop_reset_at", "normalization", "mcmc_refine_every"),
     "prune": ("prune_alpha", "max_pruned_fraction"),
     "qa": (
         "qa_render_dir",
@@ -251,6 +251,7 @@ def _dry_run(
     stop_after: str,
     qa_render_dir: Path | None,
     normalization: str,
+    mcmc_refine_every: str | int,
 ) -> dict[str, Any]:
     capture = load_capture(capture_dir)
     recipe_name, recipe_source = resolve_recipe(capture, recipe)
@@ -267,6 +268,7 @@ def _dry_run(
             backend_root=str(backend_root.resolve()) if backend_root else None,
             steps=steps,
             normalization=normalization,
+            mcmc_refine_every=str(mcmc_refine_every),
         ),
         _stage("prune", "blocked" if training_blocked else "planned", authority="viewer_hygiene_only"),
         _stage(
@@ -285,6 +287,7 @@ def _dry_run(
         "recipe": {"name": recipe_name, "source": recipe_source, **config},
         "steps": steps,
         "normalization": normalization,
+        "mcmc_refine_every": str(mcmc_refine_every),
         "resume": False,
         "dry_run": True,
         "stop_after": stop_after,
@@ -315,6 +318,7 @@ def reconstruct_capture(
     max_pruned_fraction: float = 0.6,
     stop_reset_at: int | None = None,
     normalization: str = "auto",
+    mcmc_refine_every: str | int = "auto",
 ) -> dict[str, Any]:
     capture_dir = capture_dir.resolve()
     out_dir = out_dir.resolve()
@@ -359,13 +363,14 @@ def reconstruct_capture(
         "max_pruned_fraction": max_pruned_fraction,
         "stop_reset_at": stop_reset_at,
         "normalization": normalization,
+        "mcmc_refine_every": str(mcmc_refine_every),
     }
     if out_dir.exists() and any(out_dir.iterdir()) and not resume:
         raise FileExistsError(f"reconstruction output is not empty: {out_dir}")
     out_dir.mkdir(parents=True, exist_ok=True)
     if dry_run:
         return _dry_run(
-            capture_dir, out_dir, backend, backend_root, recipe, step_values, stop_after, qa_render_dir, normalization
+            capture_dir, out_dir, backend, backend_root, recipe, step_values, stop_after, qa_render_dir, normalization, mcmc_refine_every
         )
     prior: dict[str, Any] = {}
     completed_stages: dict[str, dict[str, Any]] = {}
@@ -534,6 +539,7 @@ def reconstruct_capture(
                 backend_root,
                 steps=step_values,
                 normalization=normalization,
+                mcmc_refine_every=mcmc_refine_every,
             )
     except Exception as error:
         failed = load_json_strict(ladder_path) if ladder_path.exists() else {}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shutil
 import subprocess
 import sys
@@ -25,7 +26,13 @@ def find_gsplat_trainer(gsplat_root: Path) -> Path:
 
 
 BASE_SCHEDULE_STEPS = 30000
-RECIPE_FLAGS = ("--random_bkgd", "--steps_scaler", "--strategy.cap-max")
+RECIPE_FLAGS = (
+    "--random_bkgd",
+    "--steps_scaler",
+    "--strategy.cap-max",
+    "--strategy.refine-every",
+)
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 
 
 def _probe_import(trainer: Path, statement: str) -> dict[str, Any]:
@@ -106,6 +113,55 @@ def default_photometric_mode(package_dir: Path) -> str:
     return "bilateral-grid" if capture.get("source") == "capture_splat.prepare_capture" else "none"
 
 
+def resolve_mcmc_refine_every(
+    package_dir: Path,
+    image_dir: str,
+    steps: int,
+    strategy: str,
+    requested: str | int,
+    supported_flags: set[str],
+) -> dict[str, Any]:
+    requested_text = str(requested).strip().lower()
+    if strategy != "mcmc":
+        if requested_text != "auto":
+            raise ValueError("--mcmc-refine-every only applies to the mcmc strategy")
+        return {"requested": "auto", "applied": False, "reason": "strategy_not_mcmc"}
+    if "--strategy.refine-every" not in supported_flags:
+        raise RuntimeError("gsplat trainer does not expose --strategy.refine-every")
+
+    frame_count = sum(
+        1
+        for path in (package_dir / image_dir).iterdir()
+        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
+    )
+    if requested_text == "auto":
+        target = max(200, round(frame_count / 100) * 100)
+        source = "auto_frame_count"
+    else:
+        try:
+            target = int(requested_text)
+        except ValueError as error:
+            raise ValueError("--mcmc-refine-every must be auto or a positive integer") from error
+        if target <= 0:
+            raise ValueError("--mcmc-refine-every must be auto or a positive integer")
+        source = "explicit"
+
+    scale = float(f"{int(steps) / BASE_SCHEDULE_STEPS:.6g}") if int(steps) != BASE_SCHEDULE_STEPS else 1.0
+    command_value = max(1, math.ceil(target / scale))
+    while int(command_value * scale) < target:
+        command_value += 1
+    return {
+        "requested": requested_text,
+        "applied": True,
+        "source": source,
+        "frame_count": frame_count,
+        "target_effective_steps": target,
+        "trainer_command_value": command_value,
+        "schedule_scale": scale,
+        "expected_effective_steps": int(command_value * scale),
+    }
+
+
 def build_command(
     gsplat_root: Path,
     trainer: Path,
@@ -121,6 +177,7 @@ def build_command(
     max_gaussians: int = 1_000_000,
     mask_dir: Path | None = None,
     normalize_world_space: bool = True,
+    mcmc_refine_every_command: int | None = None,
 ) -> list[str]:
     flags = supported_flags if supported_flags is not None else set(RECIPE_FLAGS)
     capabilities = capabilities or {
@@ -170,6 +227,8 @@ def build_command(
         command.append("--random_bkgd")
     if strategy == "mcmc" and "--strategy.cap-max" in flags:
         command += ["--strategy.cap-max", str(int(max_gaussians))]
+    if strategy == "mcmc" and mcmc_refine_every_command is not None:
+        command += ["--strategy.refine-every", str(int(mcmc_refine_every_command))]
     if mask_dir is not None:
         option = capabilities.get("mask_dir_option")
         if not option:
@@ -191,7 +250,7 @@ def find_gsplat_ply(output_root: Path, steps: int) -> Path | None:
     return candidates[0] if candidates else None
 
 
-def run_gsplat(package_dir: Path, output_root: Path, gsplat_root: Path, steps: int = 30000, strategy: str = "mcmc", image_dir: str = "images", sparse_dir: str = "sparse/0", data_factor: int = 1, dry_run: bool = False, use_bilateral_grid: bool | None = None, random_bkgd: bool = True, max_gaussians: int = 1_000_000, photometric: str | None = None, masks: str = "auto", normalization: str = "auto") -> dict[str, Any]:
+def run_gsplat(package_dir: Path, output_root: Path, gsplat_root: Path, steps: int = 30000, strategy: str = "mcmc", image_dir: str = "images", sparse_dir: str = "sparse/0", data_factor: int = 1, dry_run: bool = False, use_bilateral_grid: bool | None = None, random_bkgd: bool = True, max_gaussians: int = 1_000_000, photometric: str | None = None, masks: str = "auto", normalization: str = "auto", mcmc_refine_every: str | int = "auto") -> dict[str, Any]:
     package_dir = package_dir.resolve()
     output_root = output_root.resolve()
     gsplat_root = gsplat_root.resolve()
@@ -211,6 +270,14 @@ def run_gsplat(package_dir: Path, output_root: Path, gsplat_root: Path, steps: i
         raise RuntimeError("gsplat PPISP requires the mcmc strategy")
     capabilities = probe_trainer_capabilities(trainer, strategy)
     supported_flags = set(capabilities["supported_recipe_flags"])
+    refine_every_state = resolve_mcmc_refine_every(
+        package_dir,
+        image_dir,
+        steps,
+        strategy,
+        mcmc_refine_every,
+        supported_flags,
+    )
     normalization_state = resolve_normalization_policy(
         package_dir,
         sparse_dir,
@@ -245,6 +312,7 @@ def run_gsplat(package_dir: Path, output_root: Path, gsplat_root: Path, steps: i
         max_gaussians=max_gaussians,
         mask_dir=resolved_mask_dir,
         normalize_world_space=normalization_state["enabled"],
+        mcmc_refine_every_command=refine_every_state.get("trainer_command_value"),
     )
     summary: dict[str, Any] = {
         "schema": "capture_splat.gsplat_run_summary.v0.1",
@@ -258,6 +326,7 @@ def run_gsplat(package_dir: Path, output_root: Path, gsplat_root: Path, steps: i
         "photometric": photometric,
         "trainer_capabilities": capabilities,
         "normalization": normalization_state,
+        "mcmc_refine_every": refine_every_state,
         "masks": {
             "requested": masks,
             "available": len(mask_files),
@@ -349,6 +418,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--no-bilateral-grid", action="store_true")
     parser.add_argument("--no-random-bkgd", action="store_true")
     parser.add_argument("--max-gaussians", type=int, default=1_000_000)
+    parser.add_argument("--mcmc-refine-every", default="auto", metavar="auto|N")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
@@ -356,7 +426,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     photometric = "none" if args.no_bilateral_grid else args.photometric
-    summary = run_gsplat(args.package, args.out, args.gsplat_root, args.steps, args.strategy, args.image_dir, args.sparse_dir, args.data_factor, args.dry_run, random_bkgd=not args.no_random_bkgd, max_gaussians=args.max_gaussians, photometric=photometric, masks=args.masks, normalization=args.normalization)
+    summary = run_gsplat(args.package, args.out, args.gsplat_root, args.steps, args.strategy, args.image_dir, args.sparse_dir, args.data_factor, args.dry_run, random_bkgd=not args.no_random_bkgd, max_gaussians=args.max_gaussians, photometric=photometric, masks=args.masks, normalization=args.normalization, mcmc_refine_every=args.mcmc_refine_every)
     print(json.dumps(summary, indent=2))
 
 
