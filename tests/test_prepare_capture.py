@@ -43,6 +43,8 @@ def _capture(root: Path, count: int = 2) -> Path:
         "schema": "capture_splat.v0.3",
         "capture_profile": "video_3dgs_max",
         "capture_intent": "scene_cluster",
+        "depth_scale": 1.0,
+        "session_config": {"scale_authority": "arkit_vio_metric"},
         "frames": frames,
     })
     return root
@@ -61,6 +63,8 @@ def test_prepare_capture_keeps_accepted_rgbd_and_holds_without_video(tmp_path: P
     assert summary["sfm_request"]["matcher"] == "exhaustive"
     assert len(manifest["frames"]) == 2
     assert all(frame["source_kind"] == "accepted_rgbd" for frame in manifest["frames"])
+    assert manifest["depth_scale"] == 1.0
+    assert manifest["session_config"]["scale_authority"] == "arkit_vio_metric"
     assert (tmp_path / "prepared/frames/depth/000001.npy").exists()
 
 
@@ -72,6 +76,18 @@ def test_prepare_capture_refuses_non_empty_output(tmp_path: Path) -> None:
 
     with pytest.raises(FileExistsError, match="not empty"):
         prepare_capture(capture, output, target_frames=1)
+
+
+def test_prepare_capture_omits_unknown_legacy_depth_scale(tmp_path: Path) -> None:
+    capture = _capture(tmp_path / "capture")
+    manifest = load_json_strict(capture / "capture.json")
+    manifest.pop("depth_scale")
+    write_json_strict(capture / "capture.json", manifest)
+
+    prepare_capture(capture, tmp_path / "prepared", target_frames=2)
+    prepared = load_json_strict(tmp_path / "prepared/frames/capture.json")
+
+    assert "depth_scale" not in prepared
 
 
 def test_prepare_capture_applies_strict_non_destructive_frame_exclusions(tmp_path: Path) -> None:
