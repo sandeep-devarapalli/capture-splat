@@ -6,6 +6,7 @@ from PIL import Image
 from capture_splat.json_utils import load_json_strict, write_json_strict
 from capture_splat.world_studio_export import (
     MANIFEST_NAME,
+    _measurement_eligibility,
     _mesh_walk_evidence,
     _sha256,
     export_world_studio_handoff,
@@ -416,6 +417,21 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
             "metric_seed_ply": _sha256(metric_seed),
         },
     })
+    known_scale_report = tmp_path / "apriltag_scale_report.json"
+    write_json_strict(known_scale_report, {
+        "schema": "capture_splat.apriltag_scale_validation.v0.1",
+        "decision": "promote",
+        "authority": {"known_scale_validation": True},
+        "validated_artifact": {
+            "checksum": _sha256(metric_seed),
+            "coordinate_frame": "metric_colmap_world",
+            "units": "meters",
+        },
+        "sparse_checksums": {
+            "cameras_txt": _sha256(sparse / "cameras.txt"),
+            "images_txt": _sha256(sparse / "images.txt"),
+        },
+    })
 
     export_world_studio_handoff(
         package,
@@ -424,6 +440,7 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
         capture_manifest=capture / "capture.json",
         measurement_points=metric_seed,
         measurement_points_frame="metric_colmap_world",
+        known_scale_report=known_scale_report,
         collision_candidate=collision_candidate,
         collision_report=collision_report,
         copy_files=True,
@@ -455,9 +472,20 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
     ]
     assert manifest["metric_registration"]["meters_per_target_unit"] == 1.0
     assert manifest["walk_eligibility"]["status"] == "eligible"
-    assert manifest["measurement_eligibility"]["status"] == "held"
+    assert manifest["measurement_eligibility"]["status"] == "eligible"
     assert manifest["measurement_eligibility"]["software_prerequisites"] is True
-    assert manifest["measurement_eligibility"]["reason"] == "physical_known_distance_validation_pending"
+    assert manifest["measurement_eligibility"]["reason"] == "known_scale_validation_accepted"
+    assert manifest["measurement_eligibility"]["authority"]["measurement_authority"] is False
+    held_without_physical_evidence = _measurement_eligibility(
+        metric_seed,
+        "metric_colmap_world",
+        "meters",
+        package,
+        "sparse/0",
+        None,
+    )
+    assert held_without_physical_evidence["status"] == "held"
+    assert held_without_physical_evidence["reason"] == "physical_known_distance_validation_pending"
     assert manifest["collision_eligibility"]["status"] == "held"
     assert manifest["collision_eligibility"]["software_prerequisites"] is True
     assert manifest["world_up"] == [0.0, 1.0, 0.0]

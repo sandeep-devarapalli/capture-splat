@@ -432,6 +432,19 @@ The handoff records meter units and software prerequisites, but keeps
 `measurement_eligibility.status = held` until a physical known-distance check
 passes. COLMAP-unit or trainer-normalized points are not labeled metric.
 
+`capture-splat validate-apriltag-scale` provides that optional physical check
+for a measured `tagStandard41h12` target. It detects tags through the optional
+`pupil-apriltags` dependency or replays a strict detections JSON, triangulates
+each corner from at least three registered PINHOLE views, and gates
+reprojection error, square-edge consistency, and deviation from meter scale.
+The report binds the sparse cameras, source images, detections, and optional
+measurement artifact by checksum. It never changes the source package.
+
+When a promoted report is attached with `--known-scale-report` and is bound to
+the exact `metric_colmap_world` point artifact, the handoff marks measurement
+inspection `eligible`. Measurement authority remains false: World Studio must
+still report uncertainty and retain the physical reference provenance.
+
 When a rung is finite but render/source QA still holds, diagnose weak and tail
 frames before spending a longer run:
 

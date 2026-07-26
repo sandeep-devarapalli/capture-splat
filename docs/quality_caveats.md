@@ -94,3 +94,8 @@ A simplified classified ARKit mesh is only a collision candidate. Preserved
 spatial cells, floor/wall labels, finite triangles, and correct meter units are
 software prerequisites; they do not prove watertight floors, retained walls,
 splat registration, safe movement, or navigation authority.
+
+AprilTag scale validation checks one measured target against registered camera
+geometry. A passing tag report validates that checksum-bound artifact and scale
+threshold only. It does not prove every surface is accurate, remove camera-pose
+error, or make the result survey-grade.
