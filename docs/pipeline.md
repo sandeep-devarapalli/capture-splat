@@ -41,6 +41,22 @@ video-relative timestamp and the AR-session timestamp, so cross-source
 duplicates can be removed without guessing clock offsets. Older indexes remain
 readable but report that cross-source deduplication is unavailable.
 
+For Object Orbit packages, the prepared white-valid masks can produce a
+separate premultiplied RGBA image set before SfM or training:
+
+```bash
+capture-splat remove-background \
+  --images runs/scan/prepared/frames/images \
+  --mask-dir runs/scan/prepared/frames/masks/valid \
+  --out runs/scan/background_removed
+```
+
+The default `auto` mode uses complete Capture Splat masks first. Optional
+InSPyReNet matting is available through `pip install -e '.[matting]'` and
+`--mode inspyrenet`; it is never a mandatory dependency or a fallback that
+runs silently. Derived alpha and RGB values are proposals, while the original
+capture images remain the source evidence.
+
 To omit accepted frames that a post-capture diagnostic has held or rejected,
 pass `--frame-exclusions` with a strict
 `capture_splat.frame_exclusions.v0.1` JSON manifest. The source capture remains

@@ -159,6 +159,23 @@ Resume revalidates the completed stage configuration plus source/render and
 handoff checksums. Rejected or partially written stages require a new output
 directory rather than an in-place retry over stale artifacts.
 
+For an Object Orbit package prepared with canonical white-valid masks, derive
+premultiplied RGBA training images without changing the source photographs:
+
+```bash
+capture-splat remove-background \
+  --images runs/object/prepared/frames/images \
+  --mask-dir runs/object/prepared/frames/masks/valid \
+  --out runs/object/background_removed
+```
+
+`--mode auto` prefers the captured depth/person-mask proposal when every image
+has a matching mask. `--mode inspyrenet` uses the optional
+`capture-splat[matting]` dependency with `fast`, `base`, or `base-nightly`
+model mode. Missing optional model support blocks rather than silently
+returning unmasked images. Outputs remain derived review/training proposals;
+the original images are preserved.
+
 If you have raw rendered canvases from a viewer or app, compare them against the
 source images instead of full UI screenshots:
 

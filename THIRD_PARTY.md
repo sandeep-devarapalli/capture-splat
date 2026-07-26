@@ -10,6 +10,7 @@ Capture Splat does not vendor training backends in this repository. Setup script
 | AndrewBoessen/3DGS | Experimental CUDA 13 C++ trainer candidate | See upstream | https://github.com/AndrewBoessen/3DGS |
 | COLMAP | SfM and camera-pose refinement | BSD | https://github.com/colmap/colmap |
 | Nerfstudio | Optional dataset/tooling compatibility reference | Apache-2.0 | https://github.com/nerfstudio-project/nerfstudio |
+| transparent-background / InSPyReNet | Optional object-matting backend | MIT | https://github.com/plemeri/transparent-background |
 | NumPy | Numeric processing | BSD-style | https://numpy.org |
 | Pillow | Image metadata and fixture support | HPND | https://python-pillow.org |
 
