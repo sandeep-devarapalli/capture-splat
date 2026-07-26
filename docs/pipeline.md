@@ -202,6 +202,16 @@ metric continuity is unavailable. The command keeps an unmodified sparse-model
 backup. A failed fit is held and training can continue from the original
 COLMAP package; ARKit depth is a metric prior, not a substitute for
 COLMAP-refined image support.
+
+Package scale and trainer scale are reported independently. All trainer
+commands accept `--normalization auto|on|off`. Auto mode preserves meter-native
+coordinates only when the metric report is accepted, its output checksums
+match the current sparse model, and the selected trainer exposes a real
+normalization-disable option. Current gsplat trainers can provide that option.
+Current VkSplat normalizes internally and therefore records a limitation in
+auto mode; an explicit `off` request blocks. A metric input package alone does
+not establish that a trained PLY is in meters.
+
 `--background-sphere` seeds distant background points for room and outdoor
 scenes. Both trainers write `capture_splat_scene_transform.json` next to the
 PLY so viewers can map package cameras into the trained splat world. New SfM

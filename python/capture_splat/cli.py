@@ -128,6 +128,7 @@ def main() -> None:
     p_reconstruct.add_argument("--prune-alpha", type=float, default=12.0)
     p_reconstruct.add_argument("--max-pruned-fraction", type=float, default=0.6)
     p_reconstruct.add_argument("--stop-reset-at", type=int)
+    p_reconstruct.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
     p_compare = sub.add_parser("compare-app-output", help="Compare observable outputs from iPhone 3DGS apps")
     p_compare.add_argument("--capture-splat", type=Path)
     p_compare.add_argument("--splatking", type=Path)
@@ -179,6 +180,7 @@ def main() -> None:
     p_train.add_argument("--save-train-renders", action="store_true")
     p_train.add_argument("--stop-reset-at", type=int, help="Stop VkSplat opacity resets after this step.")
     p_train.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
+    p_train.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
     p_train.add_argument("--dry-run", action="store_true")
     p_probe = sub.add_parser("vksplat-render-probe", help="Train VkSplat with train renders enabled and QA exact source-frame cameras")
     p_probe.add_argument("--package", type=Path, required=True)
@@ -190,6 +192,7 @@ def main() -> None:
     p_probe.add_argument("--sparse-dir", default="sparse/0")
     p_probe.add_argument("--strategy", choices=["default", "mcmc"], default="mcmc")
     p_probe.add_argument("--dry-run", action="store_true")
+    p_probe.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
     p_train_gsplat = sub.add_parser("train-gsplat", help="Run gsplat CUDA training on a COLMAP package")
     p_train_gsplat.add_argument("--package", type=Path, required=True)
     p_train_gsplat.add_argument("--out", type=Path, required=True)
@@ -201,6 +204,7 @@ def main() -> None:
     p_train_gsplat.add_argument("--data-factor", type=int, default=1)
     p_train_gsplat.add_argument("--photometric", choices=["none", "bilateral-grid", "ppisp"])
     p_train_gsplat.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
+    p_train_gsplat.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
     p_train_gsplat.add_argument("--no-bilateral-grid", action="store_true")
     p_train_gsplat.add_argument("--no-random-bkgd", action="store_true")
     p_train_gsplat.add_argument("--max-gaussians", type=int, default=1_000_000)
@@ -332,6 +336,7 @@ def main() -> None:
     p_gsplat_ladder.add_argument("--data-factor", type=int, default=1)
     p_gsplat_ladder.add_argument("--photometric", choices=["none", "bilateral-grid", "ppisp"])
     p_gsplat_ladder.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
+    p_gsplat_ladder.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
     p_gsplat_ladder.add_argument("--dry-run", action="store_true")
     p_gsplat_ladder.add_argument("--sanitize-non-finite-ply", action="store_true")
     p_gsplat_ladder.add_argument("--max-psnr-drop", type=float, default=0.5)
@@ -351,6 +356,7 @@ def main() -> None:
     p_ladder.add_argument("--sanitize-non-finite-ply", action="store_true")
     p_ladder.add_argument("--stop-reset-at", type=int, help="Stop VkSplat opacity resets after this step for every rung.")
     p_ladder.add_argument("--masks", choices=["auto", "off", "required"], default="auto")
+    p_ladder.add_argument("--normalization", choices=["auto", "on", "off"], default="auto")
     p_ladder.add_argument("--max-psnr-drop", type=float, default=0.5)
     p_ladder.add_argument("--max-ssim-drop", type=float, default=0.02)
     p_ladder.add_argument("--max-mae-increase", type=float, default=0.01)
@@ -435,6 +441,7 @@ def main() -> None:
             prune_alpha=args.prune_alpha,
             max_pruned_fraction=args.max_pruned_fraction,
             stop_reset_at=args.stop_reset_at,
+            normalization=args.normalization,
         )
     elif args.command == "compare-app-output":
         payload = compare_app_outputs(
@@ -482,7 +489,7 @@ def main() -> None:
             capture_profile=args.capture_profile,
         )
     elif args.command == "train-vksplat":
-        payload = run_vksplat(args.package, args.out, args.vksplat_root, steps=args.steps, dry_run=args.dry_run, save_train_renders=args.save_train_renders, stop_reset_at=args.stop_reset_at, masks=args.masks)
+        payload = run_vksplat(args.package, args.out, args.vksplat_root, steps=args.steps, dry_run=args.dry_run, save_train_renders=args.save_train_renders, stop_reset_at=args.stop_reset_at, masks=args.masks, normalization=args.normalization)
     elif args.command == "vksplat-render-probe":
         payload = run_vksplat_render_probe(
             args.package,
@@ -494,6 +501,7 @@ def main() -> None:
             sparse_dir=args.sparse_dir,
             strategy=args.strategy,
             dry_run=args.dry_run,
+            normalization=args.normalization,
         )
     elif args.command == "train-gsplat":
         photometric = "none" if args.no_bilateral_grid else args.photometric
@@ -511,6 +519,7 @@ def main() -> None:
             max_gaussians=args.max_gaussians,
             photometric=photometric,
             masks=args.masks,
+            normalization=args.normalization,
         )
     elif args.command == "scene-transform":
         payload = write_scene_transform_sidecar(args.ply, args.sparse_dir, args.trainer, normalized=not args.no_normalize)
@@ -656,6 +665,7 @@ def main() -> None:
             max_correlation_drop=args.max_correlation_drop,
             photometric=args.photometric,
             masks=args.masks,
+            normalization=args.normalization,
         )
     elif args.command == "train-vksplat-ladder":
         payload = run_vksplat_ladder(
@@ -671,6 +681,7 @@ def main() -> None:
             sanitize_non_finite_ply=args.sanitize_non_finite_ply,
             stop_reset_at=args.stop_reset_at,
             masks=args.masks,
+            normalization=args.normalization,
             max_psnr_drop=args.max_psnr_drop,
             max_ssim_drop=args.max_ssim_drop,
             max_mae_increase=args.max_mae_increase,

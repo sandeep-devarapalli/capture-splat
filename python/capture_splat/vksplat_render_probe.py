@@ -52,6 +52,7 @@ def run_vksplat_render_probe(
     sparse_dir: str = "sparse/0",
     strategy: str = "mcmc",
     dry_run: bool = False,
+    normalization: str = "auto",
 ) -> dict[str, Any]:
     package_dir = package_dir.resolve()
     output_root = output_root.resolve()
@@ -69,6 +70,7 @@ def run_vksplat_render_probe(
         strategy=strategy,
         dry_run=dry_run,
         save_train_renders=True,
+        normalization=normalization,
     )
 
     summary: dict[str, Any] = {
@@ -78,6 +80,7 @@ def run_vksplat_render_probe(
         "vksplat_root": str(vksplat_root.resolve()),
         "steps": steps,
         "strategy": strategy,
+        "normalization": normalization,
         "requested_frames": requested_frames,
         "run_summary": run_summary,
         "authority": {

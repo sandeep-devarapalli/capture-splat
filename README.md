@@ -142,6 +142,14 @@ assets. Without explicit scale authority, the compatible seed remains in
 COLMAP units and is reported as non-metric. The source package is unchanged
 and COLMAP-refined cameras remain the visual reconstruction baseline.
 
+Trainer normalization is a separate scale boundary. `--normalization auto`
+disables gsplat world normalization only when the package has an accepted
+`metric_scale_report.json`, its sparse-model checksums still match, and the
+installed trainer exposes a real disable option. VkSplat currently normalizes
+internally, so auto mode records
+`metric_package_normalized_backend_cannot_disable`; `--normalization off`
+blocks rather than pretending the output remained meter-native.
+
 The same stages can be run through one resumable evidence command:
 
 ```bash

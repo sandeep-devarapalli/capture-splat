@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -8,12 +9,103 @@ from typing import Any
 
 import numpy as np
 
-from .json_utils import write_json_strict
+from .json_utils import load_json_strict, write_json_strict
 
 SIDECAR_SCHEMA = "capture_splat.scene_transform.v0.2"
 SIDECAR_NAME = "capture_splat_scene_transform.json"
 PACKAGE_ORIENTATION_SCHEMA = "capture_splat.package_orientation_transform.v0.1"
 PACKAGE_ORIENTATION_NAME = "package_orientation_transform.json"
+METRIC_SCALE_SCHEMA = "capture_splat.metric_scale_report.v0.1"
+METRIC_SCALE_NAME = "metric_scale_report.json"
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def metric_package_status(package_dir: Path, sparse_dir_name: str = "sparse/0") -> dict[str, Any]:
+    report_path = package_dir / "metadata" / METRIC_SCALE_NAME
+    base = {
+        "accepted": False,
+        "report": str(report_path),
+        "reason": "metric_scale_report_missing",
+    }
+    if not report_path.exists():
+        return base
+    try:
+        report = load_json_strict(report_path)
+    except (OSError, ValueError) as error:
+        return {**base, "reason": f"metric_scale_report_invalid: {error}"}
+    authority = report.get("authority")
+    if (
+        report.get("schema") != METRIC_SCALE_SCHEMA
+        or report.get("status") != "accepted"
+        or report.get("target_units") != "meters"
+        or not isinstance(authority, dict)
+        or authority.get("metric_scale_evidence") is not True
+    ):
+        return {**base, "reason": "metric_scale_report_not_accepted"}
+    output_checksums = report.get("output_checksums")
+    if not isinstance(output_checksums, dict):
+        return {**base, "reason": "metric_scale_output_checksums_missing"}
+    sparse_dir = package_dir / sparse_dir_name
+    required = {
+        "images_txt": sparse_dir / "images.txt",
+        "cameras_txt": sparse_dir / "cameras.txt",
+        "points3D_txt": sparse_dir / "points3D.txt",
+    }
+    orientation = package_dir / "metadata" / PACKAGE_ORIENTATION_NAME
+    if "package_orientation_transform" in output_checksums:
+        required["package_orientation_transform"] = orientation
+    for key, path in required.items():
+        expected = output_checksums.get(key)
+        if not path.exists():
+            return {**base, "reason": f"metric_scale_bound_file_missing:{key}"}
+        if not isinstance(expected, str) or _sha256(path) != expected:
+            return {**base, "reason": f"metric_scale_checksum_mismatch:{key}"}
+    return {
+        "accepted": True,
+        "report": str(report_path),
+        "reason": "accepted_checksum_bound_metric_package",
+        "meters_per_colmap_unit": report.get("meters_per_colmap_unit"),
+        "target_coordinate_frame": report.get("target_coordinate_frame"),
+    }
+
+
+def resolve_normalization_policy(
+    package_dir: Path,
+    sparse_dir_name: str,
+    requested: str,
+    backend_supports_disable: bool,
+) -> dict[str, Any]:
+    if requested not in {"auto", "on", "off"}:
+        raise ValueError(f"unsupported normalization policy: {requested}")
+    metric = metric_package_status(package_dir, sparse_dir_name)
+    if requested == "off":
+        if not metric["accepted"]:
+            raise RuntimeError(f"normalization off requires an accepted metric package: {metric['reason']}")
+        if not backend_supports_disable:
+            raise RuntimeError("trainer does not expose a real normalization-disable capability")
+        enabled = False
+    elif requested == "auto":
+        enabled = not (metric["accepted"] and backend_supports_disable)
+    else:
+        enabled = True
+    warning = None
+    if requested == "auto" and metric["accepted"] and not backend_supports_disable:
+        warning = "metric_package_normalized_backend_cannot_disable"
+    return {
+        "requested": requested,
+        "enabled": enabled,
+        "resolved": "on" if enabled else "off",
+        "backend_supports_disable": backend_supports_disable,
+        "metric_package": metric,
+        "warning": warning,
+    }
 
 
 def quaternion_wxyz_to_matrix(qw: float, qx: float, qy: float, qz: float) -> np.ndarray:

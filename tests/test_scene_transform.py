@@ -13,6 +13,8 @@ from capture_splat.scene_transform import (
     estimate_package_orientation_transform,
     load_camera_to_worlds,
     load_ply_positions,
+    metric_package_status,
+    resolve_normalization_policy,
     similarity_from_cameras,
     transform_points,
     write_scene_transform_sidecar,
@@ -258,3 +260,33 @@ def test_sidecar_absent_when_no_source(tmp_path: Path) -> None:
 
     assert write_scene_transform_sidecar(ply, None, "vksplat", normalized=True) is None
     assert not (tmp_path / SIDECAR_NAME).exists()
+
+
+def test_metric_package_status_requires_current_sparse_checksums(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    sparse = package / "sparse/0"
+    sparse.mkdir(parents=True)
+    for name in ("cameras.txt", "images.txt", "points3D.txt"):
+        (sparse / name).write_text(f"# {name}\n", encoding="utf-8")
+    metadata = package / "metadata"
+    metadata.mkdir()
+    from capture_splat.scene_transform import _sha256
+    (metadata / "metric_scale_report.json").write_text(json.dumps({
+        "schema": "capture_splat.metric_scale_report.v0.1",
+        "status": "accepted",
+        "target_units": "meters",
+        "authority": {"metric_scale_evidence": True},
+        "output_checksums": {
+            "cameras_txt": _sha256(sparse / "cameras.txt"),
+            "images_txt": _sha256(sparse / "images.txt"),
+            "points3D_txt": _sha256(sparse / "points3D.txt"),
+        },
+    }), encoding="utf-8")
+
+    assert metric_package_status(package)["accepted"] is True
+    assert resolve_normalization_policy(package, "sparse/0", "auto", True)["resolved"] == "off"
+
+    (sparse / "points3D.txt").write_text("# stale\n", encoding="utf-8")
+    stale = metric_package_status(package)
+    assert stale["accepted"] is False
+    assert stale["reason"].endswith("points3D_txt")

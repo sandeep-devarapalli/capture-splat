@@ -24,7 +24,7 @@ IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 STAGE_CONFIG_KEYS = {
     "prepare": ("capture_manifest", "capture_manifest_checksum", "recipe"),
     "sfm": ("allow_cpu_matching", "retrieval_top_k"),
-    "train": ("backend", "backend_root", "steps", "stop_reset_at"),
+    "train": ("backend", "backend_root", "steps", "stop_reset_at", "normalization"),
     "prune": ("prune_alpha", "max_pruned_fraction"),
     "qa": (
         "qa_render_dir",
@@ -250,6 +250,7 @@ def _dry_run(
     steps: list[int],
     stop_after: str,
     qa_render_dir: Path | None,
+    normalization: str,
 ) -> dict[str, Any]:
     capture = load_capture(capture_dir)
     recipe_name, recipe_source = resolve_recipe(capture, recipe)
@@ -265,6 +266,7 @@ def _dry_run(
             backend=backend,
             backend_root=str(backend_root.resolve()) if backend_root else None,
             steps=steps,
+            normalization=normalization,
         ),
         _stage("prune", "blocked" if training_blocked else "planned", authority="viewer_hygiene_only"),
         _stage(
@@ -282,6 +284,7 @@ def _dry_run(
         "backend": backend,
         "recipe": {"name": recipe_name, "source": recipe_source, **config},
         "steps": steps,
+        "normalization": normalization,
         "resume": False,
         "dry_run": True,
         "stop_after": stop_after,
@@ -311,6 +314,7 @@ def reconstruct_capture(
     prune_alpha: float = 12.0,
     max_pruned_fraction: float = 0.6,
     stop_reset_at: int | None = None,
+    normalization: str = "auto",
 ) -> dict[str, Any]:
     capture_dir = capture_dir.resolve()
     out_dir = out_dir.resolve()
@@ -327,6 +331,8 @@ def reconstruct_capture(
         raise ValueError(f"unknown reconstruction recipe: {recipe}")
     if stop_after not in STAGES:
         raise ValueError(f"stop-after must be one of {', '.join(STAGES)}")
+    if normalization not in {"auto", "on", "off"}:
+        raise ValueError("normalization must be auto, on, or off")
     if not step_values or any(step <= 0 for step in step_values):
         raise ValueError("training steps must be positive")
     if resume and dry_run:
@@ -352,13 +358,14 @@ def reconstruct_capture(
         "prune_alpha": prune_alpha,
         "max_pruned_fraction": max_pruned_fraction,
         "stop_reset_at": stop_reset_at,
+        "normalization": normalization,
     }
     if out_dir.exists() and any(out_dir.iterdir()) and not resume:
         raise FileExistsError(f"reconstruction output is not empty: {out_dir}")
     out_dir.mkdir(parents=True, exist_ok=True)
     if dry_run:
         return _dry_run(
-            capture_dir, out_dir, backend, backend_root, recipe, step_values, stop_after, qa_render_dir
+            capture_dir, out_dir, backend, backend_root, recipe, step_values, stop_after, qa_render_dir, normalization
         )
     prior: dict[str, Any] = {}
     completed_stages: dict[str, dict[str, Any]] = {}
@@ -392,6 +399,7 @@ def reconstruct_capture(
         "backend_root": str(backend_root) if backend_root else None,
         "recipe": recipe,
         "steps": step_values,
+        "normalization": normalization,
         "resume": resume,
         "dry_run": False,
         "stop_after": stop_after,
@@ -517,9 +525,16 @@ def reconstruct_capture(
                 backend_root,
                 steps=step_values,
                 stop_reset_at=stop_reset_at,
+                normalization=normalization,
             )
         elif ladder is None:
-            ladder = run_gsplat_ladder(training_package, train_dir, backend_root, steps=step_values)
+            ladder = run_gsplat_ladder(
+                training_package,
+                train_dir,
+                backend_root,
+                steps=step_values,
+                normalization=normalization,
+            )
     except Exception as error:
         failed = load_json_strict(ladder_path) if ladder_path.exists() else {}
         record(_stage("train", str(failed.get("decision", "reject")), ladder_path if ladder_path.exists() else None, error=str(error)))
