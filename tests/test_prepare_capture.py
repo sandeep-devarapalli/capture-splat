@@ -74,6 +74,49 @@ def test_prepare_capture_refuses_non_empty_output(tmp_path: Path) -> None:
         prepare_capture(capture, output, target_frames=1)
 
 
+def test_prepare_capture_applies_strict_non_destructive_frame_exclusions(tmp_path: Path) -> None:
+    capture = _capture(tmp_path / "capture", count=3)
+    exclusions = tmp_path / "frame_exclusions.json"
+    write_json_strict(exclusions, {
+        "schema": "capture_splat.frame_exclusions.v0.1",
+        "excluded_source_frame_indices": [2],
+        "reason": "severe near-white exposure diagnostic",
+    })
+
+    summary = prepare_capture(
+        capture,
+        tmp_path / "prepared",
+        target_frames=2,
+        frame_exclusions=exclusions,
+    )
+    manifest = load_json_strict(tmp_path / "prepared/frames/capture.json")
+    report = load_json_strict(tmp_path / "prepared/frames/metadata/frame_exclusions.json")
+
+    assert summary["source_accepted_rgbd_frames"] == 3
+    assert summary["accepted_rgbd_frames"] == 2
+    assert summary["excluded_accepted_rgbd_frames"] == 1
+    assert [frame["source_frame_index"] for frame in manifest["frames"]] == [1, 3]
+    assert report["excluded_source_frame_indices"] == [2]
+    assert (capture / "rgb/frame_000002.jpg").exists()
+
+
+def test_prepare_capture_rejects_out_of_range_frame_exclusion(tmp_path: Path) -> None:
+    capture = _capture(tmp_path / "capture", count=2)
+    exclusions = tmp_path / "frame_exclusions.json"
+    write_json_strict(exclusions, {
+        "schema": "capture_splat.frame_exclusions.v0.1",
+        "excluded_source_frame_indices": [3],
+    })
+
+    with pytest.raises(ValueError, match="out of range"):
+        prepare_capture(
+            capture,
+            tmp_path / "prepared",
+            target_frames=1,
+            frame_exclusions=exclusions,
+        )
+
+
 def test_prepare_capture_deduplicates_video_on_ar_clock(tmp_path: Path, monkeypatch) -> None:
     capture = _capture(tmp_path / "capture", count=1)
     (capture / "video").mkdir()

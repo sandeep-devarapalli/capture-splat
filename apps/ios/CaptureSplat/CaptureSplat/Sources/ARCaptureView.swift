@@ -60,6 +60,7 @@ struct ARCaptureView: UIViewRepresentable {
         func update(view: ARView, capture: CaptureController) {
             let showsMesh = capture.spatialGuidanceShowsMesh
             let showsFeatures = capture.isSpatialGuidanceVisible
+                && capture.spatialGuidanceFaceBudget > 0
                 && !showsMesh
                 && capture.spatialGuidanceMode != "depth_points"
             guard showsMesh != lastShowsMesh

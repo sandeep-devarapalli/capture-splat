@@ -41,6 +41,12 @@ video-relative timestamp and the AR-session timestamp, so cross-source
 duplicates can be removed without guessing clock offsets. Older indexes remain
 readable but report that cross-source deduplication is unavailable.
 
+To omit accepted frames that a post-capture diagnostic has held or rejected,
+pass `--frame-exclusions` with a strict
+`capture_splat.frame_exclusions.v0.1` JSON manifest. The source capture remains
+untouched, and the prepared package records the applied one-based source-frame
+indices and reason.
+
 For a resumable end-to-end run, use:
 
 ```bash

@@ -20,22 +20,32 @@ final class CaptureVideoRecorder {
     private var indexHandle: FileHandle?
     private var startTimestamp: TimeInterval?
     private var lastAppendedTimestamp: TimeInterval = -.infinity
-    private let minimumFrameInterval: TimeInterval
+    private var minimumFrameInterval: TimeInterval
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "capture_splat",
         category: "video-recorder"
     )
     private(set) var appendedFrameCount = 0
     private(set) var droppedFrameCount = 0
+    private(set) var targetFPS: Double
 
     static let videoRelativePath = "video/capture.mov"
     static let frameIndexRelativePath = "metadata/frame_index.jsonl"
 
-    init(targetFPS: Double = 30) {
+    init(targetFPS: Double = 15) {
+        self.targetFPS = targetFPS
         minimumFrameInterval = targetFPS > 0 ? (1.0 / targetFPS) * 0.9 : 0
     }
 
     var isActive: Bool { writer != nil }
+
+    func setTargetFPS(_ targetFPS: Double) {
+        let clamped = min(max(targetFPS, 1), 30)
+        guard abs(clamped - self.targetFPS) >= 0.1 else { return }
+        self.targetFPS = clamped
+        minimumFrameInterval = (1.0 / clamped) * 0.9
+        logger.info("Video sampling target changed to \(clamped, privacy: .public) fps")
+    }
 
     func start(in directory: URL) throws {
         guard writer == nil else {

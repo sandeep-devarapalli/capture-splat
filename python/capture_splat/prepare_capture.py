@@ -20,6 +20,7 @@ from .reconstruction_recipe import RECIPES, plan_reconstruction, resolve_recipe
 from .sfm_evidence import camera_evidence_report, load_frame_evidence, photometric_evidence_report
 
 SUMMARY_SCHEMA = "capture_splat.prepare_capture_summary.v0.1"
+FRAME_EXCLUSIONS_SCHEMA = "capture_splat.frame_exclusions.v0.1"
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 
 
@@ -63,6 +64,44 @@ def _candidates(root: Path, capture: dict[str, Any], source_kind: str) -> list[C
             timestamp_domain=str(frame.get("timestamp_domain", default_domain)),
         ))
     return result
+
+
+def _load_frame_exclusions(path: Path | None, frame_count: int) -> dict[str, Any]:
+    if path is None:
+        return {
+            "schema": FRAME_EXCLUSIONS_SCHEMA,
+            "status": "not_requested",
+            "excluded_source_frame_indices": [],
+            "reason": None,
+            "originals_preserved": True,
+        }
+    payload = load_json_strict(path.resolve())
+    if payload.get("schema") != FRAME_EXCLUSIONS_SCHEMA:
+        raise ValueError(f"frame exclusions schema must be {FRAME_EXCLUSIONS_SCHEMA}")
+    raw_indices = payload.get("excluded_source_frame_indices")
+    if not isinstance(raw_indices, list) or any(
+        not isinstance(value, int) or isinstance(value, bool) for value in raw_indices
+    ):
+        raise ValueError("excluded_source_frame_indices must be a list of integers")
+    indices = sorted(set(raw_indices))
+    invalid = [value for value in indices if value < 1 or value > frame_count]
+    if invalid:
+        raise ValueError(f"excluded source frame indices are out of range: {invalid}")
+    reason = payload.get("reason")
+    if reason is not None and not isinstance(reason, str):
+        raise ValueError("frame exclusion reason must be a string")
+    return {
+        "schema": FRAME_EXCLUSIONS_SCHEMA,
+        "status": "applied",
+        "input_file": str(path.resolve()),
+        "excluded_source_frame_indices": indices,
+        "reason": reason,
+        "originals_preserved": True,
+        "authority": {
+            "derived_selection_evidence": True,
+            "quality_claim": False,
+        },
+    }
 
 
 def _load_json_lines(path: Path) -> list[dict[str, Any]]:
@@ -344,6 +383,7 @@ def prepare_capture(
     target_frames: int | None = None,
     max_edge: int = 1920,
     dedup_tolerance_seconds: float = 0.08,
+    frame_exclusions: Path | None = None,
 ) -> dict[str, Any]:
     capture_dir = capture_dir.resolve()
     out_dir = out_dir.resolve()
@@ -355,9 +395,15 @@ def prepare_capture(
     recipe_config = deepcopy(RECIPES[recipe_name])
     subject_masks_required = recipe_name == "object"
     requested_target = max(1, min(int(target_frames or recipe_config["target_frames"]), 600))
-    accepted = _candidates(capture_dir, capture, "accepted_rgbd")
-    if not accepted:
+    all_accepted = _candidates(capture_dir, capture, "accepted_rgbd")
+    if not all_accepted:
         raise ValueError("capture has no accepted RGB-D frames")
+    exclusion_report = _load_frame_exclusions(frame_exclusions, len(capture["frames"]))
+    excluded_indices = set(exclusion_report["excluded_source_frame_indices"])
+    excluded = [candidate for candidate in all_accepted if candidate.source_index in excluded_indices]
+    accepted = [candidate for candidate in all_accepted if candidate.source_index not in excluded_indices]
+    if not accepted:
+        raise ValueError("frame exclusions removed every accepted RGB-D frame")
     target = min(requested_target, len(accepted)) if subject_masks_required else requested_target
     warnings: list[str] = []
     finalization_status, finalization_warnings = _finalization_status(capture_dir, capture)
@@ -390,7 +436,7 @@ def prepare_capture(
                 for item in extracted:
                     if len(accepted) + len(supplements) >= target:
                         break
-                    if not _duplicate(item, accepted + supplements, dedup_tolerance_seconds):
+                    if not _duplicate(item, accepted + excluded + supplements, dedup_tolerance_seconds):
                         supplements.append(item)
             else:
                 warnings.append("video_frame_pose_attachment_empty")
@@ -425,6 +471,7 @@ def prepare_capture(
             "target_frames": target,
             "accepted_rgbd_precedence": True,
             "dedup_tolerance_seconds": dedup_tolerance_seconds,
+            "frame_exclusions": exclusion_report,
             "originals_preserved": True,
         },
         "authority": {
@@ -457,6 +504,7 @@ def prepare_capture(
     write_json_strict(metadata_dir / "camera_evidence.json", camera_report)
     write_json_strict(metadata_dir / "photometric_evidence.json", photometric_report)
     write_json_strict(metadata_dir / "valid_mask_report.json", mask_report)
+    write_json_strict(metadata_dir / "frame_exclusions.json", exclusion_report)
     actual_count = len(prepared_frames)
     matcher = "retrieval" if actual_count > 250 else "exhaustive"
     sfm_request = {
@@ -483,7 +531,10 @@ def prepare_capture(
         "recipe": {"name": recipe_name, "source": recipe_source},
         "requested_target_frames": requested_target,
         "target_frames": target,
+        "source_accepted_rgbd_frames": len(all_accepted),
         "accepted_rgbd_frames": len(accepted),
+        "excluded_accepted_rgbd_frames": len(excluded),
+        "frame_exclusions": exclusion_report,
         "continuous_video_supplements": len(supplements),
         "selection": "temporal_bins_ranked_by_parallax_blur_features",
         "prepared_frames": actual_count,

@@ -79,6 +79,11 @@ def main() -> None:
     p_prepare.add_argument("--target-frames", type=int)
     p_prepare.add_argument("--max-edge", type=int, default=1920)
     p_prepare.add_argument("--dedup-tolerance", type=float, default=0.08)
+    p_prepare.add_argument(
+        "--frame-exclusions",
+        type=Path,
+        help="Strict JSON manifest of accepted source-frame indices to omit non-destructively",
+    )
     p_seed = sub.add_parser("build-rgbd-seed", help="Align ARKit RGB-D to COLMAP and augment a copied package")
     p_seed.add_argument("--capture", type=Path, required=True)
     p_seed.add_argument("--package", type=Path, required=True)
@@ -366,6 +371,7 @@ def main() -> None:
             target_frames=args.target_frames,
             max_edge=args.max_edge,
             dedup_tolerance_seconds=args.dedup_tolerance,
+            frame_exclusions=args.frame_exclusions,
         )
     elif args.command == "build-rgbd-seed":
         payload = build_rgbd_metric_seed(

@@ -28,6 +28,7 @@ struct CaptureFrameQuality: Encodable {
     let exposureMean: Double
     let exposureDelta: Double
     let clippedHighlightFraction: Double
+    let nearClippedHighlightFraction: Double
     let clippedShadowFraction: Double
     let featureGridCoverage: Double
     let parallaxMeters: Double
@@ -43,6 +44,7 @@ struct CaptureFrameQuality: Encodable {
         case exposureMean = "exposure_mean"
         case exposureDelta = "exposure_delta"
         case clippedHighlightFraction = "clipped_highlight_fraction"
+        case nearClippedHighlightFraction = "near_clipped_highlight_fraction"
         case clippedShadowFraction = "clipped_shadow_fraction"
         case featureGridCoverage = "feature_grid_coverage"
         case parallaxMeters = "parallax_meters"

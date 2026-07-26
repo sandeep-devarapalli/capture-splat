@@ -815,6 +815,17 @@ struct ContentView: View {
                         .padding(.vertical, 6)
                         .background(.thinMaterial, in: Capsule())
 
+                    if let notice = capture.spatialGuidanceThermalNotice {
+                        Label(notice, systemImage: "thermometer.sun")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.orange)
+                            .lineLimit(2)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(.thinMaterial, in: Capsule())
+                    }
+
                     if capture.usesAngularCoverageDisplay {
                         CoverageMiniMap(
                             scores: capture.coverageSectors,

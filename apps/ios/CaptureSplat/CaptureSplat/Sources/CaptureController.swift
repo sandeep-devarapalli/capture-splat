@@ -33,17 +33,34 @@ struct ScanGuidancePoint: Identifiable {
     let depthMeters: Double
 }
 
-private struct RGBSampler {
+private struct YCbCrSampler {
     let width: Int
     let height: Int
-    let rgba: [UInt8]
+    let lumaBytesPerRow: Int
+    let chromaWidth: Int
+    let chromaHeight: Int
+    let chromaBytesPerRow: Int
+    let luma: UnsafePointer<UInt8>
+    let chroma: UnsafePointer<UInt8>
 
     func colorAt(normalizedX: Double, normalizedY: Double) -> (UInt8, UInt8, UInt8) {
         let x = min(max(Int((normalizedX * Double(width - 1)).rounded()), 0), width - 1)
         let y = min(max(Int((normalizedY * Double(height - 1)).rounded()), 0), height - 1)
-        let offset = (y * width + x) * 4
-        guard offset + 2 < rgba.count else { return (120, 220, 255) }
-        return (rgba[offset], rgba[offset + 1], rgba[offset + 2])
+        let chromaX = min(max(x / 2, 0), chromaWidth - 1)
+        let chromaY = min(max(y / 2, 0), chromaHeight - 1)
+        let yValue = Float(luma[y * lumaBytesPerRow + x])
+        let chromaOffset = chromaY * chromaBytesPerRow + chromaX * 2
+        let cb = Float(chroma[chromaOffset]) - 128
+        let cr = Float(chroma[chromaOffset + 1]) - 128
+        return (
+            channel(yValue + 1.402 * cr),
+            channel(yValue - 0.3441 * cb - 0.7141 * cr),
+            channel(yValue + 1.772 * cb)
+        )
+    }
+
+    private func channel(_ value: Float) -> UInt8 {
+        UInt8(min(max(Int(value.rounded()), 0), 255))
     }
 }
 
@@ -63,6 +80,7 @@ private struct KeyframeDecision {
     let exposureMean: Double
     let exposureDelta: Double
     let clippedHighlightFraction: Double
+    let nearClippedHighlightFraction: Double
     let clippedShadowFraction: Double
     let featureGridCoverage: Double
     let parallaxMeters: Double
@@ -93,6 +111,7 @@ private struct KeyframeDecision {
         self.exposureMean = frameQuality?.exposureMean ?? 0
         self.exposureDelta = frameQuality?.exposureDelta ?? 0
         self.clippedHighlightFraction = frameQuality?.clippedHighlightFraction ?? 0
+        self.nearClippedHighlightFraction = frameQuality?.nearClippedHighlightFraction ?? 0
         self.clippedShadowFraction = frameQuality?.clippedShadowFraction ?? 0
         self.featureGridCoverage = frameQuality?.featureGridCoverage ?? 0
         self.parallaxMeters = frameQuality?.parallaxMeters ?? 0
@@ -112,6 +131,7 @@ private struct FrameQualityEstimate {
     let exposureMean: Double
     let exposureDelta: Double
     let clippedHighlightFraction: Double
+    let nearClippedHighlightFraction: Double
     let clippedShadowFraction: Double
     let featureGridCoverage: Double
     let parallaxMeters: Double
@@ -267,6 +287,23 @@ final class CaptureController: NSObject, ObservableObject {
     @Published private(set) var spatialGuidancePath: [SpatialGuidancePathPoint] = []
     @Published private(set) var spatialGuidancePose: SpatialGuidancePose?
 
+    var spatialGuidanceThermalNotice: String? {
+        guard isRecording,
+              isSpatialGuidanceVisible,
+              !spatialGuidanceShowsMesh,
+              spatialGuidanceMode == "lidar_mesh" || spatialGuidanceMode == "roomplan_shared" else {
+            return nil
+        }
+        switch thermalStateText {
+        case "serious":
+            return "Mesh hidden to cool the phone. Capture continues."
+        case "critical":
+            return "Live surface guidance paused. Recording continues."
+        default:
+            return nil
+        }
+    }
+
     static let captureIntentOptions: [CaptureIntentOption] = [
         CaptureIntentOption(
             id: "scene_cluster",
@@ -349,6 +386,7 @@ final class CaptureController: NSObject, ObservableObject {
     private let completionHaptic = UINotificationFeedbackGenerator()
     private let writeQueue = DispatchQueue(label: "capture-splat.writer")
     private let maskWriteQueue = DispatchQueue(label: "capture-splat.person-mask-writer")
+    private var csvHandles: [String: FileHandle] = [:]
     private var frames: [CapturedFrame] = []
     private var session: ARSession?
     private var lastFrameTimestamp: TimeInterval = 0
@@ -372,6 +410,10 @@ final class CaptureController: NSObject, ObservableObject {
     private var imuRateSamples: [TimeInterval] = []
     private var gpsRateSamples: [TimeInterval] = []
     private var healthTimer: Timer?
+    private var lastStorageRefreshUptime: TimeInterval = -.infinity
+    private var lastLiveGuidanceTimestamp: TimeInterval = -.infinity
+    private var accumulatedIMURows = 0
+    private var lastIMUUIUpdateTimestamp: TimeInterval = -.infinity
     private var coverageSectorCounts = Array(repeating: 0, count: 12)
     private var targetElevationBandCounts = Array(repeating: 0, count: 3)
     private var targetDistanceBandCounts = Array(repeating: 0, count: 3)
@@ -387,9 +429,10 @@ final class CaptureController: NSObject, ObservableObject {
     private let maxAngularVelocityDegPerSec = 40.0
     private let maxTranslationSpeedMetersPerSec = 0.8
     private let minExposureMean = 0.08
-    private let maxExposureMean = 0.92
+    private let maxExposureMean = 0.82
     private let maxExposureJump = 0.28
     private let maxClippedHighlightFraction = 0.25
+    private let maxNearClippedHighlightFraction = 0.50
     private let maxClippedShadowFraction = 0.30
     private let minFeatureGridCoverage = 0.25
     private let minObjectParallaxMeters = 0.08
@@ -425,6 +468,7 @@ final class CaptureController: NSObject, ObservableObject {
     private var objectMatteSupportCounts: [String: Int] = [:]
     private var pointCloudPreviewSamples: [[String: Any]] = []
     private let maxPointCloudPreviewSamples = 6000
+    private let pointCloudPreviewCheckpointInterval = 20
     private var latestCameraTransform: simd_float4x4?
     private var latestTargetCandidateWorldPosition: SIMD3<Float>?
     private var latestTargetCandidateDistance: Float?
@@ -482,11 +526,11 @@ final class CaptureController: NSObject, ObservableObject {
         location.desiredAccuracy = kCLLocationAccuracyBest
 
         if motion.isDeviceMotionAvailable {
-            motion.deviceMotionUpdateInterval = 0.01
+            motion.deviceMotionUpdateInterval = 0.02
         }
         refreshHealth()
         healthTimer?.invalidate()
-        healthTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        healthTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             self?.refreshHealth()
         }
     }
@@ -758,6 +802,7 @@ final class CaptureController: NSObject, ObservableObject {
             let directory = try makeSessionDirectory()
             try makeExportFolders(in: directory)
             currentSessionDirectory = directory
+            videoRecorder.setTargetFPS(videoTargetFPS(for: ProcessInfo.processInfo.thermalState))
             try videoRecorder.start(in: directory)
             if isCaptureLockEnabled {
                 applyCaptureLocks(true)
@@ -793,6 +838,8 @@ final class CaptureController: NSObject, ObservableObject {
             rgbFrames = 0
             depthFrames = 0
             imuRows = 0
+            accumulatedIMURows = 0
+            lastIMUUIUpdateTimestamp = -.infinity
             gpsRows = 0
             rgbRate = 0
             depthRate = 0
@@ -869,6 +916,7 @@ final class CaptureController: NSObject, ObservableObject {
             spatialPathPointID = 0
             lastSpatialPathPosition = nil
             lastSpatialPoseTimestamp = -.infinity
+            lastLiveGuidanceTimestamp = -.infinity
             spatialCellObservationCounts.removeAll()
             spatialGuidanceUpdateDurationsMs.removeAll()
             spatialGuidanceUpdateCount = 0
@@ -932,6 +980,7 @@ final class CaptureController: NSObject, ObservableObject {
             : "Finalizing capture"
         appendSessionEvent("finalization_started", arTimestamp: lastFrameTimestamp)
         motion.stopDeviceMotionUpdates()
+        imuRows = accumulatedIMURows
         location.stopUpdatingLocation()
         applyCaptureLocks(false)
         let meshSnapshot = recordedMeshAnchorIDs.compactMap { meshAnchors[$0] }
@@ -941,10 +990,15 @@ final class CaptureController: NSObject, ObservableObject {
                 guard let self else { return }
                 self.writeQueue.async { [weak self] in
                     guard let self else { return }
+                    self.closeCSVHandles()
+                    let previewStatus = self.finalizePointCloudPreview()
                     let meshResult = self.writeARKitMesh(anchors: meshSnapshot)
                     self.maskWriteQueue.async { [weak self] in
                         DispatchQueue.main.async {
-                            self?.completeCaptureFinalization(videoResult: videoResult, meshResult: meshResult)
+                            guard let self else { return }
+                            self.pointCloudPreviewPointCount = previewStatus.count
+                            self.pointCloudPreviewFile = previewStatus.url
+                            self.completeCaptureFinalization(videoResult: videoResult, meshResult: meshResult)
                         }
                     }
                 }
@@ -1121,14 +1175,30 @@ final class CaptureController: NSObject, ObservableObject {
 
     private func appendCSV(_ name: String, values: [String]) {
         guard let directory = currentSessionDirectory else { return }
-        writeQueue.async {
-            guard let handle = try? FileHandle(forWritingTo: directory.appendingPathComponent(name)) else { return }
-            defer { try? handle.close() }
-            _ = try? handle.seekToEnd()
+        writeQueue.async { [weak self] in
+            guard let self else { return }
+            let handle: FileHandle
+            if let cached = self.csvHandles[name] {
+                handle = cached
+            } else {
+                guard let opened = try? FileHandle(
+                    forWritingTo: directory.appendingPathComponent(name)
+                ) else { return }
+                _ = try? opened.seekToEnd()
+                self.csvHandles[name] = opened
+                handle = opened
+            }
             if let data = (values.joined(separator: ",") + "\n").data(using: .utf8) {
                 try? handle.write(contentsOf: data)
             }
         }
+    }
+
+    private func closeCSVHandles() {
+        for handle in csvHandles.values {
+            try? handle.close()
+        }
+        csvHandles.removeAll()
     }
 
     private func startMotion() {
@@ -1149,8 +1219,12 @@ final class CaptureController: NSObject, ObservableObject {
                 String(format: "%.9f", q.y),
                 String(format: "%.9f", q.z),
             ])
-            self.imuRows += 1
-            self.imuRate = self.recordRateSample(&self.imuRateSamples, at: deviceMotion.timestamp)
+            self.accumulatedIMURows += 1
+            if deviceMotion.timestamp - self.lastIMUUIUpdateTimestamp >= 0.5 {
+                self.lastIMUUIUpdateTimestamp = deviceMotion.timestamp
+                self.imuRows = self.accumulatedIMURows
+                self.imuRate = self.recordRateSample(&self.imuRateSamples, at: deviceMotion.timestamp)
+            }
         }
     }
 
@@ -1211,6 +1285,8 @@ final class CaptureController: NSObject, ObservableObject {
             "video_writer_status": videoStatus,
             "video_frame_count": videoRecorder.appendedFrameCount,
             "video_dropped_frame_count": videoRecorder.droppedFrameCount,
+            "video_target_fps_at_finalize": videoRecorder.targetFPS,
+            "video_sampling_policy": "thermal_adaptive_15_10_6",
             "accepted_keyframe_count": frames.count,
             "person_mask_written_count": personMaskWrittenCount,
             "person_mask_dropped_count": personMaskDroppedCount,
@@ -2065,7 +2141,9 @@ final class CaptureController: NSObject, ObservableObject {
             awbLock: device?.whiteBalanceMode == .locked,
             focusLock: device?.focusMode == .locked,
             videoFormat: videoRecorder.appendedFrameCount > 0 ? "hevc" : nil,
-            videoTargetFPS: videoRecorder.appendedFrameCount > 0 ? 30 : nil
+            videoTargetFPS: videoRecorder.appendedFrameCount > 0
+                ? Int(videoRecorder.targetFPS.rounded())
+                : nil
         )
     }
 
@@ -2158,10 +2236,15 @@ final class CaptureController: NSObject, ObservableObject {
     }
 
     private func refreshHealth() {
-        storageFreeText = availableStorageText()
+        let uptime = ProcessInfo.processInfo.systemUptime
+        if storageFreeText == "--" || uptime - lastStorageRefreshUptime >= 30 {
+            storageFreeText = availableStorageText()
+            lastStorageRefreshUptime = uptime
+        }
         let thermalState = ProcessInfo.processInfo.thermalState
         let currentThermalState = thermalStateLabel(thermalState)
         thermalStateText = currentThermalState
+        videoRecorder.setTargetFPS(videoTargetFPS(for: thermalState))
         applySpatialGuidanceThermalPolicy(thermalState)
         if isRecording, currentThermalState != lastRecordedThermalState {
             appendSessionEvent("thermal_state_changed", details: ["thermal_state": currentThermalState])
@@ -2169,6 +2252,32 @@ final class CaptureController: NSObject, ObservableObject {
         }
         let battery = UIDevice.current.batteryLevel
         batteryText = battery < 0 ? "--" : "\(Int((battery * 100).rounded()))%"
+    }
+
+    private func videoTargetFPS(for state: ProcessInfo.ThermalState) -> Double {
+        switch state {
+        case .nominal, .fair:
+            return 15
+        case .serious:
+            return 10
+        case .critical:
+            return 6
+        @unknown default:
+            return 10
+        }
+    }
+
+    private func liveGuidanceInterval(for state: ProcessInfo.ThermalState) -> TimeInterval {
+        switch state {
+        case .nominal, .fair:
+            return 0.2
+        case .serious:
+            return 0.5
+        case .critical:
+            return 1
+        @unknown default:
+            return 0.5
+        }
     }
 
     private func availableStorageText() -> String {
@@ -2208,11 +2317,10 @@ final class CaptureController: NSObject, ObservableObject {
             spatialGuidanceShowsMesh = isSpatialGuidanceVisible
                 && (spatialGuidanceMode == "lidar_mesh" || spatialGuidanceMode == "roomplan_shared")
         case .serious:
-            policy = "reduced"
-            spatialGuidanceFaceBudget = 30_000
+            policy = "map_only"
+            spatialGuidanceFaceBudget = 0
             spatialGuidanceUpdateHz = 2
-            spatialGuidanceShowsMesh = isSpatialGuidanceVisible
-                && (spatialGuidanceMode == "lidar_mesh" || spatialGuidanceMode == "roomplan_shared")
+            spatialGuidanceShowsMesh = false
         case .critical:
             policy = "pose_only"
             spatialGuidanceFaceBudget = 0
@@ -2232,6 +2340,7 @@ final class CaptureController: NSObject, ObservableObject {
                 "thermal_state": thermalStateLabel(state),
                 "face_budget": spatialGuidanceFaceBudget,
                 "update_hz": spatialGuidanceUpdateHz,
+                "video_target_fps": videoRecorder.targetFPS,
             ]
             spatialGuidanceThermalTransitions.append(transition)
             appendSessionEvent("spatial_guidance_policy_changed", details: transition)
@@ -2239,7 +2348,8 @@ final class CaptureController: NSObject, ObservableObject {
     }
 
     private func updateSpatialGuidancePose(from frame: ARFrame) {
-        guard frame.timestamp - lastSpatialPoseTimestamp >= 0.1 else { return }
+        let interval = liveGuidanceInterval(for: ProcessInfo.processInfo.thermalState)
+        guard frame.timestamp - lastSpatialPoseTimestamp >= interval else { return }
         lastSpatialPoseTimestamp = frame.timestamp
         let transform = frame.camera.transform
         let position = SIMD2<Float>(transform.columns.3.x, transform.columns.3.z)
@@ -2626,6 +2736,17 @@ final class CaptureController: NSObject, ObservableObject {
 
     private func updateTargetCandidate(from frame: ARFrame, depthMap: CVPixelBuffer) {
         latestCameraTransform = frame.camera.transform
+        guard usesSubjectTargetGuidance else {
+            latestTargetCandidateWorldPosition = nil
+            latestTargetCandidateDistance = nil
+            targetCandidateObservations.removeAll()
+            isSubjectTargetReady = false
+            latestObjectExtentProposal = nil
+            if !isObjectExtentLocked {
+                objectExtentOverlay = nil
+            }
+            return
+        }
         guard let centerDepth = centerDepthMeters(from: depthMap), centerDepth > 0 else {
             latestTargetCandidateWorldPosition = nil
             latestTargetCandidateDistance = nil
@@ -3074,6 +3195,8 @@ final class CaptureController: NSObject, ObservableObject {
             "capture_model": "quality_gated_smart_keyframes",
             "minimum_keyframe_interval_seconds": activeMinimumKeyframeInterval,
             "max_captured_frames": activeMaxCapturedFrames,
+            "continuous_video_target_fps": videoRecorder.targetFPS,
+            "continuous_video_sampling_policy": "thermal_adaptive_15_10_6",
             "keyframe_score_threshold": activeKeyframeScoreThreshold,
             "accepted_keyframes": acceptedKeyframes,
             "skipped_keyframe_candidates": skippedKeyframes,
@@ -3154,6 +3277,8 @@ final class CaptureController: NSObject, ObservableObject {
             "capture_intent": captureIntent,
             "accepted_frame_target": activeMaxCapturedFrames,
             "minimum_keyframe_interval_seconds": activeMinimumKeyframeInterval,
+            "continuous_video_target_fps": videoRecorder.targetFPS,
+            "continuous_video_sampling_policy": "thermal_adaptive_15_10_6",
             "quality_gate": [
                 "keyframe_score_threshold": activeKeyframeScoreThreshold,
                 "min_blur_score": minBlurScore,
@@ -3162,6 +3287,7 @@ final class CaptureController: NSObject, ObservableObject {
                 "max_exposure_mean": maxExposureMean,
                 "max_exposure_jump": maxExposureJump,
                 "max_clipped_highlight_fraction": maxClippedHighlightFraction,
+                "max_near_clipped_highlight_fraction": maxNearClippedHighlightFraction,
                 "max_clipped_shadow_fraction": maxClippedShadowFraction,
                 "max_angular_velocity_deg_s": maxAngularVelocityDegPerSec,
                 "max_translation_speed_m_s": maxTranslationSpeedMetersPerSec,
@@ -3338,6 +3464,7 @@ final class CaptureController: NSObject, ObservableObject {
                 "max_exposure_mean": maxExposureMean,
                 "max_exposure_jump": maxExposureJump,
                 "max_clipped_highlight_fraction": maxClippedHighlightFraction,
+                "max_near_clipped_highlight_fraction": maxNearClippedHighlightFraction,
                 "max_clipped_shadow_fraction": maxClippedShadowFraction,
                 "min_feature_grid_coverage": minFeatureGridCoverage,
                 "min_room_parallax_meters": minRoomParallaxMeters,
@@ -3573,6 +3700,15 @@ final class CaptureController: NSObject, ObservableObject {
                 frameQuality: frameQuality
             )
         }
+        guard frameQuality.nearClippedHighlightFraction <= maxNearClippedHighlightFraction else {
+            return KeyframeDecision(
+                shouldCapture: false,
+                reason: "near_clipped_highlights",
+                score: max(0, 1.0 - frameQuality.nearClippedHighlightFraction),
+                sectorIndex: sectorIndex,
+                frameQuality: frameQuality
+            )
+        }
         guard frameQuality.blurScore >= minBlurScore else {
             return KeyframeDecision(
                 shouldCapture: false,
@@ -3802,6 +3938,7 @@ final class CaptureController: NSObject, ObservableObject {
             "exposure_mean": decision.exposureMean,
             "exposure_delta": decision.exposureDelta,
             "clipped_highlight_fraction": decision.clippedHighlightFraction,
+            "near_clipped_highlight_fraction": decision.nearClippedHighlightFraction,
             "clipped_shadow_fraction": decision.clippedShadowFraction,
             "feature_grid_coverage": decision.featureGridCoverage,
             "parallax_meters": decision.parallaxMeters,
@@ -3878,7 +4015,7 @@ final class CaptureController: NSObject, ObservableObject {
         case "weak_feature_distribution":
             captureBlockerStatus = "Weak feature spread"
             captureBlockerDetail = "Aim at textured edges, corners, shelves, or objects; blank areas need nearby detail."
-        case "clipped_exposure":
+        case "clipped_exposure", "near_clipped_highlights":
             captureBlockerStatus = "Clipped exposure"
             captureBlockerDetail = "Angle away from bright windows or dark corners; clipped areas have no texture."
         case "exposure_jump", "underexposed_frame", "overexposed_frame":
@@ -3924,6 +4061,7 @@ final class CaptureController: NSObject, ObservableObject {
             "exposure_mean": decision.exposureMean,
             "exposure_delta": decision.exposureDelta,
             "clipped_highlight_fraction": decision.clippedHighlightFraction,
+            "near_clipped_highlight_fraction": decision.nearClippedHighlightFraction,
             "clipped_shadow_fraction": decision.clippedShadowFraction,
             "feature_grid_coverage": decision.featureGridCoverage,
             "parallax_meters": decision.parallaxMeters,
@@ -4294,6 +4432,7 @@ final class CaptureController: NSObject, ObservableObject {
             exposureMean: imageQuality.exposureMean,
             exposureDelta: exposureDelta,
             clippedHighlightFraction: imageQuality.clippedHighlightFraction,
+            nearClippedHighlightFraction: imageQuality.nearClippedHighlightFraction,
             clippedShadowFraction: imageQuality.clippedShadowFraction,
             featureGridCoverage: imageQuality.featureGridCoverage,
             parallaxMeters: parallax,
@@ -4311,6 +4450,7 @@ final class CaptureController: NSObject, ObservableObject {
         blurScore: Double,
         exposureMean: Double,
         clippedHighlightFraction: Double,
+        nearClippedHighlightFraction: Double,
         clippedShadowFraction: Double,
         featureGridCoverage: Double
     ) {
@@ -4336,7 +4476,7 @@ final class CaptureController: NSObject, ObservableObject {
               height > 2,
               bytesPerRow > 0,
               let baseAddress else {
-            return (0, 0.5, 0, 0, 0)
+            return (0, 0.5, 0, 0, 0, 0)
         }
 
         let base = baseAddress.assumingMemoryBound(to: UInt8.self)
@@ -4348,6 +4488,7 @@ final class CaptureController: NSObject, ObservableObject {
         var exposureSum = 0.0
         var edgeSum = 0.0
         var clippedHighlightCount = 0
+        var nearClippedHighlightCount = 0
         var clippedShadowCount = 0
         var featureGridCells = Array(repeating: false, count: gridColumns * gridRows)
 
@@ -4369,6 +4510,9 @@ final class CaptureController: NSObject, ObservableObject {
                 if normalizedValue > 0.98 {
                     clippedHighlightCount += 1
                 }
+                if normalizedValue > 0.95 {
+                    nearClippedHighlightCount += 1
+                }
                 if normalizedValue < 0.02 {
                     clippedShadowCount += 1
                 }
@@ -4376,13 +4520,14 @@ final class CaptureController: NSObject, ObservableObject {
             }
         }
 
-        guard sampleCount > 0 else { return (0, 0.5, 0, 0, 0) }
+        guard sampleCount > 0 else { return (0, 0.5, 0, 0, 0, 0) }
         let samples = Double(sampleCount)
         let coveredCells = featureGridCells.filter { $0 }.count
         return (
             edgeSum / samples,
             exposureSum / samples,
             Double(clippedHighlightCount) / samples,
+            Double(nearClippedHighlightCount) / samples,
             Double(clippedShadowCount) / samples,
             Double(coveredCells) / Double(featureGridCells.count)
         )
@@ -4625,13 +4770,17 @@ final class CaptureController: NSObject, ObservableObject {
 
 extension CaptureController: RoomCaptureSessionDelegate {
     func captureSession(_ session: RoomCaptureSession, didUpdate room: CapturedRoom) {
-        guard session === sharedRoomCaptureSession else { return }
-        updateRoomPlanPreview(room: room)
+        DispatchQueue.main.async { [weak self, weak session] in
+            guard let self, let session, session === self.sharedRoomCaptureSession else { return }
+            self.updateRoomPlanPreview(room: room)
+        }
     }
 
     func captureSession(_ session: RoomCaptureSession, didProvide instruction: RoomCaptureSession.Instruction) {
-        guard session === sharedRoomCaptureSession else { return }
-        noteRoomPlanInstruction(instruction)
+        DispatchQueue.main.async { [weak self, weak session] in
+            guard let self, let session, session === self.sharedRoomCaptureSession else { return }
+            self.noteRoomPlanInstruction(instruction)
+        }
     }
 
     func captureSession(
@@ -4639,37 +4788,39 @@ extension CaptureController: RoomCaptureSessionDelegate {
         didEndWith data: CapturedRoomData,
         error: Error?
     ) {
-        guard session === sharedRoomCaptureSession,
-              let generation = sharedRoomPlanGeneration,
-              let directory = sharedRoomPlanDirectory else { return }
-        if let error {
-            noteRoomPlanFailure(error.localizedDescription)
-            appendSessionEvent("room_plan_shared_held", details: ["reason": error.localizedDescription])
-            finishSharedRoomPlan()
-            return
-        }
-
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                let builder = RoomBuilder(options: [.beautifyObjects])
-                let room = try await builder.capturedRoom(from: data)
-                guard self.sharedRoomPlanGeneration == generation else { return }
-                try self.writeRoomPlanAssets(room: room, directory: directory)
-                let summary = self.roomPlanSummary(room)
-                self.roomPlanStatus = "RoomPlan exported"
-                self.roomPlanDetail = summary.detail
-                self.roomPlanSummaryText = summary.shortText
-                self.appendSessionEvent("room_plan_shared_exported", details: [
-                    "walls": room.walls.count,
-                    "objects": room.objects.count,
-                ])
-            } catch {
-                guard self.sharedRoomPlanGeneration == generation else { return }
+        DispatchQueue.main.async { [weak self, weak session] in
+            guard let self, let session, session === self.sharedRoomCaptureSession,
+                  let generation = self.sharedRoomPlanGeneration,
+                  let directory = self.sharedRoomPlanDirectory else { return }
+            if let error {
                 self.noteRoomPlanFailure(error.localizedDescription)
                 self.appendSessionEvent("room_plan_shared_held", details: ["reason": error.localizedDescription])
+                self.finishSharedRoomPlan()
+                return
             }
-            self.finishSharedRoomPlan()
+
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    let builder = RoomBuilder(options: [.beautifyObjects])
+                    let room = try await builder.capturedRoom(from: data)
+                    guard self.sharedRoomPlanGeneration == generation else { return }
+                    try self.writeRoomPlanAssets(room: room, directory: directory)
+                    let summary = self.roomPlanSummary(room)
+                    self.roomPlanStatus = "RoomPlan exported"
+                    self.roomPlanDetail = summary.detail
+                    self.roomPlanSummaryText = summary.shortText
+                    self.appendSessionEvent("room_plan_shared_exported", details: [
+                        "walls": room.walls.count,
+                        "objects": room.objects.count,
+                    ])
+                } catch {
+                    guard self.sharedRoomPlanGeneration == generation else { return }
+                    self.noteRoomPlanFailure(error.localizedDescription)
+                    self.appendSessionEvent("room_plan_shared_held", details: ["reason": error.localizedDescription])
+                }
+                self.finishSharedRoomPlan()
+            }
         }
     }
 }
@@ -4748,7 +4899,9 @@ extension CaptureController: ARSessionDelegate {
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         let currentTrackingState = trackingStateText(frame.camera.trackingState)
-        trackingStatus = currentTrackingState
+        if trackingStatus != currentTrackingState {
+            trackingStatus = currentTrackingState
+        }
         if isRecording, currentTrackingState != lastRecordedTrackingState {
             appendSessionEvent("tracking_state_changed", arTimestamp: frame.timestamp, details: [
                 "tracking_state": currentTrackingState,
@@ -4756,26 +4909,39 @@ extension CaptureController: ARSessionDelegate {
             lastRecordedTrackingState = currentTrackingState
         }
         latestFeaturePointCount = frame.rawFeaturePoints?.points.count ?? 0
-        updateSpatialGuidancePose(from: frame)
         updateMotionRate(from: frame)
         if isRecording, currentSessionDirectory != nil {
             videoRecorder.append(frame: frame, captureDevice: Self.primaryCaptureDevice)
             schedulePersonMask(from: frame)
         }
+        let baseGuidanceInterval = liveGuidanceInterval(for: ProcessInfo.processInfo.thermalState)
+        let guidanceInterval = usesSubjectTargetGuidance && !isObjectTargetLocked
+            ? min(baseGuidanceInterval, 0.2)
+            : baseGuidanceInterval
+        let shouldRefreshLiveGuidance = frame.timestamp - lastLiveGuidanceTimestamp >= guidanceInterval
+        if shouldRefreshLiveGuidance {
+            lastLiveGuidanceTimestamp = frame.timestamp
+            updateSpatialGuidancePose(from: frame)
+        }
         guard let sceneDepth = frame.sceneDepth else {
-            guidancePoints.removeAll()
-            if isRecording {
-                droppedFrames += 1
-                statusText = "Waiting for LiDAR scene depth"
+            if shouldRefreshLiveGuidance {
+                guidancePoints.removeAll()
+                if isRecording {
+                    droppedFrames += 1
+                    statusText = "Waiting for LiDAR scene depth"
+                }
+                updateGuidance()
             }
-            updateGuidance()
             return
         }
-        let candidateDepthValidRatio = measureValidDepthRatio(sceneDepth.depthMap)
-        validDepthRatio = candidateDepthValidRatio
-        updateTargetCandidate(from: frame, depthMap: sceneDepth.depthMap)
-        updateLiveGuidance(from: frame, depthMap: sceneDepth.depthMap)
-        updateGuidance()
+        var candidateDepthValidRatio = validDepthRatio
+        if shouldRefreshLiveGuidance {
+            candidateDepthValidRatio = measureValidDepthRatio(sceneDepth.depthMap)
+            validDepthRatio = candidateDepthValidRatio
+            updateTargetCandidate(from: frame, depthMap: sceneDepth.depthMap)
+            updateLiveGuidance(from: frame, depthMap: sceneDepth.depthMap)
+            updateGuidance()
+        }
         guard isRecording, let directory = currentSessionDirectory else { return }
         guard isRGBEnabled, isDepthEnabled else {
             statusText = "RGB and depth are required for Capture Splat export."
@@ -4787,6 +4953,10 @@ extension CaptureController: ARSessionDelegate {
         }
         guard frame.timestamp - lastCandidateFrameTimestamp >= activeMinimumKeyframeInterval else { return }
         lastCandidateFrameTimestamp = frame.timestamp
+        if !shouldRefreshLiveGuidance {
+            candidateDepthValidRatio = measureValidDepthRatio(sceneDepth.depthMap)
+            validDepthRatio = candidateDepthValidRatio
+        }
         guard scheduledFrameCount < activeMaxCapturedFrames else {
             stopAtUsefulFrameLimit()
             return
@@ -4867,7 +5037,8 @@ extension CaptureController: ARSessionDelegate {
                     )
                     previewStatus = self.appendPointCloudPreviewSamples(
                         previewSamples,
-                        directory: directory
+                        directory: directory,
+                        frameIndex: index
                     )
                 } catch {
                     writeError = error
@@ -4898,6 +5069,7 @@ extension CaptureController: ARSessionDelegate {
                         exposureMean: keyframeDecision.exposureMean,
                         exposureDelta: keyframeDecision.exposureDelta,
                         clippedHighlightFraction: keyframeDecision.clippedHighlightFraction,
+                        nearClippedHighlightFraction: keyframeDecision.nearClippedHighlightFraction,
                         clippedShadowFraction: keyframeDecision.clippedShadowFraction,
                         featureGridCoverage: keyframeDecision.featureGridCoverage,
                         parallaxMeters: keyframeDecision.parallaxMeters,
@@ -5048,7 +5220,13 @@ extension CaptureController: ARSessionDelegate {
             return []
         }
 
-        let sampler = makeRGBSampler(from: rgbBuffer)
+        let rgbLocked = CVPixelBufferLockBaseAddress(rgbBuffer, .readOnly) == kCVReturnSuccess
+        defer {
+            if rgbLocked {
+                CVPixelBufferUnlockBaseAddress(rgbBuffer, .readOnly)
+            }
+        }
+        let sampler = rgbLocked ? makeYCbCrSampler(fromLocked: rgbBuffer) : nil
         let columns = 12
         let rows = 9
         var samples: [[String: Any]] = []
@@ -5086,7 +5264,8 @@ extension CaptureController: ARSessionDelegate {
 
     private func appendPointCloudPreviewSamples(
         _ samples: [[String: Any]],
-        directory: URL
+        directory: URL,
+        frameIndex: Int
     ) -> (count: Int, url: URL?) {
         guard !samples.isEmpty else {
             return (pointCloudPreviewSamples.count, pointCloudPreviewFile)
@@ -5096,6 +5275,14 @@ extension CaptureController: ARSessionDelegate {
             pointCloudPreviewSamples.removeFirst(pointCloudPreviewSamples.count - maxPointCloudPreviewSamples)
         }
         let url = directory.appendingPathComponent("pointcloud_preview", isDirectory: true).appendingPathComponent("preview.json")
+        guard frameIndex.isMultiple(of: pointCloudPreviewCheckpointInterval) else {
+            return (pointCloudPreviewSamples.count, pointCloudPreviewFile)
+        }
+        writePointCloudPreview(to: url)
+        return (pointCloudPreviewSamples.count, url)
+    }
+
+    private func writePointCloudPreview(to url: URL) {
         writeJSON([
             "schema": "capture_splat.pointcloud_preview.v0.1",
             "point_count": pointCloudPreviewSamples.count,
@@ -5105,31 +5292,37 @@ extension CaptureController: ARSessionDelegate {
             "capture_guidance_only": true,
             "points": pointCloudPreviewSamples,
         ], to: url)
+    }
+
+    private func finalizePointCloudPreview() -> (count: Int, url: URL?) {
+        guard let directory = currentSessionDirectory, !pointCloudPreviewSamples.isEmpty else {
+            return (pointCloudPreviewSamples.count, pointCloudPreviewFile)
+        }
+        let url = directory
+            .appendingPathComponent("pointcloud_preview", isDirectory: true)
+            .appendingPathComponent("preview.json")
+        writePointCloudPreview(to: url)
         return (pointCloudPreviewSamples.count, url)
     }
 
-    private func makeRGBSampler(from pixelBuffer: CVPixelBuffer) -> RGBSampler? {
-        let image = CIImage(cvPixelBuffer: pixelBuffer)
-        guard let cgImage = ciContext.createCGImage(image, from: image.extent) else { return nil }
-        let width = cgImage.width
-        let height = cgImage.height
-        guard width > 0, height > 0 else { return nil }
-        var rgba = [UInt8](repeating: 0, count: width * height * 4)
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let ok = rgba.withUnsafeMutableBytes { pointer -> Bool in
-            guard let context = CGContext(
-                data: pointer.baseAddress,
-                width: width,
-                height: height,
-                bitsPerComponent: 8,
-                bytesPerRow: width * 4,
-                space: colorSpace,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-            ) else { return false }
-            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-            return true
+    private func makeYCbCrSampler(fromLocked pixelBuffer: CVPixelBuffer) -> YCbCrSampler? {
+        guard CVPixelBufferGetPlaneCount(pixelBuffer) >= 2,
+              let luma = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0)?
+                .assumingMemoryBound(to: UInt8.self),
+              let chroma = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1)?
+                .assumingMemoryBound(to: UInt8.self) else {
+            return nil
         }
-        return ok ? RGBSampler(width: width, height: height, rgba: rgba) : nil
+        return YCbCrSampler(
+            width: CVPixelBufferGetWidthOfPlane(pixelBuffer, 0),
+            height: CVPixelBufferGetHeightOfPlane(pixelBuffer, 0),
+            lumaBytesPerRow: CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0),
+            chromaWidth: CVPixelBufferGetWidthOfPlane(pixelBuffer, 1),
+            chromaHeight: CVPixelBufferGetHeightOfPlane(pixelBuffer, 1),
+            chromaBytesPerRow: CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 1),
+            luma: UnsafePointer(luma),
+            chroma: UnsafePointer(chroma)
+        )
     }
 
     private func fallbackPreviewColor(depth: Double) -> (UInt8, UInt8, UInt8) {

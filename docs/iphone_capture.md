@@ -13,9 +13,11 @@ The capture view defaults to **Guidance**. On supported LiDAR iPhones it shows
 RealityKit scene-understanding wireframe plus a gravity-aligned map of the
 camera trail, observed surface cells, accepted-keyframe coverage, and heading.
 Switch to **Camera** to hide these inspection overlays without changing the
-capture gate. At serious thermal state the guidance update budget is reduced;
-at critical thermal state mesh rendering is disabled while trajectory,
-blockers, recording, and export continue.
+capture gate. At serious thermal state the live mesh is hidden and the map
+remains available. At critical thermal state surface guidance is paused while
+blockers, recording, and export continue. The capture overlay states when
+thermal protection hides the mesh; this does not mean ARKit mesh accumulation
+or RGB-D recording stopped.
 
 Without LiDAR, Guidance degrades to detected planes, feature points, and camera
 trajectory where ARKit provides them. This is not dense RGB-only surface
@@ -43,6 +45,10 @@ The capture gate also holds candidates with a large clipped-highlight or
 clipped-shadow fraction using the `clipped_exposure` skip reason. Accepted
 frames record both fractions in `capture_quality`; treat them as capture-guidance
 quality proxies, not image-quality or reconstruction-quality proof.
+It separately measures pixels near white at the 95% luminance level and uses
+`near_clipped_highlights` to hold a view when most of the image is nearly
+white. This catches broad window-driven washout without rejecting every frame
+that merely contains a bright window.
 
 Each indexed frame also records achieved white-balance gains, lens position,
 exposure/focus/white-balance adjustment states, pixel-buffer color primaries,
@@ -159,6 +165,20 @@ Object Orbit preparation never pads a strict masked package with unmasked
 continuous-video frames. For other intents, temporal downselection ranks
 candidates by parallax, blur, and distributed feature support while preserving
 coverage across the full capture duration.
+
+When a post-capture review identifies specific unusable accepted frames, keep
+the originals and provide a strict exclusion manifest:
+
+```bash
+capture-splat prepare-capture \
+  --capture /path/to/capture \
+  --out runs/scan/prepared \
+  --frame-exclusions runs/scan/frame_exclusions.json
+```
+
+The manifest uses schema `capture_splat.frame_exclusions.v0.1` and contains
+one-based `excluded_source_frame_indices`. Preparation copies the applied
+record to `frames/metadata/frame_exclusions.json`.
 
 For rooms, move in small connected side steps around the perimeter. Keep the
 previous wall, corner, table edge, shelf, or textured object in view while adding
