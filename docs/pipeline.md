@@ -191,11 +191,17 @@ unless COLMAP exposes the Caspar options and the result uses only `PINHOLE` or
 `SIMPLE_RADIAL`. Caspar is not the global solver and does not use ARKit pose
 priors in this path.
 `build-rgbd-seed` estimates a Sim(3) from shared ARKit and COLMAP camera
-centers, then transforms confidence-filtered RGB-D points only when median and
-tail residual gates pass. It writes a new package under the requested output
-directory and keeps a backup of the unaugmented sparse model. A failed fit is
-held and training can continue from the original COLMAP package; ARKit depth
-is a metric prior, not a substitute for COLMAP-refined image support.
+centers and proceeds only when median and tail residual gates pass. It applies
+the recorded depth-unit scale and adapts camera intrinsics when the depth grid
+differs from the stored intrinsics resolution. When the capture also asserts
+`arkit_vio_metric` scale authority, the copied COLMAP camera translations,
+sparse points, and RGB-D seed are written in meters with a checksum-bound
+`metadata/metric_scale_report.json`. Older captures without explicit scale
+authority retain compatible seed augmentation in COLMAP units and report that
+metric continuity is unavailable. The command keeps an unmodified sparse-model
+backup. A failed fit is held and training can continue from the original
+COLMAP package; ARKit depth is a metric prior, not a substitute for
+COLMAP-refined image support.
 `--background-sphere` seeds distant background points for room and outdoor
 scenes. Both trainers write `capture_splat_scene_transform.json` next to the
 PLY so viewers can map package cameras into the trained splat world. New SfM

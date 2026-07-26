@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 import shutil
 import struct
@@ -11,9 +12,27 @@ from PIL import Image
 
 from .background_sphere import next_point_id
 from .capture_schema import iter_frames, load_capture
-from .json_utils import write_json_strict
+from .json_utils import load_json_strict, write_json_strict
+from .scene_transform import PACKAGE_ORIENTATION_NAME, PACKAGE_ORIENTATION_SCHEMA
 
 SUMMARY_SCHEMA = "capture_splat.rgbd_seed_summary.v0.1"
+METRIC_SCALE_SCHEMA = "capture_splat.metric_scale_report.v0.1"
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _file_evidence(path: Path, root: Path) -> dict[str, Any]:
+    return {
+        "path": path.relative_to(root).as_posix(),
+        "bytes": path.stat().st_size,
+        "checksum": _sha256(path),
+    }
 
 
 def quaternion_rotation(qw: float, qx: float, qy: float, qz: float) -> np.ndarray:
@@ -75,6 +94,95 @@ def estimate_sim3(source: np.ndarray, target: np.ndarray) -> tuple[float, np.nda
 
 def apply_sim3(points: np.ndarray, scale: float, rotation: np.ndarray, translation: np.ndarray) -> np.ndarray:
     return scale * (points @ rotation.T) + translation
+
+
+def _depth_intrinsics(
+    intrinsics: dict[str, float],
+    width: int,
+    height: int,
+) -> tuple[float, float, float, float]:
+    source_width = float(intrinsics["w"])
+    source_height = float(intrinsics["h"])
+    values = [source_width, source_height, *(float(intrinsics[key]) for key in ("fl_x", "fl_y", "cx", "cy"))]
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError("frame intrinsics contain non-finite values")
+    if source_width <= 0 or source_height <= 0 or intrinsics["fl_x"] <= 0 or intrinsics["fl_y"] <= 0:
+        raise ValueError("frame intrinsics dimensions and focal lengths must be positive")
+    scale_x = width / source_width
+    scale_y = height / source_height
+    return (
+        float(intrinsics["fl_x"]) * scale_x,
+        float(intrinsics["fl_y"]) * scale_y,
+        float(intrinsics["cx"]) * scale_x,
+        float(intrinsics["cy"]) * scale_y,
+    )
+
+
+def _scale_colmap_images(images_txt: Path, meters_per_colmap_unit: float) -> None:
+    output: list[str] = []
+    expect_pose = True
+    for line in images_txt.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            output.append(line)
+            continue
+        if not stripped:
+            output.append(line)
+            if not expect_pose:
+                expect_pose = True
+            continue
+        if expect_pose:
+            parts = line.split()
+            if len(parts) < 10:
+                raise ValueError("invalid COLMAP images.txt pose line")
+            for index in range(5, 8):
+                value = float(parts[index]) * meters_per_colmap_unit
+                if not math.isfinite(value):
+                    raise ValueError("scaled COLMAP image translation is non-finite")
+                parts[index] = f"{value:.17g}"
+            output.append(" ".join(parts))
+            expect_pose = False
+        else:
+            output.append(line)
+            expect_pose = True
+    images_txt.write_text("\n".join(output) + "\n", encoding="utf-8")
+
+
+def _scale_colmap_points(points_txt: Path, meters_per_colmap_unit: float) -> None:
+    output: list[str] = []
+    for line in points_txt.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            output.append(line)
+            continue
+        parts = line.split()
+        if len(parts) < 7:
+            raise ValueError("invalid COLMAP points3D.txt line")
+        for index in range(1, 4):
+            value = float(parts[index]) * meters_per_colmap_unit
+            if not math.isfinite(value):
+                raise ValueError("scaled COLMAP point is non-finite")
+            parts[index] = f"{value:.17g}"
+        output.append(" ".join(parts))
+    points_txt.write_text("\n".join(output) + "\n", encoding="utf-8")
+
+
+def _scale_package_orientation(path: Path, meters_per_colmap_unit: float) -> None:
+    report = load_json_strict(path)
+    matrix = np.asarray(report.get("transform"), dtype=np.float64)
+    if report.get("schema") != PACKAGE_ORIENTATION_SCHEMA or matrix.shape != (4, 4):
+        raise ValueError("invalid package orientation transform")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError("package orientation transform is non-finite")
+    matrix[:3, :] *= meters_per_colmap_unit
+    report["transform"] = matrix.tolist()
+    report["target_coordinate_frame"] = "metric_colmap_world"
+    report["metric_package_scale_applied"] = meters_per_colmap_unit
+    for key in ("scale", "median_camera_center_residual", "max_camera_center_residual"):
+        value = report.get(key)
+        if isinstance(value, (int, float)):
+            report[key] = float(value) * meters_per_colmap_unit
+    write_json_strict(path, report)
 
 
 def _matched_centers(
@@ -185,6 +293,7 @@ def _frame_points(
     raw: dict[str, Any],
     points_per_frame: int,
     confidence_minimum: int,
+    depth_scale: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     depth_relative = raw.get("depth")
     if not isinstance(depth_relative, str) or not (capture_dir / depth_relative).exists():
@@ -196,7 +305,12 @@ def _frame_points(
     stride = max(1, int(math.sqrt(max(1, height * width // max(1, points_per_frame)))))
     ys, xs = np.mgrid[0:height:stride, 0:width:stride]
     sampled = depth[0:height:stride, 0:width:stride]
-    valid = np.isfinite(sampled) & (sampled > 0.05) & (sampled < 20.0)
+    raw_depth_scale = raw.get("depth_scale")
+    frame_depth_scale = depth_scale if raw_depth_scale is None else float(raw_depth_scale)
+    if not math.isfinite(frame_depth_scale) or frame_depth_scale <= 0:
+        raise ValueError("depth_scale must be positive and finite")
+    sampled_meters = sampled.astype(np.float64) * frame_depth_scale
+    valid = np.isfinite(sampled_meters) & (sampled_meters > 0.05) & (sampled_meters < 20.0)
     confidence_relative = raw.get("confidence")
     if isinstance(confidence_relative, str) and (capture_dir / confidence_relative).exists():
         confidence = np.load(capture_dir / confidence_relative, allow_pickle=False)
@@ -204,9 +318,10 @@ def _frame_points(
             valid &= confidence[0:height:stride, 0:width:stride] >= confidence_minimum
     if not np.any(valid):
         return np.empty((0, 3)), np.empty((0, 3), dtype=np.uint8)
-    d = sampled[valid].astype(np.float64)
-    x = (xs[valid] - frame.intrinsics["cx"]) / frame.intrinsics["fl_x"] * d
-    y = -((ys[valid] - frame.intrinsics["cy"]) / frame.intrinsics["fl_y"] * d)
+    fl_x, fl_y, cx, cy = _depth_intrinsics(frame.intrinsics, width, height)
+    d = sampled_meters[valid]
+    x = (xs[valid] - cx) / fl_x * d
+    y = -((ys[valid] - cy) / fl_y * d)
     local = np.stack([x, y, -d, np.ones_like(d)], axis=1)
     camera_to_world = np.asarray(frame.transform_matrix, dtype=np.float64)
     points = (camera_to_world @ local.T).T[:, :3]
@@ -311,18 +426,32 @@ def build_rgbd_metric_seed(
         write_json_strict(out_dir / "capture_splat_rgbd_seed_summary.json", summary)
         return summary
     capture = load_capture(capture_dir)
+    raw_depth_scale = capture.get("depth_scale")
+    depth_scale = 1.0 if raw_depth_scale is None else float(raw_depth_scale)
+    session_config = capture.get("session_config")
+    scale_authority = session_config.get("scale_authority") if isinstance(session_config, dict) else None
+    if not math.isfinite(depth_scale) or depth_scale <= 0:
+        raise ValueError("capture depth_scale must be positive and finite")
+    metric_scale_accepted = scale_authority == "arkit_vio_metric"
     frames = list(iter_frames(capture, accepted_only=True))
     points_per_frame = max(64, max_points // max(1, len(frames)))
     point_chunks: list[np.ndarray] = []
     color_chunks: list[np.ndarray] = []
+    consumed_assets: dict[str, dict[str, Any]] = {}
     for frame in frames:
         raw = capture["frames"][frame.source_index - 1]
         points, colors = _frame_points(
-            capture_dir, frame, raw, points_per_frame, confidence_minimum
+            capture_dir, frame, raw, points_per_frame, confidence_minimum, depth_scale
         )
         if len(points):
             point_chunks.append(points)
             color_chunks.append(colors)
+            for key in ("rgb", "depth", "confidence"):
+                relative = raw.get(key)
+                if isinstance(relative, str):
+                    path = capture_dir / relative
+                    if path.exists():
+                        consumed_assets.setdefault(relative, _file_evidence(path, capture_dir))
     if not point_chunks:
         summary["alignment"]["seed_reason"] = "no_confidence_filtered_depth_points"
         write_json_strict(out_dir / "capture_splat_rgbd_seed_summary.json", summary)
@@ -330,7 +459,10 @@ def build_rgbd_metric_seed(
     points = np.concatenate(point_chunks)
     colors = np.concatenate(color_chunks)
     scale, rotation, translation = transform
+    meters_per_colmap_unit = 1.0 / scale
     points = apply_sim3(points, scale, rotation, translation)
+    if metric_scale_accepted:
+        points *= meters_per_colmap_unit
     finite = np.all(np.isfinite(points), axis=1)
     points, colors = points[finite], colors[finite]
     if not len(points):
@@ -341,11 +473,78 @@ def build_rgbd_metric_seed(
     seed_ply = out_dir / "metric_seed.ply"
     _write_binary_ply(seed_ply, points, colors)
     points_txt = output_package / "sparse/0/points3D.txt"
+    images_txt = output_package / "sparse/0/images.txt"
+    cameras_txt = output_package / "sparse/0/cameras.txt"
+    orientation_path = output_package / "metadata" / PACKAGE_ORIENTATION_NAME
     backup = output_package / "sparse/0_colmap_refined"
     shutil.copytree(points_txt.parent, backup)
+    input_checksums = {
+        "images_txt": _sha256(images_txt),
+        "cameras_txt": _sha256(cameras_txt),
+        "points3D_txt": _sha256(points_txt),
+        "capture_manifest": _sha256(capture_dir / "capture.json"),
+    }
+    if orientation_path.exists():
+        input_checksums["package_orientation_transform"] = _sha256(orientation_path)
+    if metric_scale_accepted:
+        _scale_colmap_images(images_txt, meters_per_colmap_unit)
+        _scale_colmap_points(points_txt, meters_per_colmap_unit)
+        if orientation_path.exists():
+            _scale_package_orientation(orientation_path, meters_per_colmap_unit)
     for binary in points_txt.parent.glob("*.bin"):
         binary.unlink()
     first_point_id = _append_colmap_points(points_txt, points, colors)
+    arkit_to_metric_colmap = np.eye(4, dtype=np.float64)
+    arkit_to_metric_colmap[:3, :3] = rotation
+    arkit_to_metric_colmap[:3, 3] = translation * meters_per_colmap_unit
+    colmap_to_metric_colmap = np.eye(4, dtype=np.float64)
+    colmap_to_metric_colmap[:3, :3] *= meters_per_colmap_unit
+    metric_report_path: Path | None = None
+    if metric_scale_accepted:
+        metric_alignment = {
+            "scene_radius_meters": alignment["scene_radius"] * meters_per_colmap_unit,
+            "median_residual_meters": alignment["median_residual"] * meters_per_colmap_unit,
+            "p95_residual_meters": alignment["p95_residual"] * meters_per_colmap_unit,
+        }
+        output_checksums = {
+            "images_txt": _sha256(images_txt),
+            "cameras_txt": _sha256(cameras_txt),
+            "points3D_txt": _sha256(points_txt),
+            "metric_seed_ply": _sha256(seed_ply),
+        }
+        if orientation_path.exists():
+            output_checksums["package_orientation_transform"] = _sha256(orientation_path)
+        metric_report = {
+            "schema": METRIC_SCALE_SCHEMA,
+            "status": "accepted",
+            "source_coordinate_frame": "colmap_world",
+            "target_coordinate_frame": "metric_colmap_world",
+            "source_units": "colmap_units",
+            "target_units": "meters",
+            "scale_authority": scale_authority,
+            "depth_scale_to_meters": depth_scale,
+            "colmap_units_per_meter": scale,
+            "meters_per_colmap_unit": meters_per_colmap_unit,
+            "colmap_to_metric_colmap": colmap_to_metric_colmap.tolist(),
+            "arkit_to_metric_colmap": arkit_to_metric_colmap.tolist(),
+            "pre_metric_alignment": {
+                **alignment,
+                "absolute_value_units": "colmap_units_before_metric_scaling",
+            },
+            "metric_alignment": metric_alignment,
+            "input_checksums": input_checksums,
+            "consumed_capture_assets": list(consumed_assets.values()),
+            "output_checksums": output_checksums,
+            "authority": {
+                "metric_scale_evidence": True,
+                "colmap_refined_cameras_remain_baseline": True,
+                "collision_authority": False,
+                "measurement_authority": False,
+                "quality_claim": False,
+            },
+        }
+        metric_report_path = output_package / "metadata/metric_scale_report.json"
+        write_json_strict(metric_report_path, metric_report)
     summary.update({
         "seed_ply": str(seed_ply),
         "seed_point_count": int(len(points)),
@@ -353,6 +552,11 @@ def build_rgbd_metric_seed(
         "confidence_minimum": confidence_minimum,
         "first_colmap_point_id": first_point_id,
         "colmap_model_backup": str(backup),
+        "metric_scale_report": str(metric_report_path) if metric_report_path else None,
+        "meters_per_colmap_unit": meters_per_colmap_unit if metric_scale_accepted else None,
+        "output_coordinate_frame": "metric_colmap_world" if metric_scale_accepted else "colmap_world",
+        "metric_scale_status": "accepted" if metric_scale_accepted else "unavailable",
+        "warnings": [] if metric_scale_accepted else ["arkit_metric_scale_authority_missing_seed_in_colmap_units"],
         "package_augmented": True,
         "decision": "promote",
     })

@@ -132,9 +132,15 @@ capture-splat build-rgbd-seed \
 
 The command requires at least eight shared camera centers and gates the fitted
 Sim(3) residuals against the COLMAP scene radius. A failed fit is `hold` and
-leaves the copied package unaugmented. A passing fit writes `metric_seed.ply`
-and adds its finite points to the copied text model; COLMAP-refined cameras
-remain the visual reconstruction baseline.
+leaves the copied package unaugmented. A passing fit adds `metric_seed.ply` to
+the copied text model. Metric-scale promotion additionally requires
+`session_config.scale_authority = arkit_vio_metric`; with that evidence, the
+command applies `depth_scale`, adapts intrinsics to the actual depth grid,
+scales copied COLMAP cameras and points into meters, and writes
+`metadata/metric_scale_report.json` bound to the consumed capture and model
+assets. Without explicit scale authority, the compatible seed remains in
+COLMAP units and is reported as non-metric. The source package is unchanged
+and COLMAP-refined cameras remain the visual reconstruction baseline.
 
 The same stages can be run through one resumable evidence command:
 

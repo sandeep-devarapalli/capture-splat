@@ -480,6 +480,8 @@ def prepare_capture(
             "quality_claim": False,
         },
     }
+    if capture.get("depth_scale") is not None:
+        prepared_manifest["depth_scale"] = capture["depth_scale"]
     write_json_strict(out_dir / "frames/capture.json", prepared_manifest)
     frame_evidence = load_frame_evidence(out_dir / "frames/capture.json")
     camera_report = camera_evidence_report(out_dir / "frames/images", frame_evidence)
