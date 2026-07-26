@@ -10,6 +10,7 @@ from capture_splat.scene_transform import (
     SIDECAR_NAME,
     compute_gsplat_normalize_transform,
     disambiguate_flip_with_ply,
+    estimate_package_orientation_transform,
     load_camera_to_worlds,
     load_ply_positions,
     similarity_from_cameras,
@@ -102,6 +103,72 @@ def test_sidecar_prefers_train_json(tmp_path: Path) -> None:
     assert saved["trainer_transform_source"] == "trainer_train_json"
     assert saved["trainer"] == "vksplat"
     assert saved["authority"]["quality_claim"] is False
+
+
+def test_package_orientation_transform_fits_matched_camera_centers(tmp_path: Path) -> None:
+    before = tmp_path / "before"
+    after = tmp_path / "after"
+    before.mkdir()
+    after.mkdir()
+    source_centers = ([0, 0, 0], [1, 0, 0], [0, 0, 1], [1, 1, 1])
+    angle = math.pi / 2
+    rotation = np.array([
+        [math.cos(angle), 0, math.sin(angle)],
+        [0, 1, 0],
+        [-math.sin(angle), 0, math.cos(angle)],
+    ])
+    target_centers = [2 * rotation @ np.asarray(center) + [3, 4, 5] for center in source_centers]
+
+    def write_centers(path: Path, centers: list[np.ndarray | list[int]]) -> None:
+        lines = ["# images"]
+        for index, center in enumerate(centers, start=1):
+            tx, ty, tz = (-np.asarray(center)).tolist()
+            lines.extend((f"{index} 1 0 0 0 {tx} {ty} {tz} 1 {index:06d}.jpg", ""))
+        (path / "images.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    write_centers(before, source_centers)
+    write_centers(after, target_centers)
+
+    report = estimate_package_orientation_transform(before, after)
+
+    matrix = np.asarray(report["transform"])
+    transformed = transform_points(matrix, np.asarray(source_centers, dtype=float))
+    assert np.allclose(transformed, target_centers, atol=1e-9)
+    assert report["matched_camera_count"] == 4
+    assert report["scale"] == pytest.approx(2.0)
+    assert report["max_camera_center_residual"] < 1e-9
+
+
+def test_sidecar_preserves_package_orientation_separately(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    sparse = package / "sparse" / "0"
+    sparse.mkdir(parents=True)
+    ply = tmp_path / "run" / "splat.ply"
+    ply.parent.mkdir()
+    ply.write_bytes(b"ply")
+    (ply.parent / "train.json").write_text(
+        json.dumps({"dataparser_transform": np.eye(4).tolist()}),
+        encoding="utf-8",
+    )
+    orientation = np.eye(4)
+    orientation[:3, 3] = [1, 2, 3]
+    metadata = package / "metadata"
+    metadata.mkdir()
+    (metadata / "package_orientation_transform.json").write_text(json.dumps({
+        "schema": "capture_splat.package_orientation_transform.v0.1",
+        "transform": orientation.tolist(),
+        "matched_camera_count": 12,
+        "scale": 1.0,
+        "median_camera_center_residual": 1e-8,
+        "max_camera_center_residual": 3e-8,
+    }), encoding="utf-8")
+
+    sidecar = write_scene_transform_sidecar(ply, sparse, "gsplat", normalized=True)
+
+    assert sidecar is not None
+    assert sidecar["package_orientation_transform"] == orientation.tolist()
+    assert sidecar["package_orientation_transform_source"] == "package_orientation_transform.json"
+    assert sidecar["trainer_transform"] == np.eye(4).tolist()
 
 
 def test_sidecar_recomputes_gsplat_normalize(tmp_path: Path) -> None:

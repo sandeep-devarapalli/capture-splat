@@ -198,8 +198,12 @@ held and training can continue from the original COLMAP package; ARKit depth
 is a metric prior, not a substitute for COLMAP-refined image support.
 `--background-sphere` seeds distant background points for room and outdoor
 scenes. Both trainers write `capture_splat_scene_transform.json` next to the
-PLY so viewers can map package cameras into the trained splat world; these
-are registration and alignment evidence, not quality claims.
+PLY so viewers can map package cameras into the trained splat world. New SfM
+runs also fit and record `metadata/package_orientation_transform.json` from
+matched camera centers before and after COLMAP orientation alignment. The
+scene sidecar keeps that pre-alignment-to-package transform separate from the
+package-to-trainer transform and records camera-center residuals. These are
+registration and alignment evidence, not quality claims.
 
 ## Training Ladder
 

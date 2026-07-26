@@ -12,6 +12,7 @@ from typing import Any
 from .background_sphere import append_background_sphere
 from .hloc_runner import hloc_status, planned_frontend, run_hloc_frontend
 from .json_utils import load_json_strict, write_json_strict
+from .scene_transform import PACKAGE_ORIENTATION_NAME, write_package_orientation_transform
 from .sfm_evidence import (
     apply_camera_priors,
     camera_evidence_report,
@@ -208,7 +209,12 @@ def select_best_sparse_subdir(sparse_dir: Path) -> Path | None:
     return zero
 
 
-def align_orientation(images_dir: Path, sparse_zero: Path, dry_run: bool = False) -> dict[str, Any]:
+def align_orientation(
+    images_dir: Path,
+    sparse_zero: Path,
+    dry_run: bool = False,
+    report_path: Path | None = None,
+) -> dict[str, Any]:
     aligned = sparse_zero.parent / "0_aligned"
     backup = sparse_zero.parent / "0_before_alignment"
     command = [
@@ -233,6 +239,20 @@ def align_orientation(images_dir: Path, sparse_zero: Path, dry_run: bool = False
     shutil.move(str(aligned), str(sparse_zero))
     result["aligned"] = True
     result["backup"] = str(backup)
+    if report_path is not None:
+        try:
+            model_to_text(backup)
+            model_to_text(sparse_zero)
+            result["package_orientation_transform"] = write_package_orientation_transform(
+                backup,
+                sparse_zero,
+                report_path,
+            )
+        except (OSError, RuntimeError, ValueError) as error:
+            result["package_orientation_transform"] = {
+                "status": "unavailable",
+                "reason": str(error),
+            }
     return result
 
 
@@ -618,7 +638,11 @@ def run_sfm(
             summary["error"] = str(error)
             write_json_strict(out_dir / "capture_splat_sfm_summary.json", summary)
             raise
-    summary["orientation_alignment"] = align_orientation(run_images, sparse_zero)
+    summary["orientation_alignment"] = align_orientation(
+        run_images,
+        sparse_zero,
+        report_path=out_dir / "metadata" / PACKAGE_ORIENTATION_NAME,
+    )
     model_to_text(sparse_zero)
     stats = read_model_stats(sparse_zero)
     summary["model"] = stats
@@ -742,7 +766,11 @@ def run_triangulate(
     if triangulated.exists():
         shutil.rmtree(triangulated, ignore_errors=True)
     summary["pose_backup"] = str(backup)
-    summary["orientation_alignment"] = align_orientation(images_dir, sparse_zero)
+    summary["orientation_alignment"] = align_orientation(
+        images_dir,
+        sparse_zero,
+        report_path=package_dir / "metadata" / PACKAGE_ORIENTATION_NAME,
+    )
     model_to_text(sparse_zero)
     stats = read_model_stats(sparse_zero)
     summary["model"] = stats
