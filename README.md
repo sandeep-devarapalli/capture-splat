@@ -23,6 +23,20 @@ It is not a guarantee that every scan becomes high quality. Good splats still de
 
 For the current carry-forward lessons from the iPhone-to-VkSplat validation ladder, see `docs/field_validation_learnings.md`.
 
+## World Compiler Roadmap
+
+Capture Splat is the evidence-producing capture and reconstruction side of the
+[World Studio World Compiler Blueprint](https://github.com/sandeep-devarapalli/world-studio/tree/main/docs/blueprints/world-compiler-v0.1).
+It may provide RGB-D, poses, intrinsics, gravity, masks, mesh, RoomPlan proposals,
+continuous video, trained splats, and synchronized experiment imagery. Passive capture
+does not establish mass, inertia, friction, restitution, stiffness, force, torque, or
+physics authority.
+
+Capture Splat tracks three repo-local milestones in [ROADMAP.md](ROADMAP.md): the completed
+Live Session Foundation, Authenticated Sender And Device Acceptance, and Calibration
+Capture Evidence. World packaging, editing, navigation, simulation, and Physical Asset
+Calibration remain World Studio responsibilities.
+
 ## Quickstart: Mac + iPhone
 
 ```bash

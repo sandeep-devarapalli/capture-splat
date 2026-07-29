@@ -1,0 +1,68 @@
+name: Upstream evaluation
+description: Evaluate an external tool, model, dataset, or research repository.
+title: "[Upstream] "
+body:
+  - type: input
+    id: source
+    attributes:
+      label: Canonical source
+      placeholder: https://github.com/owner/project
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Exact revision
+      description: Commit, tag, model revision, or dataset version.
+    validations:
+      required: true
+  - type: input
+    id: license
+    attributes:
+      label: License and source
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: Intended role
+      options:
+        - Research reference
+        - Optional external tool
+        - Build dependency
+        - Runtime dependency
+        - Model or dataset
+        - Reject / no adoption
+    validations:
+      required: true
+  - type: textarea
+    id: value
+    attributes:
+      label: Transferable value
+      description: Explain the capability, mathematics, or workflow relevant to Capture Splat.
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: License, security, platform, maintenance, and distribution risks
+    validations:
+      required: true
+  - type: textarea
+    id: gates
+    attributes:
+      label: Adoption gates and non-goals
+    validations:
+      required: true
+  - type: dropdown
+    id: decision
+    attributes:
+      label: Recommendation
+      options:
+        - Adopt
+        - Optional external integration
+        - Research only
+        - Defer
+        - Reject
+    validations:
+      required: true

@@ -5,6 +5,12 @@ explicitly listening World Studio. It transports source frames, camera poses,
 capture quality, and optional depth/confidence/masks. It does not train,
 incrementally update, or claim a live Gaussian reconstruction.
 
+Phase 1 is the completed Capture Splat **Live Session Foundation** milestone. The
+authenticated sender and progressive-world direction is specified by the
+[World Studio World Compiler Blueprint](https://github.com/sandeep-devarapalli/world-studio/tree/main/docs/blueprints/world-compiler-v0.1).
+The active contract in this repository remains canonical; archived proposal schemas in
+the blueprint are provenance only.
+
 ## Canonical contract
 
 Capture Splat owns the byte-canonical schemas and fixtures under
