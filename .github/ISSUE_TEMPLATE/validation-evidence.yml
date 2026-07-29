@@ -1,0 +1,82 @@
+name: Validation evidence
+description: Submit reproducible device, reconstruction, interoperability, or quality evidence.
+title: "[Validation] "
+body:
+  - type: input
+    id: target
+    attributes:
+      label: Validation target
+      placeholder: Commit, issue, PR, capture package, or contract version
+    validations:
+      required: true
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Target milestone
+      options:
+        - Live Session Foundation
+        - Authenticated Sender And Device Acceptance
+        - Calibration Capture Evidence
+        - Maintenance / not milestone-bound
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment and versions
+      placeholder: |
+        Commit and working tree:
+        OS and architecture:
+        iPhone / iOS:
+        GPU / backend:
+        Tool versions:
+    validations:
+      required: true
+  - type: textarea
+    id: provenance
+    attributes:
+      label: Input provenance and checksums
+      description: Identify public fixtures or privacy-safe capture IDs, schemas, licenses, and hashes.
+    validations:
+      required: true
+  - type: textarea
+    id: gates
+    attributes:
+      label: Acceptance gates and results
+      placeholder: |
+        | Gate | Threshold | Result | Decision |
+        | --- | --- | --- | --- |
+        | ... | ... | ... | promote/hold/reject |
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction commands
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: warnings
+    attributes:
+      label: Warnings, failures, and exclusions
+      description: Include non-finite data, dropped frames, missing evidence, regressions, and checks not run.
+    validations:
+      required: true
+  - type: dropdown
+    id: decision
+    attributes:
+      label: Evidence decision
+      options:
+        - Promote
+        - Hold
+        - Reject
+        - Informational only
+    validations:
+      required: true
+  - type: textarea
+    id: authority
+    attributes:
+      label: Supported and unsupported claims
+    validations:
+      required: true

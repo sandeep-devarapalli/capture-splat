@@ -1,0 +1,75 @@
+name: Implementation
+description: Propose one bounded Capture Splat code or documentation outcome.
+title: "[Implementation] "
+body:
+  - type: input
+    id: outcome
+    attributes:
+      label: Intended outcome
+      description: State the user-visible or pipeline outcome in one sentence.
+    validations:
+      required: true
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Target milestone
+      options:
+        - Live Session Foundation
+        - Authenticated Sender And Device Acceptance
+        - Calibration Capture Evidence
+        - Maintenance / not milestone-bound
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and non-goals
+      placeholder: |
+        In scope:
+        - ...
+
+        Non-goals:
+        - ...
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Link prerequisite issues, contracts, upstreams, or physical evidence. Write None when independent.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance gates
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Reproducible validation
+      description: List commands, fixtures, devices, reports, checksums, thresholds, and expected decisions.
+    validations:
+      required: true
+  - type: textarea
+    id: authority
+    attributes:
+      label: Authority boundary
+      description: State what this work establishes and what remains proposal-only or evidence-blocked.
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Contributor confirmations
+      options:
+        - label: I will keep generated captures, models, splats, renders, and run outputs outside Git.
+          required: true
+        - label: I will preserve source evidence and report failed gates as hold or reject.
+          required: true
+        - label: I will not promote passive capture into collision, navigation, semantic, or physics authority.
+          required: true

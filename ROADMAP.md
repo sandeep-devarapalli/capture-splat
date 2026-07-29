@@ -31,6 +31,25 @@ These are implemented capabilities, not a blanket high-quality claim. A
 physical capture, finite PLY, viewer load, or aligned frame remains evidence
 for one gate only.
 
+## Public Milestones
+
+Capture Splat supplies evidence to the
+[World Studio World Compiler Blueprint](https://github.com/sandeep-devarapalli/world-studio/tree/main/docs/blueprints/world-compiler-v0.1).
+The broader M0-M7 world, editor, navigation, simulation, and Physical Asset
+Calibration outcomes are owned by World Studio.
+
+| Milestone | Outcome | Status |
+|---|---|---|
+| Live Session Foundation | Strict replay-first source-frame, camera, quality, sidecar, ACK, resume, and finalization contract | completed |
+| Authenticated Sender And Device Acceptance | Explicit pairing, TLS, bounded store-and-forward sender, thermal safety, and two-cycle physical-device acceptance | next |
+| Calibration Capture Evidence | Guided and synchronized experimental imagery with apparatus/scale provenance, without inferred physics authority | planned and evidence-blocked |
+
+The completed foundation is permanent `proposal_only` evidence transport. The authenticated
+sender cannot close until physical-device tests cover capture throughput, finalization,
+disconnect/recovery, thermal downgrade, and receiver identity. Calibration recording cannot
+close from code alone; it requires measured apparatus, synchronized trials, checksums, and
+declared downstream validation.
+
 ## Acceptance Gates
 
 - Finish physical acceptance of live spatial guidance and shared-session

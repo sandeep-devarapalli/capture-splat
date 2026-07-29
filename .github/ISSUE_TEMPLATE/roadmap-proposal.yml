@@ -1,0 +1,47 @@
+name: Roadmap proposal
+description: Propose a new Capture Splat outcome or a change to milestone scope.
+title: "[Roadmap] "
+body:
+  - type: input
+    id: outcome
+    attributes:
+      label: Proposed outcome
+    validations:
+      required: true
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Related milestone
+      options:
+        - Live Session Foundation
+        - Authenticated Sender And Device Acceptance
+        - Calibration Capture Evidence
+        - New milestone proposal
+        - Cross-repository World Studio milestone
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: User need and evidence
+      description: Explain the problem using observed device, reconstruction, or interoperability evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and sequencing
+    validations:
+      required: true
+  - type: textarea
+    id: gates
+    attributes:
+      label: Milestone acceptance gates
+    validations:
+      required: true
+  - type: textarea
+    id: exclusions
+    attributes:
+      label: Non-goals and authority boundary
+    validations:
+      required: true
