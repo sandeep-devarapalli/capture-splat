@@ -11,6 +11,11 @@ authenticated sender and progressive-world direction is specified by the
 The active contract in this repository remains canonical; archived proposal schemas in
 the blueprint are provenance only.
 
+The next boundary is the strict [live pairing and authentication
+contract](live_auth.md). It adds QR-bound device identity, TLS pinning, scoped
+grants, revocation epochs, and per-request replay protection without changing
+the Phase 1 evidence schemas or enabling the iPhone sender.
+
 ## Canonical contract
 
 Capture Splat owns the byte-canonical schemas and fixtures under
@@ -125,9 +130,10 @@ The future phone sender must remain downstream of capture persistence:
 5. Prefer local capture correctness under low disk, thermal pressure,
    backgrounding, receiver loss, or network failure. Pause or shed optional
    transmission before reducing the capture gate or losing source evidence.
-6. Keep the sender off by default. Any transport beyond loopback requires
-   explicit LAN opt-in, pairing credentials, authenticated requests, TLS,
-   credential rotation/revocation, and a clear receiver identity. Plain LAN
+6. Keep the sender off by default. Any transport beyond loopback must implement
+   the [live pairing and authentication contract](live_auth.md), including
+   explicit LAN opt-in, QR-bound receiver identity, TLS pinning, scoped grants,
+   request signatures, anti-replay state, and credential revocation. Plain LAN
    HTTP is not an acceptable extension of Phase 1.
 
 These requirements describe future work only. No iPhone capture-loop source is

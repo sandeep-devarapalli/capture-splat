@@ -204,6 +204,14 @@ files, never retain `ARFrame` or capture pixel buffers, keep one bounded sender
 with backpressure and limited in-flight uploads, and always prioritize capture
 and local evidence during disk, thermal, background, or network pressure.
 
-Leaving loopback is a separate security phase. It requires explicit LAN
-opt-in, pairing credentials, authenticated sessions, and TLS before any phone
-sender can connect to World Studio.
+Leaving loopback is a separate security phase defined by the strict [live
+pairing and authentication contract](live_auth.md). It requires explicit LAN
+opt-in, a QR-bound World Studio identity, Bonjour discovery checked against the
+QR invitation, TLS certificate pinning, a current scoped grant, signed requests,
+and durable anti-replay state before any phone sender can connect.
+
+That security contract does not authorize networking from the capture callback.
+The future sender stays downstream of completed atomic writes and uses one
+bounded queue with byte/frame caps. Thermal, storage, background, or network
+pressure pauses transport before it can affect keyframe acceptance or source
+evidence.

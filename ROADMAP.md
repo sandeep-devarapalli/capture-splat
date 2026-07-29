@@ -26,6 +26,9 @@ Capture Splat has implemented the core public capture-to-3DGS path:
   optional sensor-sidecar evidence to an explicitly listening loopback World
   Studio receiver with duplicate, gap, disconnect, resume, and finalization
   semantics. This is proposal-only evidence transport, not live 3DGS.
+- The authenticated-LAN boundary now has a canonical QR pairing, device
+  identity, TLS pin, scoped grant, revocation epoch, and per-request anti-replay
+  contract. The iPhone sender and physical-device acceptance remain open.
 
 These are implemented capabilities, not a blanket high-quality claim. A
 physical capture, finite PLY, viewer load, or aligned frame remains evidence
@@ -41,7 +44,7 @@ Calibration outcomes are owned by World Studio.
 | Milestone | Outcome | Status |
 |---|---|---|
 | Live Session Foundation | Strict replay-first source-frame, camera, quality, sidecar, ACK, resume, and finalization contract | completed |
-| Authenticated Sender And Device Acceptance | Explicit pairing, TLS, bounded store-and-forward sender, thermal safety, and two-cycle physical-device acceptance | next |
+| Authenticated Sender And Device Acceptance | Explicit pairing, TLS, bounded store-and-forward sender, thermal safety, and two-cycle physical-device acceptance | in progress: pairing/auth contract |
 | Calibration Capture Evidence | Guided and synchronized experimental imagery with apparatus/scale provenance, without inferred physics authority | planned and evidence-blocked |
 
 The completed foundation is permanent `proposal_only` evidence transport. The authenticated
@@ -70,9 +73,10 @@ declared downstream validation.
 - Complete TestFlight packaging and distribution metadata.
 - Add release-level startup, long-session thermal, and two-cycle finalization
   evidence across supported LiDAR iPhones.
-- Implement the documented bounded store-and-forward live sender only after
-  replay transport and physical capture stability pass. LAN transport remains
-  blocked on explicit opt-in, pairing credentials, authentication, and TLS.
+- Implement the documented bounded store-and-forward live sender after the
+  paired receiver boundary lands. LAN transport remains disabled until
+  explicit opt-in, QR-bound receiver identity, TLS pinning, a current scoped
+  grant, and authenticated request replay protection all pass.
 
 ### Reconstruction
 
