@@ -463,6 +463,17 @@ The handoff records meter units and software prerequisites, but keeps
 `measurement_eligibility.status = held` until a physical known-distance check
 passes. COLMAP-unit or trainer-normalized points are not labeled metric.
 
+### R2S2R And Newton-Ready Evidence
+
+Capture Splat remains simulator-independent. The current handoff is evidence
+World Studio may compile into a future Newton job; it is not a Newton package.
+See [Newton Simulation Handoff](newton_simulation_handoff.md) for the proposed
+units, frame-graph, collider-provenance, apparatus, task, and approval fields.
+
+World Studio must validate paths, hashes, units, registration, effective
+collision geometry, task probes, and exact solver capabilities before claiming
+compatibility. A successful import remains `hold` without those gates.
+
 `capture-splat validate-apriltag-scale` provides that optional physical check
 for a measured `tagStandard41h12` target. It detects tags through the optional
 `pupil-apriltags` dependency or replays a strict detections JSON, triangulates

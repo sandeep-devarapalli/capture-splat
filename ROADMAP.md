@@ -38,7 +38,7 @@ for one gate only.
 
 Capture Splat supplies evidence to the
 [World Studio World Compiler Blueprint](https://github.com/sandeep-devarapalli/world-studio/tree/main/docs/blueprints/world-compiler-v0.1).
-The broader M0-M7 world, editor, navigation, simulation, and Physical Asset
+The broader M0-M10 world, editor, navigation, simulation, R2S2R, and Physical Asset
 Calibration outcomes are owned by World Studio.
 
 | Milestone | Outcome | Status |
@@ -52,6 +52,23 @@ sender cannot close until physical-device tests cover capture throughput, finali
 disconnect/recovery, thermal downgrade, and receiver identity. Calibration recording cannot
 close from code alone; it requires measured apparatus, synchronized trials, checksums, and
 declared downstream validation.
+
+## R2S2R Capture Program
+
+The [Real2Sim Capture Program](docs/real2sim_capture_program.md) reconciles five requested
+checkpoints with the existing milestone structure:
+
+| Checkpoint | Outcome | Status |
+|---|---|---|
+| CS-R2S1 Task, Robot And Site Brief | Bind capture to site, robot, sensors, task, operating envelope, and evidence needs | planned |
+| CS-R2S2 Asset Capture And Calibration Trials | Record apparatus-backed object and interaction evidence without inferring physics | planned and evidence-blocked |
+| CS-R2S3 Matched Open-Loop And Task Demonstration Capture | Record initial state, command timeline, observations, and outcomes for real/sim comparison | planned |
+| CS-R2S4 Deployment Recapture And Change Evidence | Relocalize to a site revision and emit immutable changed/unchanged/unknown evidence | planned |
+| CS-R2S5 Physical Device Acceptance | Thermal, storage, clocks, networking, finalization, privacy, and apparatus acceptance | tracked by Authenticated Sender And Device Acceptance |
+
+Capture Splat stays simulator-independent. The
+[Newton Simulation Handoff](docs/newton_simulation_handoff.md) describes evidence World
+Studio may compile into its target Newton runtime after separate validation.
 
 ## Acceptance Gates
 
@@ -77,6 +94,9 @@ declared downstream validation.
   paired receiver boundary lands. LAN transport remains disabled until
   explicit opt-in, QR-bound receiver identity, TLS pinning, a current scoped
   grant, and authenticated request replay protection all pass.
+- Add task/robot/site briefs, calibration-trial recording, matched demonstration capture,
+  and deployment recapture as additive evidence workflows after the active sender/device
+  gate. None may weaken local-first capture or infer physical parameters.
 
 ### Reconstruction
 
@@ -117,3 +137,5 @@ declared downstream validation.
   `3000 -> 7000 -> 15000 -> 30000`.
 - Longer training cannot repair weak capture, poor registration, bad
   intrinsics, blur, exposure discontinuity, or missing viewpoint support.
+- Capture Splat remains simulator-neutral. Newton, Isaac, ROS, collision promotion, and
+  physical-parameter authority belong downstream in World Studio.

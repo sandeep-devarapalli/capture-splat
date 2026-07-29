@@ -27,6 +27,10 @@ For the current carry-forward lessons from the iPhone-to-VkSplat validation ladd
 
 Capture Splat is the evidence-producing capture and reconstruction side of the
 [World Studio World Compiler Blueprint](https://github.com/sandeep-devarapalli/world-studio/tree/main/docs/blueprints/world-compiler-v0.1).
+The
+[R2S2R and Newton adoption package](https://github.com/sandeep-devarapalli/world-studio/tree/main/docs/blueprints/world-compiler-v0.1/r2s2r-newton-2026-07-29)
+defines World Studio's target simulation architecture; Capture Splat remains
+simulator-independent.
 It may provide RGB-D, poses, intrinsics, gravity, masks, mesh, RoomPlan proposals,
 continuous video, trained splats, and synchronized experiment imagery. Passive capture
 does not establish mass, inertia, friction, restitution, stiffness, force, torque, or
@@ -35,7 +39,11 @@ physics authority.
 Capture Splat tracks three repo-local milestones in [ROADMAP.md](ROADMAP.md): the completed
 Live Session Foundation, Authenticated Sender And Device Acceptance, and Calibration
 Capture Evidence. World packaging, editing, navigation, simulation, and Physical Asset
-Calibration remain World Studio responsibilities.
+Calibration remain World Studio responsibilities. The
+[Real2Sim Capture Program](docs/real2sim_capture_program.md) defines task/site briefs,
+calibration trials, matched demonstrations, deployment recapture, and physical-device
+acceptance. The [Newton Simulation Handoff](docs/newton_simulation_handoff.md) records the
+strict boundary without adding a simulator dependency.
 
 ## Quickstart: Mac + iPhone
 
