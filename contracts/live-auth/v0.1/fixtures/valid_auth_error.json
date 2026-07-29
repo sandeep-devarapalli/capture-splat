@@ -1,0 +1,6 @@
+{
+  "code": "request_replayed",
+  "message": "Authenticated request was already consumed.",
+  "retryable": false,
+  "schema": "capture_splat.live_auth_error.v0.1"
+}

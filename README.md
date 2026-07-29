@@ -456,6 +456,13 @@ already loaded in World Studio. See [Live Session Phase 1](docs/live_session.md)
 for the contract, transport, recovery behavior, and the bounded future iOS
 sender design.
 
+M1 adds the strict [live pairing and authentication contract](docs/live_auth.md)
+for QR-bound World Studio identity, Bonjour discovery, certificate pinning,
+P-256 request authentication, scoped grants, expiry, revocation epochs, and
+anti-replay counters. This contract does not enable iPhone networking: the
+receiver remains loopback-only until pairing succeeds, and the capture loop is
+unchanged. The bounded sender is a separate follow-up.
+
 ## Linux, Windows, And Cloud GPUs
 
 The iPhone app must be built with Apple tooling, but once you have an exported capture folder, the processing side is intended to work on macOS, Linux, Windows, and cloud NVIDIA machines.

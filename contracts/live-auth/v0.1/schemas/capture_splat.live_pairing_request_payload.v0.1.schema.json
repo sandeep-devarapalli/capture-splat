@@ -1,0 +1,116 @@
+{
+  "$id": "urn:capture-splat:schema:capture_splat.live_pairing_request_payload.v0.1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "authority": {
+      "const": "proposal_only"
+    },
+    "client_nonce_b64u": {
+      "$ref": "#/$defs/bytes16"
+    },
+    "created_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "desktop_id": {
+      "$ref": "#/$defs/desktopId"
+    },
+    "device_app_version": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$",
+      "type": "string"
+    },
+    "device_id": {
+      "$ref": "#/$defs/deviceId"
+    },
+    "device_name": {
+      "maxLength": 80,
+      "minLength": 1,
+      "type": "string"
+    },
+    "device_platform": {
+      "const": "ios"
+    },
+    "device_public_key_b64u": {
+      "$ref": "#/$defs/p256PublicKey"
+    },
+    "pairing_id": {
+      "$ref": "#/$defs/pairingId"
+    },
+    "request_id": {
+      "$ref": "#/$defs/requestId"
+    },
+    "requested_permissions": {
+      "$ref": "#/$defs/permissions"
+    },
+    "schema": {
+      "const": "capture_splat.live_pairing_request_payload.v0.1"
+    }
+  },
+  "required": [
+    "schema",
+    "pairing_id",
+    "request_id",
+    "desktop_id",
+    "device_id",
+    "device_name",
+    "device_public_key_b64u",
+    "device_platform",
+    "device_app_version",
+    "client_nonce_b64u",
+    "requested_permissions",
+    "created_at",
+    "authority"
+  ],
+  "title": "Capture Splat live pairing request payload v0.1",
+  "type": "object",
+  "$defs": {
+    "bytes16": {
+      "pattern": "^[A-Za-z0-9_-]{21}[AQgw]$",
+      "type": "string"
+    },
+    "p256PublicKey": {
+      "pattern": "^[A-Za-z0-9_-]{86}[AEIMQUYcgkosw048]$",
+      "type": "string"
+    },
+    "pairingId": {
+      "pattern": "^csp_[A-Za-z0-9_-]{21}[AQgw]$",
+      "type": "string"
+    },
+    "desktopId": {
+      "pattern": "^wsd_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+      "type": "string"
+    },
+    "deviceId": {
+      "pattern": "^csd_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+      "type": "string"
+    },
+    "permissions": {
+      "items": {
+        "enum": [
+          "receiver:status",
+          "session:create",
+          "session:resume",
+          "frame:put",
+          "asset:put",
+          "session:finalize"
+        ]
+      },
+      "maxItems": 6,
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "requestId": {
+      "pattern": "^csr_[A-Za-z0-9_-]{21}[AQgw]$",
+      "type": "string"
+    },
+    "sha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "timestamp": {
+      "pattern": "^(?!0000)\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+      "type": "string"
+    }
+  }
+}

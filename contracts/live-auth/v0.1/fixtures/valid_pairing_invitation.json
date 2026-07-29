@@ -1,0 +1,26 @@
+{
+  "authority": "proposal_only",
+  "desktop_id": "wsd_wWnhZxTueI6DlyzNcbPEU_iTcCxdZmDP3x3La5ZDbHE",
+  "desktop_name": "World Studio Mac",
+  "desktop_public_key_b64u": "BD4yFrjlEWGhq9AqaqN85Jb0CYiW0XfRwUevR-eSmyqcd7eKx3eIz4CtI5ienFKqlIy_EleXusDfl6HkwEKt5j4",
+  "discovery": {
+    "domain": "local.",
+    "service_name": "World Studio Fixture",
+    "service_type": "_capturesplat._tcp"
+  },
+  "expires_at": "2026-07-29T10:35:00.000Z",
+  "issued_at": "2026-07-29T10:30:00.000Z",
+  "mode": "qr",
+  "pairing_id": "csp_AAECAwQFBgcICQoLDA0ODw",
+  "pairing_secret_b64u": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+  "permissions": [
+    "receiver:status",
+    "session:create",
+    "session:resume",
+    "frame:put",
+    "asset:put",
+    "session:finalize"
+  ],
+  "schema": "capture_splat.live_pairing_invitation.v0.1",
+  "tls_certificate_sha256": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+}
