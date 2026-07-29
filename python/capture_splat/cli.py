@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from .colmap_focused_repair import run_colmap_focused_repair
 from .colmap_support_delta import compare_colmap_support_delta
 from .colmap_support_repair import build_colmap_support_repair
 from .ingest import ingest_capture
+from .live_replay import DEFAULT_LIVE_RECEIVER, replay_live_session
 from .ply_stats import prune_ply_by_alpha, sanitize_ply_drop_non_finite
 from .prepare_capture import prepare_capture
 from .reconstruct import STAGES, reconstruct_capture
@@ -209,6 +211,23 @@ def main() -> None:
     p_world_studio.add_argument("--sparse-dir", default="sparse/0")
     p_world_studio.add_argument("--copy-files", action="store_true")
     p_world_studio.add_argument("--capture-profile", choices=["object", "room_interior", "walkthrough", "outdoor", "video_360"])
+    p_live_replay = sub.add_parser(
+        "replay-live-session",
+        help="Replay an existing capture to a loopback World Studio live receiver",
+    )
+    p_live_replay.add_argument("--capture", type=Path, required=True)
+    p_live_replay.add_argument(
+        "--receiver",
+        default=os.environ.get("CAPTURE_SPLAT_LIVE_RECEIVER", DEFAULT_LIVE_RECEIVER),
+    )
+    p_live_replay.add_argument("--session-id")
+    p_live_replay.add_argument("--delay-ms", type=int, default=0)
+    p_live_replay.add_argument("--shuffle", action="store_true")
+    p_live_replay.add_argument("--seed", type=int, default=0)
+    p_live_replay.add_argument("--duplicate-every", type=int, default=0)
+    p_live_replay.add_argument("--disconnect-after", type=int)
+    p_live_replay.add_argument("--disconnect-seconds", type=float, default=0.0)
+    p_live_replay.add_argument("--resume", action="store_true")
     p_train = sub.add_parser("train-vksplat", help="Run VkSplat on a COLMAP package")
     p_train.add_argument("--package", type=Path, required=True)
     p_train.add_argument("--out", type=Path, required=True)
@@ -604,6 +623,19 @@ def main() -> None:
             copy_files=args.copy_files,
             capture_profile=args.capture_profile,
         )
+    elif args.command == "replay-live-session":
+        payload = replay_live_session(
+            args.capture,
+            receiver=args.receiver,
+            session_id=args.session_id,
+            delay_ms=args.delay_ms,
+            shuffle=args.shuffle,
+            seed=args.seed,
+            duplicate_every=args.duplicate_every,
+            disconnect_after=args.disconnect_after,
+            disconnect_seconds=args.disconnect_seconds,
+            resume=args.resume,
+        )
     elif args.command == "train-vksplat":
         payload = run_vksplat(args.package, args.out, args.vksplat_root, steps=args.steps, dry_run=args.dry_run, save_train_renders=args.save_train_renders, stop_reset_at=args.stop_reset_at, masks=args.masks, normalization=args.normalization, depth_supervision=args.depth_supervision, normal_supervision=args.normal_supervision)
     elif args.command == "vksplat-render-probe":
@@ -864,7 +896,9 @@ def main() -> None:
         }
     else:
         raise AssertionError(args.command)
-    print(json.dumps(payload, indent=2))
+    print(json.dumps(payload, indent=2, allow_nan=False))
+    if args.command == "replay-live-session" and payload["status"] == "interrupted":
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,20 @@
+{
+  "asset_role": "source",
+  "contiguous_count": 1,
+  "expected_frame_count": 2,
+  "finalized": false,
+  "missing_ranges": [
+    {
+      "end": 2,
+      "start": 2
+    }
+  ],
+  "next_expected_sequence_id": 2,
+  "operation": "asset",
+  "pending_count": 0,
+  "received_count": 1,
+  "schema": "capture_splat.live_ack.v0.1",
+  "sequence_id": 1,
+  "session_id": "fixture-session-01",
+  "status": "accepted"
+}

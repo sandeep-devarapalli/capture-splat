@@ -15,6 +15,7 @@ dist/
 captures/
 runs/
 outputs/
+live-sessions/
 external/
 *.ply
 *.las

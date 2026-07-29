@@ -1,0 +1,115 @@
+{
+  "$id": "urn:capture-splat:schema:capture_splat.live_ack.v0.1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "asset_role": {
+      "enum": [
+        "source",
+        "depth",
+        "confidence",
+        "mask-person",
+        "mask-valid",
+        "mask-object"
+      ]
+    },
+    "contiguous_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "expected_frame_count": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "finalized": {
+      "type": "boolean"
+    },
+    "message": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "missing_ranges": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "end": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "start": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "next_expected_sequence_id": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "operation": {
+      "enum": [
+        "session",
+        "frame",
+        "asset",
+        "resume",
+        "finalize"
+      ]
+    },
+    "pending_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "received_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schema": {
+      "const": "capture_splat.live_ack.v0.1"
+    },
+    "sequence_id": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "session_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "accepted",
+        "duplicate",
+        "incomplete",
+        "finalized"
+      ]
+    }
+  },
+  "required": [
+    "schema",
+    "session_id",
+    "operation",
+    "status",
+    "received_count",
+    "contiguous_count",
+    "pending_count",
+    "expected_frame_count",
+    "next_expected_sequence_id",
+    "missing_ranges",
+    "finalized"
+  ],
+  "title": "Capture Splat live ACK v0.1",
+  "type": "object"
+}

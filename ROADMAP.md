@@ -22,6 +22,10 @@ Capture Splat has implemented the core public capture-to-3DGS path:
 - Package orientation and trainer normalization are recorded as separate
   transforms so viewers do not have to guess how a trained PLY relates to
   source cameras.
+- Replay-first live sessions now send strict source-frame, camera, quality, and
+  optional sensor-sidecar evidence to an explicitly listening loopback World
+  Studio receiver with duplicate, gap, disconnect, resume, and finalization
+  semantics. This is proposal-only evidence transport, not live 3DGS.
 
 These are implemented capabilities, not a blanket high-quality claim. A
 physical capture, finite PLY, viewer load, or aligned frame remains evidence
@@ -47,6 +51,9 @@ for one gate only.
 - Complete TestFlight packaging and distribution metadata.
 - Add release-level startup, long-session thermal, and two-cycle finalization
   evidence across supported LiDAR iPhones.
+- Implement the documented bounded store-and-forward live sender only after
+  replay transport and physical capture stability pass. LAN transport remains
+  blocked on explicit opt-in, pairing credentials, authentication, and TLS.
 
 ### Reconstruction
 
