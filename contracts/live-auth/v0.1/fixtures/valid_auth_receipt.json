@@ -1,0 +1,21 @@
+{
+  "auth_scheme": "p256-sha256-ieee-p1363-v0.1",
+  "authenticated_at": "2026-07-29T10:32:00.000Z",
+  "authority": "proposal_only",
+  "desktop_id": "wsd_wWnhZxTueI6DlyzNcbPEU_iTcCxdZmDP3x3La5ZDbHE",
+  "device_id": "csd_cJ0JB4zCGIKQsIFSxLzy0owayS74AO-GOjY-Eo9MGoY",
+  "grant_expires_at": "2026-08-28T10:31:01.000Z",
+  "grant_id": "csg_ICEiIyQlJicoKSorLC0uLw",
+  "pairing_epoch": 1,
+  "permissions": [
+    "receiver:status",
+    "session:create",
+    "session:resume",
+    "frame:put",
+    "asset:put",
+    "session:finalize"
+  ],
+  "schema": "capture_splat.live_auth_receipt.v0.1",
+  "session_id": "fixture-live-session-01",
+  "tls_certificate_sha256": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+}

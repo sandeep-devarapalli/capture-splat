@@ -1,0 +1,30 @@
+{
+  "auth_scheme": "p256-sha256-ieee-p1363-v0.1",
+  "authority": "proposal_only",
+  "audience": "capture_splat.live.v0.1",
+  "desktop_id": "wsd_wWnhZxTueI6DlyzNcbPEU_iTcCxdZmDP3x3La5ZDbHE",
+  "device_id": "csd_cJ0JB4zCGIKQsIFSxLzy0owayS74AO-GOjY-Eo9MGoY",
+  "device_public_key_b64u": "BEWJDLhByYwpuaSUuIhisvJyC69hT_46iedy7ALwWhnbyjMaerCzwdzY5xzSCnnR1JM8H8zSW0cgmAa5PgD_slw",
+  "expires_at": "2026-08-28T10:31:01.000Z",
+  "grant_id": "csg_ICEiIyQlJicoKSorLC0uLw",
+  "issued_at": "2026-07-29T10:31:01.000Z",
+  "live_discovery": {
+    "domain": "local.",
+    "service_name": "World Studio Fixture",
+    "service_type": "_capturesplat._tcp"
+  },
+  "not_before": "2026-07-29T10:31:01.000Z",
+  "pairing_epoch": 1,
+  "pairing_id": "csp_AAECAwQFBgcICQoLDA0ODw",
+  "permissions": [
+    "receiver:status",
+    "session:create",
+    "session:resume",
+    "frame:put",
+    "asset:put",
+    "session:finalize"
+  ],
+  "request_id": "csr_EBESExQVFhcYGRobHB0eHw",
+  "schema": "capture_splat.live_pairing_grant_payload.v0.1",
+  "tls_certificate_sha256": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+}

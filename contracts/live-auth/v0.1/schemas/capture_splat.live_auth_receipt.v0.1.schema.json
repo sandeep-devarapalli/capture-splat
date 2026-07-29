@@ -1,0 +1,100 @@
+{
+  "$id": "urn:capture-splat:schema:capture_splat.live_auth_receipt.v0.1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "auth_scheme": {
+      "const": "p256-sha256-ieee-p1363-v0.1"
+    },
+    "authenticated_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "authority": {
+      "const": "proposal_only"
+    },
+    "desktop_id": {
+      "$ref": "#/$defs/desktopId"
+    },
+    "device_id": {
+      "$ref": "#/$defs/deviceId"
+    },
+    "grant_expires_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "grant_id": {
+      "$ref": "#/$defs/grantId"
+    },
+    "pairing_epoch": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "permissions": {
+      "$ref": "#/$defs/permissions"
+    },
+    "schema": {
+      "const": "capture_splat.live_auth_receipt.v0.1"
+    },
+    "session_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "type": "string"
+    },
+    "tls_certificate_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "required": [
+    "schema",
+    "session_id",
+    "desktop_id",
+    "device_id",
+    "grant_id",
+    "pairing_epoch",
+    "permissions",
+    "auth_scheme",
+    "tls_certificate_sha256",
+    "authenticated_at",
+    "grant_expires_at",
+    "authority"
+  ],
+  "title": "Capture Splat live authentication receipt v0.1",
+  "type": "object",
+  "$defs": {
+    "grantId": {
+      "pattern": "^csg_[A-Za-z0-9_-]{21}[AQgw]$",
+      "type": "string"
+    },
+    "desktopId": {
+      "pattern": "^wsd_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+      "type": "string"
+    },
+    "deviceId": {
+      "pattern": "^csd_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+      "type": "string"
+    },
+    "permissions": {
+      "items": {
+        "enum": [
+          "receiver:status",
+          "session:create",
+          "session:resume",
+          "frame:put",
+          "asset:put",
+          "session:finalize"
+        ]
+      },
+      "maxItems": 6,
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "sha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "timestamp": {
+      "pattern": "^(?!0000)\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+      "type": "string"
+    }
+  }
+}

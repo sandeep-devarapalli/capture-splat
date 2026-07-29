@@ -1,0 +1,32 @@
+{
+  "$id": "urn:capture-splat:schema:capture_splat.live_pairing_grant_envelope.v0.1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "desktop_signature_b64u": {
+      "$ref": "#/$defs/signature"
+    },
+    "payload_b64u": {
+      "maxLength": 10923,
+      "minLength": 1,
+      "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$",
+      "type": "string"
+    },
+    "schema": {
+      "const": "capture_splat.live_pairing_grant_envelope.v0.1"
+    }
+  },
+  "required": [
+    "schema",
+    "payload_b64u",
+    "desktop_signature_b64u"
+  ],
+  "title": "Capture Splat live pairing grant envelope v0.1",
+  "type": "object",
+  "$defs": {
+    "signature": {
+      "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$",
+      "type": "string"
+    }
+  }
+}

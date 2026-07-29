@@ -1,0 +1,47 @@
+{
+  "$id": "urn:capture-splat:schema:capture_splat.live_auth_error.v0.1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "enum": [
+        "body_digest_mismatch",
+        "desktop_signature_invalid",
+        "device_signature_invalid",
+        "grant_expired",
+        "grant_revoked",
+        "grant_unknown",
+        "identity_mismatch",
+        "invalid_request",
+        "pairing_consumed",
+        "pairing_expired",
+        "pairing_proof_invalid",
+        "permission_denied",
+        "receiver_not_paired",
+        "request_replayed",
+        "request_signature_invalid",
+        "request_stale",
+        "session_owner_mismatch",
+        "tls_required"
+      ]
+    },
+    "message": {
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "schema": {
+      "const": "capture_splat.live_auth_error.v0.1"
+    }
+  },
+  "required": [
+    "schema",
+    "code",
+    "retryable"
+  ],
+  "title": "Capture Splat live authentication error v0.1",
+  "type": "object"
+}

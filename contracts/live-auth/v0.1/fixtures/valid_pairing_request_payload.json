@@ -1,0 +1,22 @@
+{
+  "authority": "proposal_only",
+  "client_nonce_b64u": "YGFiY2RlZmdoaWprbG1ubw",
+  "created_at": "2026-07-29T10:31:00.000Z",
+  "desktop_id": "wsd_wWnhZxTueI6DlyzNcbPEU_iTcCxdZmDP3x3La5ZDbHE",
+  "device_app_version": "0.1.0",
+  "device_id": "csd_cJ0JB4zCGIKQsIFSxLzy0owayS74AO-GOjY-Eo9MGoY",
+  "device_name": "Capture Splat iPhone",
+  "device_platform": "ios",
+  "device_public_key_b64u": "BEWJDLhByYwpuaSUuIhisvJyC69hT_46iedy7ALwWhnbyjMaerCzwdzY5xzSCnnR1JM8H8zSW0cgmAa5PgD_slw",
+  "pairing_id": "csp_AAECAwQFBgcICQoLDA0ODw",
+  "request_id": "csr_EBESExQVFhcYGRobHB0eHw",
+  "requested_permissions": [
+    "receiver:status",
+    "session:create",
+    "session:resume",
+    "frame:put",
+    "asset:put",
+    "session:finalize"
+  ],
+  "schema": "capture_splat.live_pairing_request_payload.v0.1"
+}

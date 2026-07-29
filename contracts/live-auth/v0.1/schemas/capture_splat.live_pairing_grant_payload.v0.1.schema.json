@@ -1,0 +1,150 @@
+{
+  "$id": "urn:capture-splat:schema:capture_splat.live_pairing_grant_payload.v0.1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "audience": {
+      "const": "capture_splat.live.v0.1"
+    },
+    "auth_scheme": {
+      "const": "p256-sha256-ieee-p1363-v0.1"
+    },
+    "authority": {
+      "const": "proposal_only"
+    },
+    "desktop_id": {
+      "$ref": "#/$defs/desktopId"
+    },
+    "device_id": {
+      "$ref": "#/$defs/deviceId"
+    },
+    "device_public_key_b64u": {
+      "$ref": "#/$defs/p256PublicKey"
+    },
+    "expires_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "grant_id": {
+      "$ref": "#/$defs/grantId"
+    },
+    "issued_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "not_before": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "live_discovery": {
+      "additionalProperties": false,
+      "properties": {
+        "domain": {
+          "const": "local."
+        },
+        "service_name": {
+          "maxLength": 63,
+          "minLength": 1,
+          "type": "string"
+        },
+        "service_type": {
+          "const": "_capturesplat._tcp"
+        }
+      },
+      "required": [
+        "service_type",
+        "service_name",
+        "domain"
+      ],
+      "type": "object"
+    },
+    "pairing_id": {
+      "$ref": "#/$defs/pairingId"
+    },
+    "pairing_epoch": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "permissions": {
+      "$ref": "#/$defs/permissions"
+    },
+    "request_id": {
+      "$ref": "#/$defs/requestId"
+    },
+    "schema": {
+      "const": "capture_splat.live_pairing_grant_payload.v0.1"
+    },
+    "tls_certificate_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "required": [
+    "schema",
+    "pairing_id",
+    "request_id",
+    "grant_id",
+    "pairing_epoch",
+    "audience",
+    "desktop_id",
+    "device_id",
+    "device_public_key_b64u",
+    "permissions",
+    "auth_scheme",
+    "live_discovery",
+    "tls_certificate_sha256",
+    "issued_at",
+    "not_before",
+    "expires_at",
+    "authority"
+  ],
+  "title": "Capture Splat live pairing grant payload v0.1",
+  "type": "object",
+  "$defs": {
+    "grantId": {
+      "pattern": "^csg_[A-Za-z0-9_-]{21}[AQgw]$",
+      "type": "string"
+    },
+    "pairingId": {
+      "pattern": "^csp_[A-Za-z0-9_-]{21}[AQgw]$",
+      "type": "string"
+    },
+    "desktopId": {
+      "pattern": "^wsd_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+      "type": "string"
+    },
+    "deviceId": {
+      "pattern": "^csd_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+      "type": "string"
+    },
+    "p256PublicKey": {
+      "pattern": "^[A-Za-z0-9_-]{86}[AEIMQUYcgkosw048]$",
+      "type": "string"
+    },
+    "permissions": {
+      "items": {
+        "enum": [
+          "receiver:status",
+          "session:create",
+          "session:resume",
+          "frame:put",
+          "asset:put",
+          "session:finalize"
+        ]
+      },
+      "maxItems": 6,
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "requestId": {
+      "pattern": "^csr_[A-Za-z0-9_-]{21}[AQgw]$",
+      "type": "string"
+    },
+    "sha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "timestamp": {
+      "pattern": "^(?!0000)\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+      "type": "string"
+    }
+  }
+}

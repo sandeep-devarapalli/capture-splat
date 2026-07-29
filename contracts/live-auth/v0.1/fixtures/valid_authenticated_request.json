@@ -1,0 +1,15 @@
+{
+  "body_b64u": "Zml4dHVyZS1saXZlLWJvZHk",
+  "canonical_ascii_b64u": "Q0FQVFVSRS1TUExBVC1BVVRILVYxCndzZF93V25oWnhUdWVJNkRseXpOY2JQRVVfaVRjQ3hkWm1EUDN4M0xhNVpEYkhFCmNzZF9jSjBKQjR6Q0dJS1FzSUZTeEx6eTBvd2F5Uzc0QU8tR09qWS1FbzlNR29ZCmNzZ19JQ0VpSXlRbEppY29LU29yTEMwdUx3CjcKY3NyX0VCRVNFeFFWRmhjWUdSb2JIQjBlSHcKMjAyNi0wNy0yOVQxMDozMjowMC4wMDBaClBVVAovYXBpL2NhcHR1cmUtc3BsYXQvbGl2ZS92MC4xL3Nlc3Npb25zL2ZpeHR1cmUtbGl2ZS1zZXNzaW9uLTAxL2ZyYW1lcy8xCmFwcGxpY2F0aW9uL2pzb24KMTcKc2hhMjU2OjBkYzgzYzIzNjVhYWVjZDkzYzg5Y2VhOWEzMWEwZjllZWQyZDVhNGUxYmFiODA3ZjAyZmZjMjkwODM3ZTU0ODYK",
+  "content_length": 17,
+  "content_sha256": "sha256:0dc83c2365aaecd93c89cea9a31a0f9eed2d5a4e1bab807f02ffc290837e5486",
+  "content_type": "application/json",
+  "counter": 7,
+  "desktop_id": "wsd_wWnhZxTueI6DlyzNcbPEU_iTcCxdZmDP3x3La5ZDbHE",
+  "device_id": "csd_cJ0JB4zCGIKQsIFSxLzy0owayS74AO-GOjY-Eo9MGoY",
+  "grant_id": "csg_ICEiIyQlJicoKSorLC0uLw",
+  "method": "PUT",
+  "path": "/api/capture-splat/live/v0.1/sessions/fixture-live-session-01/frames/1",
+  "request_id": "csr_EBESExQVFhcYGRobHB0eHw",
+  "timestamp": "2026-07-29T10:32:00.000Z"
+}
