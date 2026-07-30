@@ -195,14 +195,15 @@ previous wall, corner, table edge, shelf, or textured object in view while addin
 translation. Avoid fast pans, exposure jumps, blank walls, glass, and stopping
 after only one height band.
 
-## Future live sender boundary
+## Live sender boundary
 
-The Phase 1 live path is replay-only and does not modify the iPhone capture
-loop. A future sender must follow the bounded store-and-forward design in
-[Live Session Phase 1](live_session.md): enqueue only atomically completed local
-files, never retain `ARFrame` or capture pixel buffers, keep one bounded sender
-with backpressure and limited in-flight uploads, and always prioritize capture
-and local evidence during disk, thermal, background, or network pressure.
+The Phase 1 live path remains replay-first and does not modify the iPhone
+capture loop. M1B-1 adds the dormant [Swift sender
+foundation](ios_live_sender.md): persistent device identity and grants, pinned
+authenticated transport, a durable frame/byte-bounded queue, limited in-flight
+uploads, retry/resume, and capture-first pressure policy. It accepts only
+immutable local file references and never retains `ARFrame` or capture pixel
+buffers.
 
 Leaving loopback is a separate security phase defined by the strict [live
 pairing and authentication contract](live_auth.md). It requires explicit LAN
@@ -210,8 +211,7 @@ opt-in, a QR-bound World Studio identity, Bonjour discovery checked against the
 QR invitation, TLS certificate pinning, a current scoped grant, signed requests,
 and durable anti-replay state before any phone sender can connect.
 
-That security contract does not authorize networking from the capture callback.
-The future sender stays downstream of completed atomic writes and uses one
-bounded queue with byte/frame caps. Thermal, storage, background, or network
-pressure pauses transport before it can affect keyframe acceptance or source
-evidence.
+That security contract and the dormant foundation do not authorize networking
+from the capture callback. The later integration stays downstream of completed
+atomic writes. Thermal, storage, background, or network pressure must pause
+transport before it can affect keyframe acceptance or source evidence.

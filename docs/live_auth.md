@@ -2,8 +2,8 @@
 
 This is the canonical Capture Splat contract for pairing one iPhone with one
 World Studio Mac and authenticating the existing live-session protocol over a
-local network. It is the security boundary before a future bounded iPhone
-sender. This change does not enable phone networking or modify the capture
+local network. It is the security boundary used by the dormant M1B-1 bounded
+sender foundation. M1B-1 does not enable phone networking or modify the capture
 loop.
 
 World Studio must keep the live receiver on loopback until an unexpired pairing
@@ -70,9 +70,10 @@ csg_<22 Base64URL characters>
 ```
 
 ECDSA signatures use SHA-256 and the 64-byte IEEE-P1363 `r || s` form, not ASN.1
-DER. Both scalars must be nonzero and less than the P-256 order. This repository
-defines structural validation plus deterministic canonical-byte and domain
-vectors; iPhone key generation and signing remain future sender work.
+DER. Both scalars must be nonzero and less than the P-256 order. The M1B-1 Swift
+foundation generates and persists the device key, signs pairing/live requests,
+and verifies desktop grants against these deterministic canonical-byte and
+domain vectors.
 
 ## Pairing invitation and QR
 
@@ -242,8 +243,10 @@ secret, or reusable bearer credential. Errors use the strict
 
 ## Capture-loop and sender boundary
 
-This contract deliberately stops before iPhone sender implementation. The next
-change must:
+The [M1B-1 sender foundation](ios_live_sender.md) implements the isolated
+identity, grant, signed transport, bounded queue, retry, resume, and pressure
+policy below. It deliberately stops before capture-loop integration. The
+integration change must:
 
 1. create immutable session identity before the first live session request;
 2. enqueue only after source RGB and every declared sidecar are atomically

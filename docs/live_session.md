@@ -14,7 +14,9 @@ the blueprint are provenance only.
 The next boundary is the strict [live pairing and authentication
 contract](live_auth.md). It adds QR-bound device identity, TLS pinning, scoped
 grants, revocation epochs, and per-request replay protection without changing
-the Phase 1 evidence schemas or enabling the iPhone sender.
+the Phase 1 evidence schemas. The dormant
+[M1B-1 Swift sender foundation](ios_live_sender.md) implements that client
+boundary, but does not enable capture-loop networking.
 
 ## Canonical contract
 
@@ -111,9 +113,12 @@ are deterministic test tools:
 Replay creates no queue, checkpoint, or generated session in the capture
 folder. World Studio owns durable receiver state outside Git.
 
-## Future iOS bounded store-and-forward sender
+## iOS bounded store-and-forward sender
 
-The future phone sender must remain downstream of capture persistence:
+M1B-1 implements and host-tests the isolated identity, grant, signed transport,
+queue, retry, resume, and pressure-policy components. The capture-loop hookup
+and physical sender remain future work and must stay downstream of capture
+persistence:
 
 1. Enqueue a frame only after RGB and all declared sidecars have completed
    atomic local writes. Queue records reference file paths and immutable
