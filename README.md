@@ -489,8 +489,11 @@ connection.
 
 The sender is still not wired into `CaptureController`, and pairing does not
 open a frame queue or upload capture evidence. The ACK-index benchmark in
-issue #35, the post-atomic-write callback, and two-cycle physical-device
-acceptance remain open.
+[issue #35](https://github.com/sandeep-devarapalli/capture-splat/issues/35)
+uses the predeclared
+[Release benchmark protocol](docs/ios_live_ack_index_benchmark.md) before any
+post-atomic-write callback is allowed. The eligible oldest-device run and
+two-cycle physical-device acceptance remain open.
 
 ## Linux, Windows, And Cloud GPUs
 
