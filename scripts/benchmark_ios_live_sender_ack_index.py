@@ -17,15 +17,16 @@ from typing import Any
 TRIAL_COUNTS = (360, 720, 1_000, 10_000, 50_000)
 DEFAULT_WARMUPS = 5
 DEFAULT_TRIALS = 30
-REPORT_SCHEMA = "capture_splat.live_sender_ack_benchmark_report.v0.1"
-ENVELOPE_SCHEMA = "capture_splat.live_sender_ack_benchmark_report_envelope.v0.1"
-RECONCILE_SCHEMA = "capture_splat.live_sender_ack_benchmark_reconcile_phase.v0.1"
-REOPEN_SCHEMA = "capture_splat.live_sender_ack_benchmark_reopen_phase.v0.1"
+ELIGIBLE_MODELS = ("iPhone17,2",)
+REPORT_SCHEMA = "capture_splat.live_sender_ack_benchmark_report.v0.2"
+ENVELOPE_SCHEMA = "capture_splat.live_sender_ack_benchmark_report_envelope.v0.2"
+RECONCILE_SCHEMA = "capture_splat.live_sender_ack_benchmark_reconcile_phase.v0.2"
+REOPEN_SCHEMA = "capture_splat.live_sender_ack_benchmark_reopen_phase.v0.2"
 UNPACED_STREAM_SCHEMA = (
-    "capture_splat.live_sender_ack_benchmark_unpaced_stream_phase.v0.1"
+    "capture_splat.live_sender_ack_benchmark_unpaced_stream_phase.v0.2"
 )
 PACED_STREAM_SCHEMA = (
-    "capture_splat.live_sender_ack_benchmark_paced_stream_phase.v0.1"
+    "capture_splat.live_sender_ack_benchmark_paced_stream_phase.v0.2"
 )
 DEFAULT_STREAM_COUNT = 720
 DEFAULT_PACED_ACKNOWLEDGEMENTS_PER_SECOND = 5
@@ -66,7 +67,7 @@ PLATFORM_KEYS = {
     "architecture",
     "thermal_state",
     "is_physical_device",
-    "is_oldest_supported_lidar_iphone",
+    "is_designated_ack_benchmark_device",
     "optimized_build",
     "physical_gate_result",
 }
@@ -144,6 +145,12 @@ def _validate_platform(value: object) -> dict[str, Any]:
     platform = _require_keys(value, PLATFORM_KEYS, "platform evidence")
     if platform["optimized_build"] is not True:
         raise ValueError("benchmark CLI was not compiled with the optimized-build marker")
+    expected_designated = (
+        platform["is_physical_device"]
+        and platform["machine"] in ELIGIBLE_MODELS
+    )
+    if platform["is_designated_ack_benchmark_device"] is not expected_designated:
+        raise ValueError("platform designated benchmark-device claim is inconsistent")
     return platform
 
 
@@ -317,7 +324,7 @@ def _validate_stream_gate_result(value: object, platform: dict[str, Any]) -> str
         raise ValueError("stream gate result is invalid")
     if not platform["is_physical_device"]:
         expected = "not_evaluated_non_physical"
-    elif not platform["is_oldest_supported_lidar_iphone"]:
+    elif not platform["is_designated_ack_benchmark_device"]:
         expected = "not_evaluated_ineligible_device"
     elif not platform["optimized_build"]:
         expected = "not_evaluated_unoptimized_build"
@@ -838,7 +845,7 @@ def _hard_gate_status(
 ) -> str:
     if not platform["is_physical_device"]:
         return "not_evaluated_non_physical"
-    if not platform["is_oldest_supported_lidar_iphone"]:
+    if not platform["is_designated_ack_benchmark_device"]:
         return "not_evaluated_ineligible_device"
     if not platform["optimized_build"]:
         return "not_evaluated_unoptimized_build"
@@ -1166,8 +1173,11 @@ def main() -> int:
             },
             "hard_gate": {
                 "status": hard_gate_status,
-                "eligible_device_models": ["iPhone13,3", "iPhone13,4"],
-                "required_evidence": "optimized physical-device run on the oldest supported LiDAR iPhone",
+                "eligible_device_models": list(ELIGIBLE_MODELS),
+                "required_evidence": (
+                    "optimized physical-device run on the designated "
+                    "iPhone 16 Pro Max (iPhone17,2)"
+                ),
                 "budgets": HARD_GATE_BUDGETS,
                 "evaluation_inputs": gate_inputs,
             },
@@ -1210,7 +1220,7 @@ def main() -> int:
         }
         _atomic_write(output, _canonical(envelope))
         print(_canonical({
-            "schema": "capture_splat.live_sender_ack_benchmark_summary.v0.1",
+            "schema": "capture_splat.live_sender_ack_benchmark_summary.v0.2",
             "report": str(output),
             "payload_sha256": envelope["payload_sha256"],
             "hard_gate_status": hard_gate_status,

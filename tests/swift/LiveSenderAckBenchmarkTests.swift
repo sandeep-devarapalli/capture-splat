@@ -173,7 +173,7 @@ final class LiveSenderAckBenchmarkTests: XCTestCase {
         platform: LiveSenderAckBenchmarkPlatform
     ) {
         if platform.isPhysicalDevice
-            && platform.isOldestSupportedLiDARiPhone
+            && platform.isDesignatedACKBenchmarkDevice
             && platform.optimizedBuild {
             XCTAssertEqual(
                 gateResult,
@@ -189,7 +189,7 @@ final class LiveSenderAckBenchmarkTests: XCTestCase {
         _ platform: LiveSenderAckBenchmarkPlatform
     ) {
         if platform.isPhysicalDevice
-            && platform.isOldestSupportedLiDARiPhone
+            && platform.isDesignatedACKBenchmarkDevice
             && platform.optimizedBuild {
             XCTAssertEqual(
                 platform.physicalGateResult,
