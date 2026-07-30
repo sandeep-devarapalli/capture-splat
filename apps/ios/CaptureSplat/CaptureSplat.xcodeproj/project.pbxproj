@@ -24,6 +24,10 @@
 		100000000000000000000115 /* LiveBonjourResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000019 /* LiveBonjourResolver.swift */; };
 		100000000000000000000116 /* LivePairingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000020 /* LivePairingCoordinator.swift */; };
 		100000000000000000000117 /* LivePairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000021 /* LivePairingView.swift */; };
+		200000000000000000000101 /* LiveAuthContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000014 /* LiveAuthContract.swift */; };
+		200000000000000000000102 /* LiveSenderQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000016 /* LiveSenderQueue.swift */; };
+		200000000000000000000103 /* LiveSenderAckBenchmarkCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* LiveSenderAckBenchmarkCore.swift */; };
+		200000000000000000000104 /* LiveSenderAckBenchmarkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* LiveSenderAckBenchmarkTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -48,10 +52,20 @@
 		100000000000000000000019 /* LiveBonjourResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveBonjourResolver.swift; sourceTree = "<group>"; };
 		100000000000000000000020 /* LivePairingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePairingCoordinator.swift; sourceTree = "<group>"; };
 		100000000000000000000021 /* LivePairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePairingView.swift; sourceTree = "<group>"; };
+		200000000000000000000001 /* CaptureSplatAckBenchmarks.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CaptureSplatAckBenchmarks.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000002 /* LiveSenderAckBenchmarkCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSenderAckBenchmarkCore.swift; sourceTree = "<group>"; };
+		200000000000000000000003 /* LiveSenderAckBenchmarkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSenderAckBenchmarkTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		100000000000000000000201 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		200000000000000000000201 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -65,6 +79,7 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000302 /* CaptureSplat */,
+				200000000000000000000301 /* Ack Benchmarks */,
 				100000000000000000000303 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -83,6 +98,7 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000008 /* CaptureSplat.app */,
+				200000000000000000000001 /* CaptureSplatAckBenchmarks.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -128,6 +144,16 @@
 			path = Config;
 			sourceTree = "<group>";
 		};
+		200000000000000000000301 /* Ack Benchmarks */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000002 /* LiveSenderAckBenchmarkCore.swift */,
+				200000000000000000000003 /* LiveSenderAckBenchmarkTests.swift */,
+			);
+			name = "Ack Benchmarks";
+			path = ../../../tests/swift;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -148,6 +174,22 @@
 			productReference = 100000000000000000000008 /* CaptureSplat.app */;
 			productType = "com.apple.product-type.application";
 		};
+		200000000000000000000401 /* CaptureSplatAckBenchmarks */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 200000000000000000000801 /* Build configuration list for PBXNativeTarget "CaptureSplatAckBenchmarks" */;
+			buildPhases = (
+				200000000000000000000501 /* Sources */,
+				200000000000000000000201 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CaptureSplatAckBenchmarks;
+			productName = CaptureSplatAckBenchmarks;
+			productReference = 200000000000000000000001 /* CaptureSplatAckBenchmarks.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -159,6 +201,9 @@
 				LastUpgradeCheck = 2650;
 				TargetAttributes = {
 					100000000000000000000401 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					200000000000000000000401 = {
 						CreatedOnToolsVersion = 26.0;
 					};
 				};
@@ -177,6 +222,7 @@
 			projectRoot = "";
 			targets = (
 				100000000000000000000401 /* CaptureSplat */,
+				200000000000000000000401 /* CaptureSplatAckBenchmarks */,
 			);
 		};
 /* End PBXProject section */
@@ -213,6 +259,17 @@
 				100000000000000000000115 /* LiveBonjourResolver.swift in Sources */,
 				100000000000000000000116 /* LivePairingCoordinator.swift in Sources */,
 				100000000000000000000117 /* LivePairingView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		200000000000000000000501 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				200000000000000000000101 /* LiveAuthContract.swift in Sources */,
+				200000000000000000000102 /* LiveSenderQueue.swift in Sources */,
+				200000000000000000000103 /* LiveSenderAckBenchmarkCore.swift in Sources */,
+				200000000000000000000104 /* LiveSenderAckBenchmarkTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -388,6 +445,63 @@
 			};
 			name = Release;
 		};
+		200000000000000000000903 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 100000000000000000000011 /* CaptureSplat.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(CAPTURE_SPLAT_BUNDLE_IDENTIFIER).AckBenchmarks";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "";
+			};
+			name = Debug;
+		};
+		200000000000000000000904 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 100000000000000000000011 /* CaptureSplat.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(CAPTURE_SPLAT_BUNDLE_IDENTIFIER).AckBenchmarks";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = CAPTURE_SPLAT_ACK_BENCHMARK_OPTIMIZED;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -405,6 +519,15 @@
 			buildConfigurations = (
 				100000000000000000000903 /* Debug */,
 				100000000000000000000904 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		200000000000000000000801 /* Build configuration list for PBXNativeTarget "CaptureSplatAckBenchmarks" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				200000000000000000000903 /* Debug */,
+				200000000000000000000904 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
