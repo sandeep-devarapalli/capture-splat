@@ -226,7 +226,8 @@ in Keychain; only a rebuildable non-secret desktop cache and counters are
 stored under Application Support.
 
 Pairing still does not authorize networking from the capture callback or open a
-frame queue. Complete the exact ACK-index benchmark in issue #35 first. The
+frame queue. Complete the exact
+[ACK-index benchmark](ios_live_ack_index_benchmark.md) in issue #35 first. The
 later integration stays downstream of completed atomic writes. Thermal,
 storage, background, or network pressure must pause transport before it can
 affect keyframe acceptance or source evidence.

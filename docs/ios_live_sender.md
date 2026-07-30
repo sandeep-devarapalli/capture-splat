@@ -104,6 +104,8 @@ visible in the finalized handoff.
 The exact acknowledged-frame hash ledger remains authoritative until verified
 finalization. Its long-session size and latency gate is tracked in
 [issue #35](https://github.com/sandeep-devarapalli/capture-splat/issues/35).
+The fixed matrix, numeric budgets, result fields, and proof boundary are in the
+[ACK-index benchmark protocol](ios_live_ack_index_benchmark.md).
 Do not prune hashes or raise the 48 MiB state limit; if the benchmark fails,
 land the specified chunked checksummed index before capture-loop integration.
 
@@ -140,8 +142,9 @@ capture files.
 
 ## Next integration order
 
-1. Complete issue #35's Release benchmark at 360 and 720 accepted-frame
-   identities, with 1k/10k/50k stress characterization.
+1. Complete issue #35's
+   [Release benchmark](ios_live_ack_index_benchmark.md) at 360 and 720
+   accepted-frame identities, with 1k/10k/50k stress characterization.
 2. If the 720-frame size, persistence, reopen, memory, throughput, or exact
    duplicate/conflict gates fail, land the chunked checksummed exact ACK index.
 3. Add one nonblocking callback only after each declared frame file is
