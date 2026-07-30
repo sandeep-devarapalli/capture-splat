@@ -3,8 +3,9 @@
 This is the canonical Capture Splat contract for pairing one iPhone with one
 World Studio Mac and authenticating the existing live-session protocol over a
 local network. It is the security boundary used by the dormant M1B-1 bounded
-sender foundation. M1B-1 does not enable phone networking or modify the capture
-loop.
+sender foundation. The app now uses it for explicit QR/Bonjour pairing, but
+pairing does not open a frame queue, upload capture evidence, or modify the
+capture loop.
 
 World Studio must keep the live receiver on loopback until an unexpired pairing
 invitation succeeds. Bonjour is discovery only. Every LAN connection must use
