@@ -45,6 +45,7 @@ private enum ScanViewMode: String, CaseIterable, Identifiable {
 private enum ActiveSheet: String, Identifiable {
     case export
     case camera
+    case livePairing
     case review
     case roomPlan
 
@@ -53,6 +54,7 @@ private enum ActiveSheet: String, Identifiable {
 
 struct ContentView: View {
     @EnvironmentObject private var capture: CaptureController
+    @EnvironmentObject private var livePairing: LivePairingCoordinator
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: WorkspaceTab = .capture
     @State private var scanMode: ScanMode = .video3DGS
@@ -65,8 +67,12 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            ARCaptureView()
-                .ignoresSafeArea()
+            if activeSheet != .livePairing {
+                ARCaptureView()
+                    .ignoresSafeArea()
+            } else {
+                Color.black.ignoresSafeArea()
+            }
 
             if selectedTab == .capture, viewMode == .guidance {
                 scanGuidanceOverlay
@@ -88,6 +94,7 @@ struct ContentView: View {
             .padding(.vertical, 12)
         }
         .task {
+            await livePairing.restore()
             capture.prepareSensors()
             capture.setScanTargetMode(scanMode.controllerTargetMode)
             capture.setSpatialGuidanceVisible(viewMode == .guidance)
@@ -112,6 +119,8 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 refreshCaptureLibrary()
+            } else if phase == .background {
+                livePairing.handleBackgrounding()
             }
         }
         .sheet(item: $activeSheet) { sheet in
@@ -120,6 +129,8 @@ struct ContentView: View {
                 exportPresetSheet
             case .camera:
                 cameraSettingsSheet
+            case .livePairing:
+                LivePairingView(coordinator: livePairing)
             case .review:
                 pointCloudReviewSheet
             case .roomPlan:
@@ -137,6 +148,17 @@ struct ContentView: View {
             }
             .pickerStyle(.segmented)
             .disabled(capture.isRecording || capture.isStarting || capture.isFinalizing)
+
+            Button {
+                activeSheet = .livePairing
+            } label: {
+                Image(systemName: livePairing.snapshot.hasCurrentPairing
+                    ? "antenna.radiowaves.left.and.right"
+                    : "antenna.radiowaves.left.and.right.slash")
+            }
+            .buttonStyle(.bordered)
+            .disabled(capture.isRecording || capture.isStarting || capture.isFinalizing)
+            .accessibilityLabel("World Studio pairing")
 
             Button {
                 activeSheet = .camera

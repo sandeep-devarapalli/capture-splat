@@ -19,7 +19,13 @@
   <key>CFBundleVersion</key>
   <string>$(CURRENT_PROJECT_VERSION)</string>
   <key>NSCameraUsageDescription</key>
-  <string>Capture Splat records RGB frames for local 3D reconstruction exports.</string>
+  <string>Capture Splat records RGB frames for local 3D reconstruction exports and scans a World Studio pairing QR when you request it.</string>
+  <key>NSBonjourServices</key>
+  <array>
+    <string>_capturesplat._tcp</string>
+  </array>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Capture Splat discovers and securely pairs with the specific World Studio Mac selected by its short-lived QR.</string>
   <key>NSLocationWhenInUseUsageDescription</key>
   <string>Capture Splat records GNSS provenance for outdoor capture sessions.</string>
   <key>NSMotionUsageDescription</key>

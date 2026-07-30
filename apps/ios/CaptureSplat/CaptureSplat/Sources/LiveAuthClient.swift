@@ -27,6 +27,13 @@ protocol LiveSecureValueStore: Sendable {
     func read(account: String) throws -> Data?
     func write(_ data: Data, account: String) throws
     func remove(account: String) throws
+    func removeAll() throws
+}
+
+extension LiveSecureValueStore {
+    func removeAll() throws {
+        throw LiveAuthContractError.invalid("Secure store reset is unavailable.")
+    }
 }
 
 final class KeychainLiveSecureValueStore: LiveSecureValueStore, @unchecked Sendable {
@@ -72,6 +79,17 @@ final class KeychainLiveSecureValueStore: LiveSecureValueStore, @unchecked Senda
         let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw LiveAuthContractError.invalid("Keychain value could not be removed.")
+        }
+    }
+
+    func removeAll() throws {
+        let status = SecItemDelete([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrSynchronizable as String: false,
+        ] as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw LiveAuthContractError.invalid("Live Keychain values could not be removed.")
         }
     }
 

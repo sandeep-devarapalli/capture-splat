@@ -107,10 +107,43 @@ finalization. Its long-session size and latency gate is tracked in
 Do not prune hashes or raise the 48 MiB state limit; if the benchmark fails,
 land the specified chunked checksummed index before capture-loop integration.
 
+## Pairing application wiring
+
+The iPhone app now exposes pairing as an explicit sheet:
+
+- its VisionKit scanner accepts only the canonical `capture-splat://pair/`
+  invitation and is unavailable while a capture is active;
+- it browses only after a QR or paste action, filters the exact Bonjour
+  service name/type/domain from that invitation, and resolves only that match;
+- the existing client then performs pinned TLS, signed pairing, explicit Mac
+  approval, scoped grant validation, and durable request-counter registration;
+- private keys, grants, pending signed requests, and an authoritative one-Mac
+  recovery pointer stay in Keychain; and
+- a checksummed rebuildable desktop cache plus request counters live under
+  `Application Support/CaptureSplat/live-sender/v0.1`.
+
+Restoring the app reads that local state but starts no browser, listener, or
+connection. A retry resubmits the exact Keychain-backed pending request.
+Pairing cancellation or backgrounding stops discovery and the in-flight
+request, then reconciles Keychain before declaring cancellation complete so a
+grant issued during that race remains visible. The app exposes one current Mac
+at a time; pair another only after locally forgetting and remotely revoking the
+first. Local forget removes only the phone-side grant, so the user must also
+revoke the device in World Studio for immediate Mac-side invalidation.
+If the rebuildable cache is corrupt, the Keychain pointer restores the known
+Mac without discovery. If even that pointer is unreadable, pairing remains
+blocked until the user explicitly resets the entire local live Keychain service
+and restarts the app; World Studio revocation is still required.
+
+This wiring does not instantiate `LiveSender`, open a session queue, or enqueue
+capture files.
+
 ## Next integration order
 
-1. Add explicit LAN opt-in plus QR scan and exact Bonjour service resolution.
-2. Place queue/counter state under Application Support and expose queue limits.
+1. Complete issue #35's Release benchmark at 360 and 720 accepted-frame
+   identities, with 1k/10k/50k stress characterization.
+2. If the 720-frame size, persistence, reopen, memory, throughput, or exact
+   duplicate/conflict gates fail, land the chunked checksummed exact ACK index.
 3. Add one nonblocking callback only after each declared frame file is
    atomically durable. Do not wait for optional sidecars that are still writing.
 4. Run two physical iPhone-to-Mac cycles, including receiver restart and Wi-Fi

@@ -20,6 +20,10 @@
 		100000000000000000000111 /* LiveAuthClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000015 /* LiveAuthClient.swift */; };
 		100000000000000000000112 /* LiveSenderQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000016 /* LiveSenderQueue.swift */; };
 		100000000000000000000113 /* LiveSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000017 /* LiveSender.swift */; };
+		100000000000000000000114 /* LiveApplicationSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000018 /* LiveApplicationSupport.swift */; };
+		100000000000000000000115 /* LiveBonjourResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000019 /* LiveBonjourResolver.swift */; };
+		100000000000000000000116 /* LivePairingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000020 /* LivePairingCoordinator.swift */; };
+		100000000000000000000117 /* LivePairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000021 /* LivePairingView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -40,6 +44,10 @@
 		100000000000000000000015 /* LiveAuthClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveAuthClient.swift; sourceTree = "<group>"; };
 		100000000000000000000016 /* LiveSenderQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSenderQueue.swift; sourceTree = "<group>"; };
 		100000000000000000000017 /* LiveSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSender.swift; sourceTree = "<group>"; };
+		100000000000000000000018 /* LiveApplicationSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveApplicationSupport.swift; sourceTree = "<group>"; };
+		100000000000000000000019 /* LiveBonjourResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveBonjourResolver.swift; sourceTree = "<group>"; };
+		100000000000000000000020 /* LivePairingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePairingCoordinator.swift; sourceTree = "<group>"; };
+		100000000000000000000021 /* LivePairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePairingView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -94,6 +102,10 @@
 				100000000000000000000015 /* LiveAuthClient.swift */,
 				100000000000000000000016 /* LiveSenderQueue.swift */,
 				100000000000000000000017 /* LiveSender.swift */,
+				100000000000000000000018 /* LiveApplicationSupport.swift */,
+				100000000000000000000019 /* LiveBonjourResolver.swift */,
+				100000000000000000000020 /* LivePairingCoordinator.swift */,
+				100000000000000000000021 /* LivePairingView.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -197,6 +209,10 @@
 				100000000000000000000111 /* LiveAuthClient.swift in Sources */,
 				100000000000000000000112 /* LiveSenderQueue.swift in Sources */,
 				100000000000000000000113 /* LiveSender.swift in Sources */,
+				100000000000000000000114 /* LiveApplicationSupport.swift in Sources */,
+				100000000000000000000115 /* LiveBonjourResolver.swift in Sources */,
+				100000000000000000000116 /* LivePairingCoordinator.swift in Sources */,
+				100000000000000000000117 /* LivePairingView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

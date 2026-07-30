@@ -79,7 +79,7 @@ throttling from actual drops, records processing-budget overruns, and reports
 time spent with mesh, map-only, pose-only, or hidden guidance under each thermal
 policy.
 
-## Dormant live sender foundation
+## World Studio pairing and dormant sender
 
 M1B-1 compiles an isolated bounded sender foundation into the app target. It
 implements QR invitation parsing, P-256 device identity, Keychain-backed grants,
@@ -88,14 +88,25 @@ checksummed frame/byte-bounded queue, ACK/resume reconciliation, limited
 in-flight uploads, retry, paired desktop/device queue binding, and
 thermal/storage/background/network pause policy.
 
-It is deliberately dormant. `CaptureController.swift`, keyframe acceptance,
-atomic writers, capture UI, local-network permissions, and Bonjour activation
-are unchanged. The additive v0.2 contract derives a stable session ID from an
-atomically persisted random seed before `capture.json` exists and binds the
-final manifest reference only at finalization. The deterministic host probe
-uses only immutable file references and never retains `ARFrame` or pixel
+The World Studio pairing sheet is now active only after an explicit user
+action. It scans QR codes, resolves the exact `_capturesplat._tcp` service
+identity from that invitation, pins TLS, waits for Mac approval, and recovers a
+pending or current grant after restart without performing discovery at app
+launch. Device keys, grants, pending signed requests, and an authoritative
+one-Mac recovery pointer remain in Keychain. A checksummed rebuildable desktop
+cache and durable request counters live under
+`Application Support/CaptureSplat/live-sender/v0.1`.
+The app exposes one current Mac at a time; revoke and forget it before pairing
+another.
+
+The frame sender remains deliberately dormant. `CaptureController.swift`,
+keyframe acceptance, and atomic writers are unchanged; pairing does not open a
+queue or upload a capture. The additive v0.2 contract derives a stable session
+ID from an atomically persisted random seed before `capture.json` exists and
+binds the final manifest reference only at finalization. The deterministic host
+probe uses only immutable file references and never retains `ARFrame` or pixel
 buffers. See [iOS Live Sender M1B-1](../../../docs/ios_live_sender.md) for the
-integration boundary and remaining physical gates.
+ACK-index gate, integration boundary, and remaining physical gates.
 
 Saved frames include `capture_quality` metadata. The host pipeline uses accepted
 keyframes for ingest and COLMAP export, so rejected candidates remain diagnostic

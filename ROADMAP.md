@@ -33,7 +33,10 @@ Capture Splat has implemented the core public capture-to-3DGS path:
   progress, and capture-first pressure policy without entering the capture
   loop. The additive v0.2 session-seed/final-manifest contract now permits
   progressive transfer before `capture.json` exists while preserving v0.1
-  replay. Physical integration and device acceptance remain open.
+  replay. The app now performs explicit QR scanning, exact Bonjour resolution,
+  Mac approval, and Application Support recovery without starting discovery at
+  launch or opening a frame queue. Capture integration and physical acceptance
+  remain open.
 
 These are implemented capabilities, not a blanket high-quality claim. A
 physical capture, finite PLY, viewer load, or aligned frame remains evidence
@@ -49,7 +52,7 @@ Calibration outcomes are owned by World Studio.
 | Milestone | Outcome | Status |
 |---|---|---|
 | Live Session Foundation | Strict replay-first source-frame, camera, quality, sidecar, ACK, resume, and finalization contract | completed |
-| Authenticated Sender And Device Acceptance | Explicit pairing, TLS, bounded store-and-forward sender, thermal safety, and two-cycle physical-device acceptance | in progress: pairing/auth plus tested sender foundation; capture hookup and physical evidence open |
+| Authenticated Sender And Device Acceptance | Explicit pairing, TLS, bounded store-and-forward sender, thermal safety, and two-cycle physical-device acceptance | in progress: pairing UI, auth, Application Support recovery, and sender foundation complete; ACK-index gate, capture hookup, and physical evidence open |
 | Calibration Capture Evidence | Guided and synchronized experimental imagery with apparatus/scale provenance, without inferred physics authority | planned and evidence-blocked |
 
 The completed foundation is permanent `proposal_only` evidence transport. The authenticated
@@ -95,11 +98,12 @@ Studio may compile into its target Newton runtime after separate validation.
 - Complete TestFlight packaging and distribution metadata.
 - Add release-level startup, long-session thermal, and two-cycle finalization
   evidence across supported LiDAR iPhones.
-- Integrate the dormant bounded store-and-forward foundation through explicit
-  opt-in, QR/Bonjour UI, Application Support state, and a minimal callback after
-  atomic frame writes. The additive session-seed/final-manifest contract is now
-  defined, but LAN transport remains disabled until the current grant, TLS pin,
-  replay protection, and pressure gates pass.
+- Complete issue #35's exact ACK-index benchmark, then integrate the dormant
+  bounded store-and-forward foundation through one nonblocking callback after
+  atomic frame writes. Explicit QR/Bonjour pairing and Application Support
+  recovery are now active, but they do not open a frame queue. LAN evidence
+  transfer remains disabled until the benchmark, current grant, TLS pin, replay
+  protection, and pressure gates pass.
 - Add task/robot/site briefs, calibration-trial recording, matched demonstration capture,
   and deployment recapture as additive evidence workflows after the active sender/device
   gate. None may weaken local-first capture or infer physical parameters.

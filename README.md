@@ -479,10 +479,18 @@ derives the stable `csl_...` session ID; strict v0.2 finalization later binds th
 completed `capture.json` path, schema, size, and checksum to the same session.
 The replay CLI remains byte-compatible with live session/finalization v0.1.
 
-The sender is still not wired into `CaptureController`. QR scanning, Bonjour
-UI, local-network permission activation, the atomic-write callback, and
-two-cycle physical-device acceptance remain open. No iPhone networking starts
-in this change.
+The app now exposes explicit World Studio pairing. Its QR-only scanner resolves
+the exact advertised Bonjour identity, then reuses the existing pinned-TLS,
+P-256 request, approval, grant, and replay-protection boundary. Device
+credentials, pending signed requests, and an authoritative one-Mac recovery
+pointer remain in Keychain; a rebuildable non-secret desktop cache and request
+counters live under Application Support. App launch performs no discovery or
+connection.
+
+The sender is still not wired into `CaptureController`, and pairing does not
+open a frame queue or upload capture evidence. The ACK-index benchmark in
+issue #35, the post-atomic-write callback, and two-cycle physical-device
+acceptance remain open.
 
 ## Linux, Windows, And Cloud GPUs
 
