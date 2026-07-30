@@ -1,0 +1,79 @@
+{
+  "$id": "urn:capture-splat:schema:capture_splat.live_session.v0.2",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "authority": {
+      "const": "proposal_only"
+    },
+    "coordinate_system": {
+      "additionalProperties": false,
+      "properties": {
+        "camera_forward": {
+          "const": "-Z"
+        },
+        "handedness": {
+          "const": "right"
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "matrix_layout": {
+          "const": "row-major"
+        },
+        "units": {
+          "enum": [
+            "meters",
+            "unknown"
+          ]
+        },
+        "vector_convention": {
+          "const": "column-vector"
+        },
+        "world_up": {
+          "const": "+Y"
+        }
+      },
+      "required": [
+        "id",
+        "units",
+        "handedness",
+        "world_up",
+        "camera_forward",
+        "matrix_layout",
+        "vector_convention"
+      ],
+      "type": "object"
+    },
+    "created_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "expected_frame_count": {
+      "type": "null"
+    },
+    "schema": {
+      "const": "capture_splat.live_session.v0.2"
+    },
+    "session_id": {
+      "pattern": "^csl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+      "type": "string"
+    },
+    "source_session_seed_b64u": {
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "session_id",
+    "created_at",
+    "source_session_seed_b64u",
+    "expected_frame_count",
+    "coordinate_system",
+    "authority"
+  ],
+  "title": "Capture Splat progressive live session v0.2",
+  "type": "object"
+}
