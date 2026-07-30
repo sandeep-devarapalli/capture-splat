@@ -421,18 +421,82 @@ def test_dry_run_declares_352_distinct_one_test_process_invocations() -> None:
         "CaptureSplatAckBenchmarks/LiveSenderAckBenchmarkTests/"
         "testColdReopenAcknowledgedFrames50000"
     ) == 35
-    assert identifiers[-2:] == [
+    assert identifiers[140:142] == [
         "CaptureSplatAckBenchmarks/LiveSenderAckBenchmarkTests/"
         "testUnpacedAcknowledgementStream720",
         "CaptureSplatAckBenchmarks/LiveSenderAckBenchmarkTests/"
         "testPacedAcknowledgementStream720",
     ]
+    assert [invocation["count"] for invocation in invocations[:70]] == [
+        360
+    ] * 70
+    assert [invocation["count"] for invocation in invocations[70:140]] == [
+        720
+    ] * 70
+    for offset, count in enumerate((1_000, 10_000, 50_000)):
+        start = 142 + offset * 70
+        assert [
+            invocation["count"] for invocation in invocations[start : start + 70]
+        ] == [count] * 70
     assert plan["build_settings_command"][
         plan["build_settings_command"].index("-target") + 1
     ] == "CaptureSplatAckBenchmarks"
     assert plan["build_settings_command"][
         plan["build_settings_command"].index("-sdk") + 1
     ] == "iphoneos"
+
+
+def test_real_collection_uses_the_declared_required_first_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _load_runner()
+    observed = []
+    monkeypatch.setattr(runner, "_show_build_settings", lambda *_: {})
+    monkeypatch.setattr(
+        runner,
+        "_run_command",
+        lambda *_, **__: {
+            "process_id": 1,
+            "stdout_sha256": _sha256("build-stdout"),
+            "stderr_sha256": _sha256("build-stderr"),
+        },
+    )
+
+    def record_invocation(**arguments: object) -> dict[str, object]:
+        observed.append(
+            (
+                arguments["phase"],
+                arguments["count"],
+                arguments["sample_index"],
+                arguments.get("required_evidence", True),
+            )
+        )
+        return {"phase": arguments["phase"], "count": arguments["count"]}
+
+    monkeypatch.setattr(runner, "_run_test_invocation", record_invocation)
+    collection = runner._collect_real(
+        repository=_repository(),
+        device_id="TEST-DEVICE-123456",
+        work_root=tmp_path,
+        timeout_seconds=1,
+    )
+
+    assert len(observed) == 352
+    assert [entry[1] for entry in observed[:70]] == [360] * 70
+    assert [entry[1] for entry in observed[70:140]] == [720] * 70
+    assert [(entry[0], entry[1]) for entry in observed[140:142]] == [
+        ("unpaced", None),
+        ("paced", None),
+    ]
+    for offset, count in enumerate((1_000, 10_000, 50_000)):
+        start = 142 + offset * 70
+        assert [entry[1] for entry in observed[start : start + 70]] == [
+            count
+        ] * 70
+    assert all(entry[3] is True for entry in observed[:142])
+    assert all(entry[3] is False for entry in observed[142:])
+    assert collection["matrix"]["counts"] == list(runner.COUNTS)
 
 
 def test_strict_json_and_phase_contract_reject_nonfinite_and_extra_fields() -> None:
