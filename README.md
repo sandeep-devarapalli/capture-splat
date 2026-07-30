@@ -473,10 +473,16 @@ identity and grants, signed TLS transport, a checksummed frame/byte-bounded
 queue bound to the paired desktop/device, resume reconciliation, limited
 in-flight uploads, retry, and capture-first pressure policy.
 
-The sender foundation is exercised with finalized replay fixtures and is not
-wired into `CaptureController`. QR scanning, Bonjour UI, local-network
-permission activation, the atomic-write callback, and two-cycle physical-device
-acceptance remain open. No iPhone networking starts in this change.
+The additive progressive-session contract now lets that sender create an
+immutable session before `capture.json` exists. A canonical 32-byte random seed
+derives the stable `csl_...` session ID; strict v0.2 finalization later binds the
+completed `capture.json` path, schema, size, and checksum to the same session.
+The replay CLI remains byte-compatible with live session/finalization v0.1.
+
+The sender is still not wired into `CaptureController`. QR scanning, Bonjour
+UI, local-network permission activation, the atomic-write callback, and
+two-cycle physical-device acceptance remain open. No iPhone networking starts
+in this change.
 
 ## Linux, Windows, And Cloud GPUs
 

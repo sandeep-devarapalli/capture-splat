@@ -31,7 +31,9 @@ Capture Splat has implemented the core public capture-to-3DGS path:
   contract. A dormant bounded Swift sender foundation now persists identity,
   grants, counters, paired desktop/device-bound queue state, ACK/resume
   progress, and capture-first pressure policy without entering the capture
-  loop. Physical integration and device acceptance remain open.
+  loop. The additive v0.2 session-seed/final-manifest contract now permits
+  progressive transfer before `capture.json` exists while preserving v0.1
+  replay. Physical integration and device acceptance remain open.
 
 These are implemented capabilities, not a blanket high-quality claim. A
 physical capture, finite PLY, viewer load, or aligned frame remains evidence
@@ -93,11 +95,11 @@ Studio may compile into its target Newton runtime after separate validation.
 - Complete TestFlight packaging and distribution metadata.
 - Add release-level startup, long-session thermal, and two-cycle finalization
   evidence across supported LiDAR iPhones.
-- Integrate the dormant bounded store-and-forward foundation only after an
-  additive live-session contract binds a pre-capture source seed to the
-  finalized `capture.json`, then add explicit opt-in, QR/Bonjour UI, and a
-  minimal callback after atomic frame writes. LAN transport remains disabled
-  until the current grant, TLS pin, replay protection, and pressure gates pass.
+- Integrate the dormant bounded store-and-forward foundation through explicit
+  opt-in, QR/Bonjour UI, Application Support state, and a minimal callback after
+  atomic frame writes. The additive session-seed/final-manifest contract is now
+  defined, but LAN transport remains disabled until the current grant, TLS pin,
+  replay protection, and pressure gates pass.
 - Add task/robot/site briefs, calibration-trial recording, matched demonstration capture,
   and deployment recapture as additive evidence workflows after the active sender/device
   gate. None may weaken local-first capture or infer physical parameters.

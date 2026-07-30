@@ -11,22 +11,29 @@ authenticated sender and progressive-world direction is specified by the
 The active contract in this repository remains canonical; archived proposal schemas in
 the blueprint are provenance only.
 
-The next boundary is the strict [live pairing and authentication
-contract](live_auth.md). It adds QR-bound device identity, TLS pinning, scoped
-grants, revocation epochs, and per-request replay protection without changing
-the Phase 1 evidence schemas. The dormant
+The strict [live pairing and authentication contract](live_auth.md) adds
+QR-bound device identity, TLS pinning, scoped grants, revocation epochs, and
+per-request replay protection. The dormant
 [M1B-1 Swift sender foundation](ios_live_sender.md) implements that client
-boundary, but does not enable capture-loop networking.
+boundary. The additive v0.2 session/finalization pair removes the finalized
+manifest timing blocker without enabling capture-loop networking.
 
 ## Canonical contract
 
 Capture Splat owns the byte-canonical schemas and fixtures under
-`contracts/live-session/v0.1/`. World Studio mirrors this directory exactly and
-checks the file fingerprints in tests.
+`contracts/live-session/v0.1/` and `contracts/live-session/v0.2/`. World Studio
+mirrors both directories exactly and checks the file fingerprints in tests.
 
 - `capture_splat.live_session.v0.1` binds a session ID to the source
   `capture.json` checksum, expected frame count, coordinate convention, and
   permanent `proposal_only` authority.
+- `capture_splat.live_session.v0.2` starts a progressive session before
+  `capture.json` exists. It carries a canonical unpadded Base64URL encoding of
+  exactly 32 random seed bytes, an explicit null expected count, the coordinate
+  convention, and permanent `proposal_only` authority.
+- `capture_splat.live_finalize.v0.2` binds the final sequence plus the completed
+  `capture.json` path, schema, byte size, and SHA-256 while the receiver
+  atomically seals a progressive session.
 - `capture_splat.live_frame.v0.1` uses one-based contiguous sequence IDs. It
   records timestamp and clock domain, actual source RGB dimensions and SHA-256,
   independently dimensioned pinhole calibration, row-major 4x4
@@ -40,6 +47,23 @@ disabled. Checksums have the form `sha256:` plus 64 lowercase hexadecimal
 characters. Asset references are safe POSIX-relative paths; replay rejects
 absolute paths, URI-like paths, backslashes, traversal, missing files, and
 symlinks whose real path leaves the capture root.
+
+For v0.2, derive the session ID exactly as:
+
+```text
+csl_ + base64url_unpadded(
+  SHA256(
+    ASCII("CAPTURE-SPLAT-LIVE-SESSION-V2") ||
+    0x00 ||
+    decoded_source_session_seed_bytes
+  )
+)
+```
+
+The seed is public correlation material, not a credential or source of
+authorization. It must be generated once with a cryptographically secure random
+source and atomically persisted before the first session request. A restart
+reloads the same bytes; it never silently regenerates or replaces them.
 
 The iPhone currently records full-resolution RGB and depth-grid intrinsics.
 Replay preserves those original focal values and their calibration width and
@@ -76,6 +100,14 @@ Finalization declares the last sequence ID, requires every frame through it,
 rehashes all committed assets, and then atomically seals the session. Repeating
 the same finalization is idempotent. Missing frames, corrupt assets, or changed
 final state fail closed.
+
+Replay keeps the existing v0.1 session and v0.1 finalization body unchanged. A
+progressive v0.2 session reports a null expected count until its local
+finalization reference is durable. Its v0.2 finalization binds the authenticated
+source-manifest reference in the same seal operation. The receiver does not
+receive the raw `capture.json` bytes in this phase and therefore records the
+signed checksum reference without claiming an independent manifest rehash.
+Mixing v0.1 and v0.2 session/finalization bodies is a conflict.
 
 ## Replay and recovery
 
@@ -115,10 +147,10 @@ folder. World Studio owns durable receiver state outside Git.
 
 ## iOS bounded store-and-forward sender
 
-M1B-1 implements and host-tests the isolated identity, grant, signed transport,
-queue, retry, resume, and pressure-policy components. The capture-loop hookup
-and physical sender remain future work and must stay downstream of capture
-persistence:
+M1B implements and host-tests the isolated identity, grant, signed transport,
+progressive identity, final-manifest binding, queue, retry, resume, and
+pressure-policy components. The capture-loop hookup and physical sender remain
+future work and must stay downstream of capture persistence:
 
 1. Enqueue a frame only after RGB and all declared sidecars have completed
    atomic local writes. Queue records reference file paths and immutable
@@ -141,5 +173,5 @@ persistence:
    request signatures, anti-replay state, and credential revocation. Plain LAN
    HTTP is not an acceptable extension of Phase 1.
 
-These requirements describe future work only. No iPhone capture-loop source is
-changed by Phase 1.
+The transport foundation and contract are implemented but dormant. No iPhone
+capture-loop source is changed by this contract revision.

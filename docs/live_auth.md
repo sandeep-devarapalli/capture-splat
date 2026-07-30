@@ -261,11 +261,13 @@ integration change must:
 7. require explicit LAN opt-in and a current paired grant.
 
 `capture.json` is a finalized manifest and does not exist while the capture is
-still in progress. The future sender must therefore atomically persist an
-immutable random source-session seed before its first session request, then
-bind the finalized `capture.json` checksum to that same identity at
-finalization. It must never hash a mutable or not-yet-created manifest and call
-that source identity.
+still in progress. The additive `capture_splat.live_session.v0.2` contract
+therefore derives its `csl_...` identity from an atomically persisted random
+32-byte source-session seed. `capture_splat.live_finalize.v0.2` later binds the
+completed `capture.json` path, schema, size, and checksum to the same identity.
+The seed is public correlation material, not a credential. The sender must
+never hash a mutable or not-yet-created manifest and call that source identity.
+Replay remains on the byte-compatible v0.1 session/finalization pair.
 
 Optional reconstruction workers remain isolated external processes. They may
 consume checksum-bound received evidence and emit proposals, but they receive
