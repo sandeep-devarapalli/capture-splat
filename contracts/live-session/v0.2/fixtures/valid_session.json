@@ -1,0 +1,17 @@
+{
+  "authority": "proposal_only",
+  "coordinate_system": {
+    "camera_forward": "-Z",
+    "handedness": "right",
+    "id": "arkit_world",
+    "matrix_layout": "row-major",
+    "units": "meters",
+    "vector_convention": "column-vector",
+    "world_up": "+Y"
+  },
+  "created_at": "2026-07-30T10:00:00.000Z",
+  "expected_frame_count": null,
+  "schema": "capture_splat.live_session.v0.2",
+  "session_id": "csl_SMOhjzjH7dE8x3yB5A0KBAo4YL6A4IzY1U570kVX_D8",
+  "source_session_seed_b64u": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+}

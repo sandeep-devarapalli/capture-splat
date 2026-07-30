@@ -205,6 +205,12 @@ uploads, retry/resume, and capture-first pressure policy. It accepts only
 immutable local file references and never retains `ARFrame` or capture pixel
 buffers.
 
+The additive v0.2 contract removes the finalized-manifest timing dependency:
+the phone persists one random 32-byte source-session seed before the first
+request, derives the stable live session ID from it, and binds the final
+`capture.json` reference only after local finalization. Existing replay remains
+v0.1-compatible.
+
 Leaving loopback is a separate security phase defined by the strict [live
 pairing and authentication contract](live_auth.md). It requires explicit LAN
 opt-in, a QR-bound World Studio identity, Bonjour discovery checked against the

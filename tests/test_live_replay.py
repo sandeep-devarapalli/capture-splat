@@ -63,6 +63,7 @@ class _ReceiverState:
         self.received: set[int] = set()
         self.frame_order: list[int] = []
         self.asset_order: list[tuple[int, str]] = []
+        self.finalize_payloads: list[dict[str, Any]] = []
         self.finalized = False
         self.drop_next_asset_ack = False
         self.lock = threading.Lock()
@@ -206,6 +207,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         payload = self._json()
         with self.state.lock:
+            self.state.finalize_payloads.append(payload)
             expected = int(self.state.session["expected_frame_count"])  # type: ignore[index]
             if payload["final_sequence_id"] != expected or self.state.received != set(range(1, expected + 1)):
                 self._send({"error": "missing frames"}, 409)
@@ -240,6 +242,13 @@ def test_http_replay_is_sequential_and_finalized(tmp_path: Path) -> None:
     assert summary["sent_sequence_ids"] == [1, 2, 3]
     assert summary["received_count"] == 3
     assert summary["finalized"] is True
+    assert state.session is not None
+    assert state.session["schema"] == "capture_splat.live_session.v0.1"
+    assert state.finalize_payloads == [{
+        "schema": "capture_splat.live_finalize.v0.1",
+        "session_id": "sequential",
+        "final_sequence_id": 3,
+    }]
     assert state.frame_order == [1, 2, 3]
 
 

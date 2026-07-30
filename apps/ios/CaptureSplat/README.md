@@ -90,10 +90,12 @@ thermal/storage/background/network pause policy.
 
 It is deliberately dormant. `CaptureController.swift`, keyframe acceptance,
 atomic writers, capture UI, local-network permissions, and Bonjour activation
-are unchanged. The deterministic host probe uses only immutable file references
-and finalized replay fixtures; it never retains `ARFrame` or pixel buffers.
-See [iOS Live Sender M1B-1](../../../docs/ios_live_sender.md) for the integration
-boundary and remaining physical gates.
+are unchanged. The additive v0.2 contract derives a stable session ID from an
+atomically persisted random seed before `capture.json` exists and binds the
+final manifest reference only at finalization. The deterministic host probe
+uses only immutable file references and never retains `ARFrame` or pixel
+buffers. See [iOS Live Sender M1B-1](../../../docs/ios_live_sender.md) for the
+integration boundary and remaining physical gates.
 
 Saved frames include `capture_quality` metadata. The host pipeline uses accepted
 keyframes for ingest and COLMAP export, so rejected candidates remain diagnostic

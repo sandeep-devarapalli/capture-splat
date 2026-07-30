@@ -1,8 +1,10 @@
-# iOS Live Sender M1B-1
+# iOS Live Sender M1B
 
-M1B-1 is the tested, dormant Swift foundation for authenticated
-iPhone-to-World Studio evidence transfer. It does not start networking, change
-the capture loop, or claim physical-device acceptance.
+M1B-1 established the tested, dormant Swift foundation for authenticated
+iPhone-to-World Studio evidence transfer. The additive progressive-session
+contract now supplies its pre-manifest identity and final-manifest binding. It
+does not start networking, change the capture loop, or claim physical-device
+acceptance.
 
 ## Implemented boundary
 
@@ -38,6 +40,9 @@ acceptance or deletes capture evidence.
   identity, scopes, TLS pin, pairing epoch, and validity window before storage.
 - Discard the invitation secret after pairing; never write it to durable state.
 - Reserve and atomically persist a counter before starting each live request.
+- Generate and atomically persist one random 32-byte source-session seed before
+  the first v0.2 session request. A restart must reload the exact seed rather
+  than replace it.
 - Retry a pairing request with the exact same body and request identity.
 - Retry a live resource with the same bytes/checksum/path but a fresh counter,
   request ID, timestamp, and signature.
@@ -53,6 +58,11 @@ acceptance or deletes capture evidence.
 
 The integration layer must place queue/counter state under the app's
 Application Support directory, never inside a capture bundle.
+The dormant foundation does not yet generate or write the seed-bearing v0.2
+session metadata. Its caller must first atomically write that immutable file;
+only then may `LiveSenderQueue.open` validate its bytes and seed-derived ID and
+durably bind the file path, size, and checksum in queue state. Application
+Support ownership and creation wiring remain the next integration PR.
 
 ## Deliberately not activated
 
@@ -71,34 +81,39 @@ receiver actors, and performs a real TLS 1.3 loopback handshake with positive
 and negative leaf-certificate pins. It proves bounded deterministic behavior
 and transport/contract interoperability, not a physical LAN transfer.
 
-## Required contract bridge before capture hookup
+## Progressive contract bridge
 
-The current live-session schema identifies a session with the size and checksum
-of finalized `capture.json`. That manifest does not exist while recording, and
+The v0.1 replay session identifies a session with the size and checksum of
+finalized `capture.json`. That manifest does not exist while recording, and
 World Studio correctly treats accepted session metadata as immutable.
 
-Before progressive capture-loop integration, add a narrow mirrored contract
-revision that:
+The mirrored v0.2 contract resolves that timing boundary:
 
-1. creates and atomically persists an immutable random source-session seed
-   before the first upload;
-2. derives the live session identity from that seed;
-3. binds the final `capture.json` size and checksum during fail-closed
+1. `capture_splat.live_session.v0.2` carries an immutable random 32-byte
+   source-session seed and derives a stable `csl_...` session identity from it;
+2. its expected frame count remains explicitly null during progressive upload;
+3. `capture_splat.live_finalize.v0.2` binds the final sequence and completed
+   `capture.json` path, schema, size, and checksum during fail-closed
    finalization; and
-4. preserves idempotence, ownership, resume, and proposal-only authority.
+4. the v0.1 replay session and finalization bodies remain unchanged.
 
-Until that bridge exists, the sender foundation is exercised only with
-immutable finalized/replay fixtures. Delaying all transfer until
-`capture.json` exists would not satisfy progressive live evidence.
+The receiver binds the authenticated manifest reference but does not receive
+the raw `capture.json` bytes in this phase. That proof boundary must remain
+visible in the finalized handoff.
+
+The exact acknowledged-frame hash ledger remains authoritative until verified
+finalization. Its long-session size and latency gate is tracked in
+[issue #35](https://github.com/sandeep-devarapalli/capture-splat/issues/35).
+Do not prune hashes or raise the 48 MiB state limit; if the benchmark fails,
+land the specified chunked checksummed index before capture-loop integration.
 
 ## Next integration order
 
-1. Publish the additive session-seed/final-manifest binding in both repositories.
-2. Add explicit LAN opt-in plus QR scan and exact Bonjour service resolution.
-3. Place queue/counter state under Application Support and expose queue limits.
-4. Add one nonblocking callback only after each declared frame file is
+1. Add explicit LAN opt-in plus QR scan and exact Bonjour service resolution.
+2. Place queue/counter state under Application Support and expose queue limits.
+3. Add one nonblocking callback only after each declared frame file is
    atomically durable. Do not wait for optional sidecars that are still writing.
-5. Run two physical iPhone-to-Mac cycles, including receiver restart and Wi-Fi
+4. Run two physical iPhone-to-Mac cycles, including receiver restart and Wi-Fi
    interruption, while measuring memory, storage, thermal state, writer drops,
    throughput, recovery, and finalization.
 

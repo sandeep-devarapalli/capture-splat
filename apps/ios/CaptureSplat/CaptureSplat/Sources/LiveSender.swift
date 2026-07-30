@@ -226,6 +226,7 @@ actor LiveSender {
             try await queue.validateAuthorizationBinding(authorization)
 
             let session = try await queue.sessionForSend()
+            let sessionSchema = try await queue.sessionSchemaForSend()
             let sessionURL = try await queue.verifiedFileURL(for: session.metadata)
             let sessionPath = "\(LiveAuthContract.liveAPIRoot)/sessions/\(session.sessionID)"
             let sessionACK = try await requestACK(
@@ -341,11 +342,33 @@ actor LiveSender {
             }
 
             if let finalization = try await queue.finalizationForSend() {
-                let payload = LiveFinalizePayload(
-                    schema: "capture_splat.live_finalize.v0.1",
-                    sessionID: finalization.sessionID,
-                    finalSequenceID: finalization.finalSequenceID
-                )
+                let payload: LiveFinalizePayload
+                switch sessionSchema {
+                case "capture_splat.live_session.v0.1":
+                    guard finalization.sourceManifest == nil else {
+                        throw LiveSenderQueueError.finalizationConflict
+                    }
+                    payload = LiveFinalizePayload(
+                        schema: "capture_splat.live_finalize.v0.1",
+                        sessionID: finalization.sessionID,
+                        finalSequenceID: finalization.finalSequenceID,
+                        sourceManifest: nil
+                    )
+                case "capture_splat.live_session.v0.2":
+                    guard let sourceManifest = finalization.sourceManifest else {
+                        throw LiveSenderQueueError.finalizationConflict
+                    }
+                    payload = LiveFinalizePayload(
+                        schema: "capture_splat.live_finalize.v0.2",
+                        sessionID: finalization.sessionID,
+                        finalSequenceID: finalization.finalSequenceID,
+                        sourceManifest: sourceManifest
+                    )
+                default:
+                    throw LiveSenderQueueError.invalidReference(
+                        "unsupported live session schema"
+                    )
+                }
                 let body = try LiveStrictJSON.canonicalData(payload)
                 let ack = try await requestACK(
                     method: "POST",
@@ -581,10 +604,20 @@ private struct LiveFinalizePayload: Codable {
     let schema: String
     let sessionID: String
     let finalSequenceID: Int
+    let sourceManifest: LiveSenderSourceManifestReference?
 
     enum CodingKeys: String, CodingKey {
         case schema
         case sessionID = "session_id"
         case finalSequenceID = "final_sequence_id"
+        case sourceManifest = "source_manifest"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schema, forKey: .schema)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(finalSequenceID, forKey: .finalSequenceID)
+        try container.encodeIfPresent(sourceManifest, forKey: .sourceManifest)
     }
 }

@@ -1,0 +1,11 @@
+{
+  "final_sequence_id": 2,
+  "schema": "capture_splat.live_finalize.v0.2",
+  "session_id": "csl_SMOhjzjH7dE8x3yB5A0KBAo4YL6A4IzY1U570kVX_D8",
+  "source_manifest": {
+    "path": "capture.json",
+    "schema": "capture_splat.v0.3",
+    "sha256": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "size_bytes": 456
+  }
+}

@@ -90,6 +90,7 @@ private actor ReceiverHarness: LiveAuthenticatedRequesting {
     private var dropFinalizationResponses = true
     private var active = 0
     private var maximumActive = 0
+    private var finalizePayloadValid = false
 
     init(expectedCount: Int, authorization: LiveSenderAuthorizationBinding) {
         self.expectedCount = expectedCount
@@ -129,6 +130,22 @@ private actor ReceiverHarness: LiveAuthenticatedRequesting {
             operation = .resume
             status = finalized ? .finalized : .accepted
         } else if path.hasSuffix("/finalize") {
+            let expectedBody = Data(
+                "{\"final_sequence_id\":\(expectedCount),\"schema\":\"capture_splat.live_finalize.v0.1\",\"session_id\":\"sender-fixture-01\"}".utf8
+            )
+            guard case .data(let data, let contentType) = body,
+                  contentType == "application/json",
+                  data == expectedBody,
+                  let document = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  Set(document.keys) == Set(["schema", "session_id", "final_sequence_id"]),
+                  document["schema"] as? String == "capture_splat.live_finalize.v0.1",
+                  document["session_id"] as? String == "sender-fixture-01",
+                  document["final_sequence_id"] as? Int == expectedCount else {
+                throw LiveAuthenticatedRequestError.corruptBody(
+                    "v0.1 finalization payload is invalid"
+                )
+            }
+            finalizePayloadValid = true
             finalized = true
             if dropFinalizationResponses {
                 throw LiveAuthenticatedRequestError.network("simulated lost finalization ACK")
@@ -173,8 +190,8 @@ private actor ReceiverHarness: LiveAuthenticatedRequesting {
         dropFinalizationResponses = false
     }
 
-    func evidence() -> (calls: [String], maximumActive: Int) {
-        (calls, maximumActive)
+    func evidence() -> (calls: [String], maximumActive: Int, finalizePayloadValid: Bool) {
+        (calls, maximumActive, finalizePayloadValid)
     }
 
     private func sequence(from path: String) -> Int? {
@@ -209,6 +226,105 @@ private actor ReceiverHarness: LiveAuthenticatedRequesting {
     }
 }
 
+private actor ProgressiveReceiverHarness: LiveAuthenticatedRequesting {
+    private let sessionID: String
+    private let expectedCount: Int
+    private let authorization: LiveSenderAuthorizationBinding
+    private let sourceManifest: LiveSenderSourceManifestReference?
+    private var finalized = false
+    private var droppedFinalizationACK = false
+    private var calls: [String] = []
+    private var finalizePayloadValid = false
+
+    init(
+        sessionID: String,
+        expectedCount: Int,
+        authorization: LiveSenderAuthorizationBinding,
+        sourceManifest: LiveSenderSourceManifestReference? = nil
+    ) {
+        self.sessionID = sessionID
+        self.expectedCount = expectedCount
+        self.authorization = authorization
+        self.sourceManifest = sourceManifest
+    }
+
+    func validateSenderAuthorization(
+        now: Date
+    ) async throws -> LiveSenderAuthorizationBinding {
+        authorization
+    }
+
+    func perform(
+        method: String,
+        path: String,
+        body: LiveAuthenticatedBody,
+        now: Date
+    ) async throws -> Data {
+        calls.append("\(method) \(path)")
+        let operation: LiveSenderAcknowledgement.Operation
+        let status: LiveSenderAcknowledgement.Status
+        if path.hasSuffix("/finalize") {
+            operation = .finalize
+            status = .finalized
+            guard let sourceManifest,
+                  case .data(let data, let contentType) = body,
+                  contentType == "application/json",
+                  let document = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  Set(document.keys) == Set([
+                      "schema",
+                      "session_id",
+                      "final_sequence_id",
+                      "source_manifest",
+                  ]),
+                  document["schema"] as? String == "capture_splat.live_finalize.v0.2",
+                  document["session_id"] as? String == sessionID,
+                  document["final_sequence_id"] as? Int == expectedCount,
+                  let source = document["source_manifest"] as? [String: Any],
+                  Set(source.keys) == Set(["path", "schema", "sha256", "size_bytes"]),
+                  source["path"] as? String == sourceManifest.path,
+                  source["schema"] as? String == sourceManifest.schema,
+                  source["sha256"] as? String == sourceManifest.sha256,
+                  (source["size_bytes"] as? NSNumber)?.int64Value
+                      == sourceManifest.sizeBytes else {
+                throw LiveAuthenticatedRequestError.corruptBody(
+                    "progressive finalization payload is invalid"
+                )
+            }
+            finalizePayloadValid = true
+            finalized = true
+            if !droppedFinalizationACK {
+                droppedFinalizationACK = true
+                throw LiveAuthenticatedRequestError.network(
+                    "simulated lost progressive finalization ACK"
+                )
+            }
+        } else if method == "GET" {
+            operation = .resume
+            status = finalized ? .finalized : .accepted
+        } else {
+            operation = .session
+            status = finalized ? .duplicate : .accepted
+        }
+        let acknowledgement = try LiveSenderAcknowledgement(
+            sessionID: sessionID,
+            operation: operation,
+            status: status,
+            receivedCount: expectedCount,
+            contiguousCount: expectedCount,
+            pendingCount: 0,
+            expectedFrameCount: finalized ? expectedCount : nil,
+            nextExpectedSequenceID: expectedCount + 1,
+            missingRanges: [],
+            finalized: finalized
+        )
+        return try LiveStrictJSON.canonicalData(acknowledgement)
+    }
+
+    func evidence() -> (calls: [String], finalizePayloadValid: Bool) {
+        (calls, finalizePayloadValid)
+    }
+}
+
 @main
 private struct LiveSenderProbe {
     static func main() async throws {
@@ -227,6 +343,8 @@ private struct LiveSenderProbe {
             result = try await pinnedTransport(root: root)
         case "queue":
             result = try await queue(root: root)
+        case "progressive":
+            result = try await progressive(root: root)
         case "engine":
             result = try await engine(root: root)
         case "policy":
@@ -1111,6 +1229,410 @@ private struct LiveSenderProbe {
         ]
     }
 
+    private static func progressive(root: URL) async throws -> [String: Any] {
+        let capture = root.appendingPathComponent("progressive-capture", isDirectory: true)
+        let stateURL = root.appendingPathComponent("progressive-state/queue.json")
+        try FileManager.default.createDirectory(at: capture, withIntermediateDirectories: true)
+        let seed = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        let sessionID = try LiveSenderProgressiveSessionIdentity.sessionID(
+            sourceSessionSeedBase64URL: seed
+        )
+        let expectedSessionID = "csl_SMOhjzjH7dE8x3yB5A0KBAo4YL6A4IzY1U570kVX_D8"
+        let sessionURL = try write(
+            capture,
+            path: "live/session.json",
+            bytes: try progressiveSessionMetadata(sessionID: sessionID, seed: seed)
+        )
+        let authorization = try fixtureAuthorization()
+        let session = try LiveSenderSessionReference(
+            sessionID: sessionID,
+            expectedFrameCount: nil,
+            metadata: try reference(capture, url: sessionURL, mediaType: "application/json"),
+            authorization: authorization
+        )
+        let limits = try LiveSenderQueueLimits(
+            maximumFrames: 4,
+            maximumBytes: 4 * 1024 * 1024,
+            maximumInFlight: 2
+        )
+        let manifestAbsentAtOpen = !FileManager.default.fileExists(
+            atPath: capture.appendingPathComponent("capture.json").path
+        )
+        let queue = try await LiveSenderQueue.open(
+            captureRoot: capture,
+            stateURL: stateURL,
+            limits: limits,
+            session: session
+        )
+        let preManifestReceiver = ProgressiveReceiverHarness(
+            sessionID: sessionID,
+            expectedCount: 0,
+            authorization: authorization
+        )
+        let preManifestRun = await LiveSender(
+            queue: queue,
+            requester: preManifestReceiver,
+            policy: try LiveSenderPolicy(minimumAvailableStorageBytes: 1),
+            retryPolicy: try LiveSenderRetryPolicy(
+                maximumAttempts: 1,
+                initialDelayMilliseconds: 0,
+                maximumDelayMilliseconds: 0
+            ),
+            sleeper: ImmediateSleeper()
+        ).runOnce(environment: {
+            LiveSenderEnvironment(
+                isForeground: true,
+                networkAvailable: true,
+                receiverAvailable: true,
+                availableStorageBytes: 1_000,
+                thermalState: .nominal
+            )
+        })
+        let preManifestCalls = await preManifestReceiver.evidence().calls
+        let preManifestSessionSent = preManifestRun.status == .awaitingFrames
+            && preManifestCalls.count == 2
+            && preManifestCalls[0].hasPrefix("PUT ")
+            && preManifestCalls[1].hasPrefix("GET ")
+
+        let sessionBytes = try Data(contentsOf: sessionURL)
+        try Data(#"{"schema":"tampered"}"#.utf8).write(to: sessionURL, options: .atomic)
+        var immutableSessionRejected = false
+        do {
+            _ = try await queue.sessionForSend()
+        } catch LiveSenderQueueError.sourceSizeMismatch {
+            immutableSessionRejected = true
+        } catch LiveSenderQueueError.sourceChecksumMismatch {
+            immutableSessionRejected = true
+        }
+        try sessionBytes.write(to: sessionURL, options: .atomic)
+
+        let invalidSessionURL = try write(
+            capture,
+            path: "live/invalid-session.json",
+            bytes: try progressiveSessionMetadata(
+                sessionID: sessionID,
+                seed: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
+            )
+        )
+        let invalidSession = try LiveSenderSessionReference(
+            sessionID: sessionID,
+            expectedFrameCount: nil,
+            metadata: try reference(
+                capture,
+                url: invalidSessionURL,
+                mediaType: "application/json"
+            ),
+            authorization: authorization
+        )
+        var mismatchedSeedRejected = false
+        do {
+            _ = try await LiveSenderQueue.open(
+                captureRoot: capture,
+                stateURL: root.appendingPathComponent("invalid-progressive/queue.json"),
+                limits: limits,
+                session: invalidSession
+            )
+        } catch LiveSenderQueueError.invalidReference {
+            mismatchedSeedRejected = true
+        }
+
+        let absentManifest = try LiveSenderSourceManifestReference(
+            path: "capture.json",
+            sizeBytes: 1,
+            sha256: "sha256:" + String(repeating: "0", count: 64),
+            schema: "capture_splat.v0.3"
+        )
+        var missingManifestRejected = false
+        do {
+            try await queue.setFinalization(LiveSenderFinalizationReference(
+                sessionID: sessionID,
+                finalSequenceID: 2,
+                sourceManifest: absentManifest
+            ))
+        } catch LiveSenderQueueError.sourceMissing {
+            missingManifestRejected = true
+        }
+
+        let manifestBytes = Data(#"{"frames":[],"schema":"capture_splat.v0.3"}"#.utf8)
+        let manifestURL = try write(
+            capture,
+            path: "capture.json",
+            bytes: manifestBytes
+        )
+        let manifestFile = try reference(
+            capture,
+            url: manifestURL,
+            mediaType: "application/json"
+        )
+        let manifest = try LiveSenderSourceManifestReference(
+            path: manifestFile.relativePath,
+            sizeBytes: manifestFile.sizeBytes,
+            sha256: manifestFile.sha256,
+            schema: "capture_splat.v0.3"
+        )
+        var corruptManifestRejected = true
+        for invalidBytes in [
+            Data(#"{"schema":"capture_splat.v0.3""#.utf8),
+            Data(#"{"schema":"capture_splat.v0.3","schema":"capture_splat.v0.3"}"#.utf8),
+            Data(#"{"schema":"capture_splat.v0.3","value":NaN}"#.utf8),
+        ] {
+            try invalidBytes.write(to: manifestURL, options: .atomic)
+            let invalidFile = try reference(
+                capture,
+                url: manifestURL,
+                mediaType: "application/json"
+            )
+            do {
+                try await queue.setFinalization(LiveSenderFinalizationReference(
+                    sessionID: sessionID,
+                    finalSequenceID: 2,
+                    sourceManifest: try LiveSenderSourceManifestReference(
+                        path: invalidFile.relativePath,
+                        sizeBytes: invalidFile.sizeBytes,
+                        sha256: invalidFile.sha256,
+                        schema: "capture_splat.v0.3"
+                    )
+                ))
+                corruptManifestRejected = false
+            } catch LiveSenderQueueError.invalidReference {
+                continue
+            }
+        }
+        try manifestBytes.write(to: manifestURL, options: .atomic)
+        var manifestSchemaMismatchRejected = false
+        do {
+            try await queue.setFinalization(LiveSenderFinalizationReference(
+                sessionID: sessionID,
+                finalSequenceID: 2,
+                sourceManifest: try LiveSenderSourceManifestReference(
+                    path: manifestFile.relativePath,
+                    sizeBytes: manifestFile.sizeBytes,
+                    sha256: manifestFile.sha256,
+                    schema: "capture_splat.v0.4"
+                )
+            ))
+        } catch LiveSenderQueueError.invalidReference {
+            manifestSchemaMismatchRejected = true
+        }
+        try await queue.setFinalization(LiveSenderFinalizationReference(
+            sessionID: sessionID,
+            finalSequenceID: 2,
+            sourceManifest: manifest
+        ))
+        var conflictingBindingRejected = false
+        do {
+            try await queue.setFinalization(LiveSenderFinalizationReference(
+                sessionID: sessionID,
+                finalSequenceID: 2,
+                sourceManifest: LiveSenderSourceManifestReference(
+                    path: "capture.json",
+                    sizeBytes: manifest.sizeBytes,
+                    sha256: manifest.sha256,
+                    schema: "capture_splat.v0.4"
+                )
+            ))
+        } catch LiveSenderQueueError.finalizationConflict {
+            conflictingBindingRejected = true
+        }
+
+        try Data(#"{"schema":"capture_splat.v0.3""#.utf8)
+            .write(to: manifestURL, options: .atomic)
+        var corruptManifestRestartRejected = false
+        do {
+            _ = try await LiveSenderQueue.open(
+                captureRoot: capture,
+                stateURL: stateURL,
+                limits: limits,
+                session: session
+            )
+        } catch LiveSenderQueueError.invalidReference {
+            corruptManifestRestartRejected = true
+        } catch LiveSenderQueueError.sourceSizeMismatch {
+            corruptManifestRestartRejected = true
+        } catch LiveSenderQueueError.sourceChecksumMismatch {
+            corruptManifestRestartRejected = true
+        }
+        try manifestBytes.write(to: manifestURL, options: .atomic)
+        let reopened = try await LiveSenderQueue.open(
+            captureRoot: capture,
+            stateURL: stateURL,
+            limits: limits,
+            session: session
+        )
+        let reopenedSession = try await reopened.sessionForSend()
+        let reopenedSessionURL = try await reopened.verifiedFileURL(
+            for: reopenedSession.metadata
+        )
+        let reopenedSessionBytes = try Data(contentsOf: reopenedSessionURL)
+        let restartPreservedBinding = reopenedSession == session
+            && reopenedSessionBytes == sessionBytes
+        let nilExpectedACK = try LiveSenderAcknowledgement(
+            sessionID: sessionID,
+            operation: .resume,
+            status: .accepted,
+            receivedCount: 2,
+            contiguousCount: 2,
+            pendingCount: 0,
+            expectedFrameCount: nil,
+            nextExpectedSequenceID: 3,
+            missingRanges: [],
+            finalized: false
+        )
+        _ = try await reopened.reconcile(nilExpectedACK)
+        let durableExpectedACK = try LiveSenderAcknowledgement(
+            sessionID: sessionID,
+            operation: .resume,
+            status: .accepted,
+            receivedCount: 2,
+            contiguousCount: 2,
+            pendingCount: 0,
+            expectedFrameCount: 2,
+            nextExpectedSequenceID: 3,
+            missingRanges: [],
+            finalized: false
+        )
+        _ = try await reopened.reconcile(durableExpectedACK)
+        let staleNilResult = try await reopened.reconcile(LiveSenderAcknowledgement(
+            sessionID: sessionID,
+            operation: .resume,
+            status: .accepted,
+            receivedCount: 1,
+            contiguousCount: 1,
+            pendingCount: 0,
+            expectedFrameCount: nil,
+            nextExpectedSequenceID: 2,
+            missingRanges: [],
+            finalized: false
+        ))
+        let confirmedSource = try write(
+            capture,
+            path: "rgb/confirmed-frame-2.jpg",
+            bytes: Data(repeating: 2, count: 8)
+        )
+        let confirmedMetadata = try write(
+            capture,
+            path: "live/confirmed-frame-2.json",
+            bytes: try frameMetadata(
+                capture: capture,
+                sessionID: sessionID,
+                sequence: 2,
+                source: confirmedSource
+            )
+        )
+        let staleNilDisposition = try await reopened.enqueue(frame(
+            capture,
+            sessionID: sessionID,
+            sequence: 2,
+            metadata: confirmedMetadata,
+            source: confirmedSource
+        )).disposition
+        var differingExpectedRejected = false
+        do {
+            _ = try await reopened.reconcile(LiveSenderAcknowledgement(
+                sessionID: sessionID,
+                operation: .resume,
+                status: .accepted,
+                receivedCount: 2,
+                contiguousCount: 2,
+                pendingCount: 0,
+                expectedFrameCount: 3,
+                nextExpectedSequenceID: 3,
+                missingRanges: [try LiveSenderMissingRange(start: 3, end: 3)],
+                finalized: false
+            ))
+        } catch LiveSenderQueueError.invalidAcknowledgement {
+            differingExpectedRejected = true
+        }
+
+        try Data(#"{"frames":[],"schema":"capture_splat.v0.4"}"#.utf8)
+            .write(to: manifestURL, options: .atomic)
+        var manifestReverifiedBeforeSend = false
+        do {
+            _ = try await reopened.finalizationForSend()
+        } catch LiveSenderQueueError.sourceChecksumMismatch {
+            manifestReverifiedBeforeSend = true
+        }
+        try manifestBytes.write(to: manifestURL, options: .atomic)
+        let finalizationReadyAfterRestore = try await reopened.finalizationForSend() != nil
+
+        let receiver = ProgressiveReceiverHarness(
+            sessionID: sessionID,
+            expectedCount: 2,
+            authorization: authorization,
+            sourceManifest: manifest
+        )
+        let environment = LiveSenderEnvironment(
+            isForeground: true,
+            networkAvailable: true,
+            receiverAvailable: true,
+            availableStorageBytes: 1_000,
+            thermalState: .nominal
+        )
+        let first = await LiveSender(
+            queue: reopened,
+            requester: receiver,
+            policy: try LiveSenderPolicy(minimumAvailableStorageBytes: 1),
+            retryPolicy: try LiveSenderRetryPolicy(
+                maximumAttempts: 1,
+                initialDelayMilliseconds: 0,
+                maximumDelayMilliseconds: 0
+            ),
+            sleeper: ImmediateSleeper()
+        ).runOnce(environment: { environment })
+        let restarted = try await LiveSenderQueue.open(
+            captureRoot: capture,
+            stateURL: stateURL,
+            limits: limits,
+            session: session
+        )
+        let recovered = await LiveSender(
+            queue: restarted,
+            requester: receiver,
+            policy: try LiveSenderPolicy(minimumAvailableStorageBytes: 1),
+            retryPolicy: try LiveSenderRetryPolicy(),
+            sleeper: ImmediateSleeper()
+        ).runOnce(environment: { environment })
+        let callsBeforeIdempotentRun = await receiver.evidence().calls.count
+        let finalizedQueue = try await LiveSenderQueue.open(
+            captureRoot: capture,
+            stateURL: stateURL,
+            limits: limits,
+            session: session
+        )
+        let idempotent = await LiveSender(
+            queue: finalizedQueue,
+            requester: receiver,
+            policy: try LiveSenderPolicy(minimumAvailableStorageBytes: 1),
+            retryPolicy: try LiveSenderRetryPolicy(),
+            sleeper: ImmediateSleeper()
+        ).runOnce(environment: { environment })
+        let evidence = await receiver.evidence()
+
+        return [
+            "derived_session_id_matches": sessionID == expectedSessionID,
+            "opened_before_manifest": manifestAbsentAtOpen,
+            "immutable_session_rejected": immutableSessionRejected,
+            "mismatched_seed_rejected": mismatchedSeedRejected,
+            "missing_manifest_rejected": missingManifestRejected,
+            "conflicting_binding_rejected": conflictingBindingRejected,
+            "corrupt_manifest_rejected": corruptManifestRejected,
+            "corrupt_manifest_restart_rejected": corruptManifestRestartRejected,
+            "manifest_schema_mismatch_rejected": manifestSchemaMismatchRejected,
+            "restart_preserved_binding": restartPreservedBinding,
+            "pre_manifest_session_sent": preManifestSessionSent,
+            "expected_count_promoted": finalizationReadyAfterRestore,
+            "stale_nil_ignored": staleNilResult.snapshot.finalizationPending
+                && staleNilDisposition == .duplicate,
+            "differing_expected_rejected": differingExpectedRejected,
+            "manifest_reverified_before_send": manifestReverifiedBeforeSend,
+            "lost_finalize_ack_interrupted": first.status == .interrupted,
+            "restart_resumed_finalization": recovered.status == .finalized && recovered.finalized,
+            "finalize_payload_valid": evidence.finalizePayloadValid,
+            "idempotent_after_finalize": idempotent.status == .finalized
+                && evidence.calls.count == callsBeforeIdempotentRun,
+        ]
+    }
+
     private static func engine(root: URL) async throws -> [String: Any] {
         let capture = root.appendingPathComponent("capture", isDirectory: true)
         try FileManager.default.createDirectory(at: capture, withIntermediateDirectories: true)
@@ -1291,6 +1813,7 @@ private struct LiveSenderProbe {
             "post_finalization_idempotent": finalizedRerun.status == .finalized
                 && finalizedRerun.finalized
                 && evidence.calls.count == callsBeforeFinalizedRerun,
+            "v0_1_finalize_payload_valid": evidence.finalizePayloadValid,
             "resume_before_frames": evidence.calls.firstIndex(where: { $0.hasPrefix("GET ") })!
                 < evidence.calls.firstIndex(where: { $0.contains("/frames/") })!,
             "authorization_owner_enforced": wrongDesktopSummary.status == .interrupted
@@ -1366,6 +1889,29 @@ private struct LiveSenderProbe {
         return try JSONSerialization.data(withJSONObject: document, options: [.sortedKeys])
     }
 
+    private static func progressiveSessionMetadata(
+        sessionID: String,
+        seed: String
+    ) throws -> Data {
+        try JSONSerialization.data(withJSONObject: [
+            "schema": "capture_splat.live_session.v0.2",
+            "session_id": sessionID,
+            "created_at": "2026-07-30T10:00:00.000Z",
+            "source_session_seed_b64u": seed,
+            "expected_frame_count": NSNull(),
+            "coordinate_system": [
+                "id": "arkit_world",
+                "units": "meters",
+                "handedness": "right",
+                "world_up": "+Y",
+                "camera_forward": "-Z",
+                "matrix_layout": "row-major",
+                "vector_convention": "column-vector",
+            ],
+            "authority": "proposal_only",
+        ], options: [.sortedKeys])
+    }
+
     private static func frameMetadata(
         capture: URL,
         sessionID: String,
@@ -1418,12 +1964,13 @@ private struct LiveSenderProbe {
 
     private static func frame(
         _ capture: URL,
+        sessionID: String = "sender-fixture-01",
         sequence: Int,
         metadata: URL,
         source: URL
     ) throws -> LiveSenderFrameReference {
         try LiveSenderFrameReference(
-            sessionID: "sender-fixture-01",
+            sessionID: sessionID,
             sequenceID: sequence,
             metadata: reference(capture, url: metadata, mediaType: "application/json"),
             assets: [
@@ -1457,10 +2004,13 @@ private struct LiveSenderProbe {
         mediaType: String
     ) throws -> LiveSenderFileReference {
         let relative = String(url.path.dropFirst(capture.path.count + 1))
-        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize!
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        guard let size = attributes[.size] as? NSNumber else {
+            throw LiveSenderQueueError.sourceMissing(relative)
+        }
         return try LiveSenderFileReference(
             relativePath: relative,
-            sizeBytes: Int64(size),
+            sizeBytes: size.int64Value,
             sha256: LiveFileDigest.sha256(url: url),
             mediaType: mediaType
         )

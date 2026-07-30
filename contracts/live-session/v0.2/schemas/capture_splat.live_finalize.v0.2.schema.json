@@ -1,0 +1,54 @@
+{
+  "$id": "urn:capture-splat:schema:capture_splat.live_finalize.v0.2",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "final_sequence_id": {
+      "maximum": 99999999,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "schema": {
+      "const": "capture_splat.live_finalize.v0.2"
+    },
+    "session_id": {
+      "pattern": "^csl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+      "type": "string"
+    },
+    "source_manifest": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "const": "capture.json"
+        },
+        "schema": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size_bytes",
+        "schema"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema",
+    "session_id",
+    "final_sequence_id",
+    "source_manifest"
+  ],
+  "title": "Capture Splat progressive live finalization v0.2",
+  "type": "object"
+}

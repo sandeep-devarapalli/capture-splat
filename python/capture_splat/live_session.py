@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import math
 import mimetypes
@@ -16,13 +18,21 @@ from .capture_schema import IMAGE_KEYS, load_capture
 from .json_utils import ensure_finite
 
 LIVE_SESSION_SCHEMA = "capture_splat.live_session.v0.1"
+LIVE_PROGRESSIVE_SESSION_SCHEMA = "capture_splat.live_session.v0.2"
 LIVE_FRAME_SCHEMA = "capture_splat.live_frame.v0.1"
 LIVE_ACK_SCHEMA = "capture_splat.live_ack.v0.1"
 LIVE_FINALIZE_SCHEMA = "capture_splat.live_finalize.v0.1"
+LIVE_PROGRESSIVE_FINALIZE_SCHEMA = "capture_splat.live_finalize.v0.2"
 LIVE_REPLAY_SUMMARY_SCHEMA = "capture_splat.live_replay_summary.v0.1"
 
 SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+PROGRESSIVE_SESSION_ID_PATTERN = re.compile(
+    r"^csl_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+)
+SOURCE_SESSION_SEED_PATTERN = re.compile(
+    r"^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+)
 URI_SCHEME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 MEDIA_TYPE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$")
 RFC3339_DATETIME_PATTERN = re.compile(
@@ -44,6 +54,8 @@ QUALITY_NUMBER_KEYS = (
     "colmap_overlap_score",
     "valid_depth_ratio",
 )
+PROGRESSIVE_SESSION_ID_DOMAIN = b"CAPTURE-SPLAT-LIVE-SESSION-V2\x00"
+MAXIMUM_SEQUENCE_ID = 99_999_999
 
 
 @dataclass(frozen=True)
@@ -151,6 +163,28 @@ def _sha(value: Any, field: str) -> str:
     return value
 
 
+def _source_session_seed(value: Any) -> bytes:
+    if not isinstance(value, str) or not SOURCE_SESSION_SEED_PATTERN.fullmatch(value):
+        raise ValueError("source_session_seed_b64u must be canonical unpadded Base64URL for 32 bytes")
+    try:
+        decoded = base64.b64decode(value + "=", altchars=b"-_", validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError(
+            "source_session_seed_b64u must be canonical unpadded Base64URL for 32 bytes"
+        ) from exc
+    canonical = base64.urlsafe_b64encode(decoded).rstrip(b"=").decode("ascii")
+    if len(decoded) != 32 or canonical != value:
+        raise ValueError("source_session_seed_b64u must be canonical unpadded Base64URL for 32 bytes")
+    return decoded
+
+
+def derive_live_session_id(source_session_seed_b64u: Any) -> str:
+    seed = _source_session_seed(source_session_seed_b64u)
+    digest = hashlib.sha256(PROGRESSIVE_SESSION_ID_DOMAIN + seed).digest()
+    encoded = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return f"csl_{encoded}"
+
+
 def _validate_asset_reference(value: Any, field: str, *, dimensions_required: bool) -> None:
     required = {"path", "sha256", "size_bytes", "media_type"}
     if dimensions_required:
@@ -167,18 +201,8 @@ def _validate_asset_reference(value: Any, field: str, *, dimensions_required: bo
             _integer(reference[name], f"{field}.{name}", minimum=1)
 
 
-def validate_live_session(value: Any) -> dict[str, Any]:
-    ensure_finite(value)
-    session = _exact_keys(
-        value,
-        {"schema", "session_id", "created_at", "source_manifest", "coordinate_system", "authority"},
-        {"expected_frame_count"},
-        "session",
-    )
-    if session["schema"] != LIVE_SESSION_SCHEMA:
-        raise ValueError(f"session.schema must be {LIVE_SESSION_SCHEMA}")
-    _session_id(session["session_id"])
-    created_at = _string(session["created_at"], "session.created_at")
+def _validate_created_at(value: Any) -> None:
+    created_at = _string(value, "session.created_at")
     if not RFC3339_DATETIME_PATTERN.fullmatch(created_at):
         raise ValueError("session.created_at must be an RFC 3339 date-time")
     try:
@@ -187,13 +211,11 @@ def validate_live_session(value: Any) -> dict[str, Any]:
         raise ValueError("session.created_at must be an RFC 3339 date-time") from exc
     if parsed_created_at.tzinfo is None:
         raise ValueError("session.created_at must include a timezone")
-    source = _exact_keys(session["source_manifest"], {"path", "sha256", "size_bytes", "schema"}, set(), "session.source_manifest")
-    validate_safe_relative_path(source["path"], "session.source_manifest.path")
-    _sha(source["sha256"], "session.source_manifest.sha256")
-    _integer(source["size_bytes"], "session.source_manifest.size_bytes", minimum=1)
-    _string(source["schema"], "session.source_manifest.schema")
+
+
+def _validate_coordinate_system(value: Any) -> None:
     coordinate = _exact_keys(
-        session["coordinate_system"],
+        value,
         {"id", "units", "handedness", "world_up", "camera_forward", "matrix_layout", "vector_convention"},
         set(),
         "session.coordinate_system",
@@ -211,11 +233,119 @@ def validate_live_session(value: Any) -> dict[str, Any]:
     for key, expected in expected_coordinate.items():
         if coordinate[key] != expected:
             raise ValueError(f"session.coordinate_system.{key} must be {expected}")
+
+
+def _validate_live_session_v0_1(value: Any) -> dict[str, Any]:
+    session = _exact_keys(
+        value,
+        {"schema", "session_id", "created_at", "source_manifest", "coordinate_system", "authority"},
+        {"expected_frame_count"},
+        "session",
+    )
+    _session_id(session["session_id"])
+    _validate_created_at(session["created_at"])
+    source = _exact_keys(
+        session["source_manifest"],
+        {"path", "sha256", "size_bytes", "schema"},
+        set(),
+        "session.source_manifest",
+    )
+    validate_safe_relative_path(source["path"], "session.source_manifest.path")
+    _sha(source["sha256"], "session.source_manifest.sha256")
+    _integer(source["size_bytes"], "session.source_manifest.size_bytes", minimum=1)
+    _string(source["schema"], "session.source_manifest.schema")
+    _validate_coordinate_system(session["coordinate_system"])
     if session["authority"] != "proposal_only":
         raise ValueError("session.authority must be proposal_only")
     if "expected_frame_count" in session:
         _integer(session["expected_frame_count"], "session.expected_frame_count", minimum=1)
     return session
+
+
+def _validate_live_session_v0_2(value: Any) -> dict[str, Any]:
+    session = _exact_keys(
+        value,
+        {
+            "schema",
+            "session_id",
+            "created_at",
+            "source_session_seed_b64u",
+            "expected_frame_count",
+            "coordinate_system",
+            "authority",
+        },
+        set(),
+        "session",
+    )
+    if session["expected_frame_count"] is not None:
+        raise ValueError("session.expected_frame_count must be null for a progressive session")
+    expected_session_id = derive_live_session_id(session["source_session_seed_b64u"])
+    if session["session_id"] != expected_session_id:
+        raise ValueError("session.session_id does not match source_session_seed_b64u")
+    _validate_created_at(session["created_at"])
+    _validate_coordinate_system(session["coordinate_system"])
+    if session["authority"] != "proposal_only":
+        raise ValueError("session.authority must be proposal_only")
+    return session
+
+
+def validate_live_session(value: Any) -> dict[str, Any]:
+    ensure_finite(value)
+    if not isinstance(value, dict):
+        raise ValueError("session must be an object")
+    schema = value.get("schema")
+    if schema == LIVE_SESSION_SCHEMA:
+        return _validate_live_session_v0_1(value)
+    if schema == LIVE_PROGRESSIVE_SESSION_SCHEMA:
+        return _validate_live_session_v0_2(value)
+    raise ValueError(
+        f"session.schema must be {LIVE_SESSION_SCHEMA} or {LIVE_PROGRESSIVE_SESSION_SCHEMA}"
+    )
+
+
+def validate_live_finalize(value: Any) -> dict[str, Any]:
+    ensure_finite(value)
+    if not isinstance(value, dict):
+        raise ValueError("finalize must be an object")
+    schema = value.get("schema")
+    if schema == LIVE_FINALIZE_SCHEMA:
+        finalize = _exact_keys(
+            value,
+            {"schema", "session_id", "final_sequence_id"},
+            set(),
+            "finalize",
+        )
+        _session_id(finalize["session_id"])
+    elif schema == LIVE_PROGRESSIVE_FINALIZE_SCHEMA:
+        finalize = _exact_keys(
+            value,
+            {"schema", "session_id", "final_sequence_id", "source_manifest"},
+            set(),
+            "finalize",
+        )
+        if not isinstance(finalize["session_id"], str) or not PROGRESSIVE_SESSION_ID_PATTERN.fullmatch(
+            finalize["session_id"]
+        ):
+            raise ValueError("finalize.session_id must be a derived csl_ identifier")
+        source = _exact_keys(
+            finalize["source_manifest"],
+            {"path", "sha256", "size_bytes", "schema"},
+            set(),
+            "finalize.source_manifest",
+        )
+        if source["path"] != "capture.json":
+            raise ValueError("finalize.source_manifest.path must be capture.json")
+        _sha(source["sha256"], "finalize.source_manifest.sha256")
+        _integer(source["size_bytes"], "finalize.source_manifest.size_bytes", minimum=1)
+        _string(source["schema"], "finalize.source_manifest.schema")
+    else:
+        raise ValueError(
+            f"finalize.schema must be {LIVE_FINALIZE_SCHEMA} or {LIVE_PROGRESSIVE_FINALIZE_SCHEMA}"
+        )
+    sequence_id = _integer(finalize["final_sequence_id"], "finalize.final_sequence_id", minimum=1)
+    if sequence_id > MAXIMUM_SEQUENCE_ID:
+        raise ValueError(f"finalize.final_sequence_id must not exceed {MAXIMUM_SEQUENCE_ID}")
+    return finalize
 
 
 def validate_live_frame(value: Any) -> dict[str, Any]:
