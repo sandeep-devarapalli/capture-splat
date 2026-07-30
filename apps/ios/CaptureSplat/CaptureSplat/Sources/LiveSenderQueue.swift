@@ -128,11 +128,61 @@ public struct LiveSenderFrameReference: Codable, Equatable, Sendable {
     }
 }
 
+public struct LiveSenderSourceManifestReference: Codable, Equatable, Sendable {
+    public let path: String
+    public let sizeBytes: Int64
+    public let sha256: String
+    public let schema: String
+
+    public init(path: String, sizeBytes: Int64, sha256: String, schema: String) throws {
+        guard path == "capture.json" else {
+            throw LiveSenderQueueError.invalidReference(
+                "progressive source manifest path must be capture.json"
+            )
+        }
+        try LiveSenderValidation.fileReference(
+            relativePath: path,
+            sizeBytes: sizeBytes,
+            sha256: sha256,
+            mediaType: "application/json"
+        )
+        guard !schema.isEmpty else {
+            throw LiveSenderQueueError.invalidReference(
+                "progressive source manifest schema must not be empty"
+            )
+        }
+        self.path = path
+        self.sizeBytes = sizeBytes
+        self.sha256 = sha256
+        self.schema = schema
+    }
+
+    fileprivate func fileReference() throws -> LiveSenderFileReference {
+        try LiveSenderFileReference(
+            relativePath: path,
+            sizeBytes: sizeBytes,
+            sha256: sha256,
+            mediaType: "application/json"
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case path
+        case sizeBytes = "size_bytes"
+        case sha256, schema
+    }
+}
+
 public struct LiveSenderFinalizationReference: Codable, Equatable, Sendable {
     public let sessionID: String
     public let finalSequenceID: Int
+    public let sourceManifest: LiveSenderSourceManifestReference?
 
-    public init(sessionID: String, finalSequenceID: Int) throws {
+    public init(
+        sessionID: String,
+        finalSequenceID: Int,
+        sourceManifest: LiveSenderSourceManifestReference? = nil
+    ) throws {
         try LiveSenderValidation.sessionID(sessionID)
         guard (1...LiveSenderValidation.maximumSequenceID).contains(finalSequenceID) else {
             throw LiveSenderQueueError.invalidReference(
@@ -141,11 +191,53 @@ public struct LiveSenderFinalizationReference: Codable, Equatable, Sendable {
         }
         self.sessionID = sessionID
         self.finalSequenceID = finalSequenceID
+        self.sourceManifest = sourceManifest
     }
 
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case finalSequenceID = "final_sequence_id"
+        case sourceManifest = "source_manifest"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            sessionID: container.decode(String.self, forKey: .sessionID),
+            finalSequenceID: container.decode(Int.self, forKey: .finalSequenceID),
+            sourceManifest: container.decodeIfPresent(
+                LiveSenderSourceManifestReference.self,
+                forKey: .sourceManifest
+            )
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(finalSequenceID, forKey: .finalSequenceID)
+        try container.encodeIfPresent(sourceManifest, forKey: .sourceManifest)
+    }
+}
+
+public enum LiveSenderProgressiveSessionIdentity {
+    private static let domain = Data("CAPTURE-SPLAT-LIVE-SESSION-V2\u{0}".utf8)
+
+    public static func sessionID(sourceSessionSeedBase64URL: String) throws -> String {
+        let seed: Data
+        do {
+            seed = try LiveAuthEncoding.decodeBase64URL(
+                sourceSessionSeedBase64URL,
+                expectedBytes: 32,
+                field: "source_session_seed_b64u"
+            )
+        } catch {
+            throw LiveSenderQueueError.invalidReference(
+                "source_session_seed_b64u must be canonical unpadded Base64URL for 32 bytes"
+            )
+        }
+        let digest = SHA256.hash(data: domain + seed)
+        return "csl_\(LiveAuthEncoding.encodeBase64URL(Data(digest)))"
     }
 }
 
@@ -260,6 +352,28 @@ public struct LiveSenderAcknowledgement: Codable, Equatable, Sendable {
         case nextExpectedSequenceID = "next_expected_sequence_id"
         case missingRanges = "missing_ranges"
         case finalized, message
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schema, forKey: .schema)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(operation, forKey: .operation)
+        try container.encode(status, forKey: .status)
+        try container.encodeIfPresent(sequenceID, forKey: .sequenceID)
+        try container.encodeIfPresent(assetRole, forKey: .assetRole)
+        try container.encode(receivedCount, forKey: .receivedCount)
+        try container.encode(contiguousCount, forKey: .contiguousCount)
+        try container.encode(pendingCount, forKey: .pendingCount)
+        if let expectedFrameCount {
+            try container.encode(expectedFrameCount, forKey: .expectedFrameCount)
+        } else {
+            try container.encodeNil(forKey: .expectedFrameCount)
+        }
+        try container.encode(nextExpectedSequenceID, forKey: .nextExpectedSequenceID)
+        try container.encode(missingRanges, forKey: .missingRanges)
+        try container.encode(finalized, forKey: .finalized)
+        try container.encodeIfPresent(message, forKey: .message)
     }
 }
 
@@ -465,6 +579,10 @@ public actor LiveSenderQueue {
                 throw LiveSenderQueueError.sessionConflict
             }
             try validate(loaded)
+            let sessionSchema = try verify(loaded.session)
+            if let finalization = loaded.finalization {
+                try verify(finalization, sessionSchema: sessionSchema)
+            }
             state = loaded
             return
         }
@@ -489,6 +607,13 @@ public actor LiveSenderQueue {
         }
         try verify(state.session)
         return state.session
+    }
+
+    func sessionSchemaForSend() throws -> String {
+        guard let state else {
+            throw LiveSenderQueueError.sessionNotLoaded
+        }
+        return try verify(state.session)
     }
 
     func validateAuthorizationBinding(_ authorization: LiveSenderAuthorizationBinding) throws {
@@ -595,10 +720,24 @@ public actor LiveSenderQueue {
         guard acknowledgement.sessionID == state.session.sessionID else {
             throw LiveSenderQueueError.acknowledgementSessionMismatch
         }
-        guard acknowledgement.expectedFrameCount == state.session.expectedFrameCount else {
-            throw LiveSenderQueueError.invalidAcknowledgement(
-                "ACK expected_frame_count conflicts with the queued session"
-            )
+        switch try verify(state.session) {
+        case LiveSessionContract.v0_1.rawValue:
+            guard acknowledgement.expectedFrameCount == state.session.expectedFrameCount else {
+                throw LiveSenderQueueError.invalidAcknowledgement(
+                    "ACK expected_frame_count conflicts with the queued session"
+                )
+            }
+        case LiveSessionContract.v0_2.rawValue:
+            if let expected = acknowledgement.expectedFrameCount {
+                guard let finalization = state.finalization,
+                      expected == finalization.finalSequenceID else {
+                    throw LiveSenderQueueError.invalidAcknowledgement(
+                        "ACK expected_frame_count conflicts with progressive finalization"
+                    )
+                }
+            }
+        default:
+            throw LiveSenderQueueError.invalidReference("unsupported live session schema")
         }
         if acknowledgement.finalized {
             try validateFinalized(acknowledgement, state: state)
@@ -664,6 +803,8 @@ public actor LiveSenderQueue {
         if let existing = state.finalization, existing != reference {
             throw LiveSenderQueueError.finalizationConflict
         }
+        let sessionSchema = try verify(state.session)
+        try verify(reference, sessionSchema: sessionSchema)
         let sequenceExceedsFinal = state.frames.contains {
             $0.sequenceID > reference.finalSequenceID
         } || state.acknowledgedFrames.contains {
@@ -688,6 +829,8 @@ public actor LiveSenderQueue {
             throw LiveSenderQueueError.sessionNotLoaded
         }
         guard let finalization = state.finalization else { return nil }
+        let sessionSchema = try verify(state.session)
+        try verify(finalization, sessionSchema: sessionSchema)
         let (next, overflow) = finalization.finalSequenceID.addingReportingOverflow(1)
         guard !state.finalized,
               state.frames.isEmpty,
@@ -812,21 +955,159 @@ public actor LiveSenderQueue {
         }
     }
 
-    private func verify(_ session: LiveSenderSessionReference) throws {
+    @discardableResult
+    private func verify(_ session: LiveSenderSessionReference) throws -> String {
         let metadataURL = try verify(session.metadata)
-        let metadata = try decodeMetadata(
-            LiveSenderSessionMetadataEvidence.self,
-            from: metadataURL,
-            reference: session.metadata
-        )
-        guard metadata.schema == "capture_splat.live_session.v0.1",
-              metadata.sessionID == session.sessionID,
-              metadata.expectedFrameCount == session.expectedFrameCount else {
+        let data = try metadataData(from: metadataURL, reference: session.metadata)
+        let object: [String: Any]
+        do {
+            guard let dictionary = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw LiveSenderQueueError.invalidReference(
+                    "session metadata must be a JSON object"
+                )
+            }
+            object = dictionary
+        } catch let error as LiveSenderQueueError {
+            throw error
+        } catch {
+            throw LiveSenderQueueError.invalidReference(
+                "session metadata is not strict contract JSON"
+            )
+        }
+        guard let schema = object["schema"] as? String else {
             throw LiveSenderQueueError.invalidReference(
                 "session metadata identity does not match its queue reference"
             )
         }
-        try verify(metadata.sourceManifest.reference())
+        switch schema {
+        case LiveSessionContract.v0_1.rawValue:
+            let allowed = Set([
+                "schema",
+                "session_id",
+                "created_at",
+                "source_manifest",
+                "coordinate_system",
+                "authority",
+                "expected_frame_count",
+            ])
+            let required = allowed.subtracting(["expected_frame_count"])
+            guard required.isSubset(of: object.keys),
+                  Set(object.keys).isSubset(of: allowed) else {
+                throw LiveSenderQueueError.invalidReference(
+                    "session metadata has missing or additional fields"
+                )
+            }
+            let metadata = try decodeMetadata(
+                LiveSenderSessionMetadataEvidenceV1.self,
+                from: metadataURL,
+                reference: session.metadata
+            )
+            guard metadata.sessionID == session.sessionID,
+                  metadata.expectedFrameCount == session.expectedFrameCount else {
+                throw LiveSenderQueueError.invalidReference(
+                    "session metadata identity does not match its queue reference"
+                )
+            }
+            try verify(metadata.sourceManifest.reference())
+        case LiveSessionContract.v0_2.rawValue:
+            let exactKeys = Set([
+                "schema",
+                "session_id",
+                "created_at",
+                "source_session_seed_b64u",
+                "expected_frame_count",
+                "coordinate_system",
+                "authority",
+            ])
+            guard Set(object.keys) == exactKeys,
+                  object["expected_frame_count"] is NSNull,
+                  let coordinate = object["coordinate_system"] as? [String: Any],
+                  Set(coordinate.keys) == Set([
+                      "id",
+                      "units",
+                      "handedness",
+                      "world_up",
+                      "camera_forward",
+                      "matrix_layout",
+                      "vector_convention",
+                  ]) else {
+                throw LiveSenderQueueError.invalidReference(
+                    "progressive session metadata has missing or additional fields"
+                )
+            }
+            let metadata = try decodeMetadata(
+                LiveSenderSessionMetadataEvidenceV2.self,
+                from: metadataURL,
+                reference: session.metadata
+            )
+            guard session.expectedFrameCount == nil,
+                  metadata.sessionID == session.sessionID,
+                  metadata.authority == "proposal_only",
+                  try LiveSenderProgressiveSessionIdentity.sessionID(
+                      sourceSessionSeedBase64URL: metadata.sourceSessionSeedBase64URL
+                  ) == session.sessionID else {
+                throw LiveSenderQueueError.invalidReference(
+                    "progressive session identity does not match its immutable seed"
+                )
+            }
+            try metadata.coordinateSystem.validate()
+            guard LiveSenderValidation.isRFC3339DateTime(metadata.createdAt) else {
+                throw LiveSenderQueueError.invalidReference(
+                    "progressive session created_at must be an RFC 3339 date-time"
+                )
+            }
+        default:
+            throw LiveSenderQueueError.invalidReference("unsupported live session schema")
+        }
+        return schema
+    }
+
+    private func verify(
+        _ finalization: LiveSenderFinalizationReference,
+        sessionSchema: String
+    ) throws {
+        switch sessionSchema {
+        case LiveSessionContract.v0_1.rawValue:
+            guard finalization.sourceManifest == nil else {
+                throw LiveSenderQueueError.finalizationConflict
+            }
+        case LiveSessionContract.v0_2.rawValue:
+            guard let sourceManifest = finalization.sourceManifest else {
+                throw LiveSenderQueueError.finalizationConflict
+            }
+            let reference = try sourceManifest.fileReference()
+            let manifestURL = try verify(reference)
+            let manifestData: Data
+            do {
+                manifestData = try Data(contentsOf: manifestURL)
+            } catch {
+                throw LiveSenderQueueError.sourceMissing(sourceManifest.path)
+            }
+            guard Int64(manifestData.count) == sourceManifest.sizeBytes else {
+                throw LiveSenderQueueError.sourceSizeMismatch(sourceManifest.path)
+            }
+            guard Self.sha256(manifestData) == sourceManifest.sha256 else {
+                throw LiveSenderQueueError.sourceChecksumMismatch(sourceManifest.path)
+            }
+            let evidence: LiveSenderCaptureManifestEvidence
+            do {
+                evidence = try LiveStrictJSON.decode(
+                    LiveSenderCaptureManifestEvidence.self,
+                    from: manifestData
+                )
+            } catch {
+                throw LiveSenderQueueError.invalidReference(
+                    "capture.json is not strict contract JSON"
+                )
+            }
+            guard evidence.schema == sourceManifest.schema else {
+                throw LiveSenderQueueError.invalidReference(
+                    "capture.json schema does not match its finalization binding"
+                )
+            }
+        default:
+            throw LiveSenderQueueError.invalidReference("unsupported live session schema")
+        }
     }
 
     private func decodeMetadata<T: Decodable>(
@@ -847,6 +1128,29 @@ public actor LiveSenderQueue {
                 "live metadata is not strict contract JSON"
             )
         }
+    }
+
+    private func metadataData(
+        from url: URL,
+        reference: LiveSenderFileReference
+    ) throws -> Data {
+        guard reference.mediaType == "application/json",
+              reference.sizeBytes <= 1024 * 1024 else {
+            throw LiveSenderQueueError.invalidReference(
+                "live metadata must be application/json and no larger than 1 MiB"
+            )
+        }
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+            _ = try LiveStrictJSON.decode(LiveSenderSessionSchemaEvidence.self, from: data)
+            _ = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw LiveSenderQueueError.invalidReference(
+                "live metadata is not strict contract JSON"
+            )
+        }
+        return data
     }
 
     private func confinedURL(for relativePath: String) throws -> URL {
@@ -1009,10 +1313,15 @@ public actor LiveSenderQueue {
             )
         }
         let (next, overflow) = finalization.finalSequenceID.addingReportingOverflow(1)
+        let sessionSchema = try verify(state.session)
+        let expectedCountIsValid = sessionSchema == LiveSessionContract.v0_2.rawValue
+            ? acknowledgement.expectedFrameCount == finalization.finalSequenceID
+            : true
         guard !overflow,
               acknowledgement.receivedCount == finalization.finalSequenceID,
               acknowledgement.contiguousCount == finalization.finalSequenceID,
               acknowledgement.pendingCount == 0,
+              expectedCountIsValid,
               acknowledgement.nextExpectedSequenceID == next,
               acknowledgement.missingRanges.isEmpty else {
             throw LiveSenderQueueError.invalidAcknowledgement(
@@ -1026,6 +1335,9 @@ public actor LiveSenderQueue {
         incoming: ReceiverProgress
     ) throws -> ReceiverProgress {
         guard let current else { return incoming }
+        if current.expectedFrameCount != nil, incoming.expectedFrameCount == nil {
+            return current
+        }
         if progress(incoming, dominates: current) {
             return incoming
         }
@@ -1038,15 +1350,21 @@ public actor LiveSenderQueue {
     }
 
     private func progress(_ candidate: ReceiverProgress, dominates prior: ReceiverProgress) -> Bool {
-        guard candidate.expectedFrameCount == prior.expectedFrameCount,
-              candidate.receivedCount >= prior.receivedCount,
+        guard candidate.receivedCount >= prior.receivedCount,
               candidate.contiguousCount >= prior.contiguousCount else {
             return false
         }
-        guard candidate.expectedFrameCount != nil else {
+        switch (candidate.expectedFrameCount, prior.expectedFrameCount) {
+        case (nil, nil):
             return true
+        case (.some, nil):
+            return true
+        case (nil, .some):
+            return false
+        case let (.some(candidateExpected), .some(priorExpected)):
+            guard candidateExpected == priorExpected else { return false }
+            return missingRanges(candidate.missingRanges, areSubsetOf: prior.missingRanges)
         }
-        return missingRanges(candidate.missingRanges, areSubsetOf: prior.missingRanges)
     }
 
     private func missingRanges(
@@ -1360,7 +1678,16 @@ private struct PersistentEnvelope: Codable, Equatable {
     }
 }
 
-private struct LiveSenderSessionMetadataEvidence: Decodable {
+private enum LiveSessionContract: String {
+    case v0_1 = "capture_splat.live_session.v0.1"
+    case v0_2 = "capture_splat.live_session.v0.2"
+}
+
+private struct LiveSenderSessionSchemaEvidence: Decodable {
+    let schema: String
+}
+
+private struct LiveSenderSessionMetadataEvidenceV1: Decodable {
     let schema: String
     let sessionID: String
     let expectedFrameCount: Int?
@@ -1371,6 +1698,62 @@ private struct LiveSenderSessionMetadataEvidence: Decodable {
         case sessionID = "session_id"
         case expectedFrameCount = "expected_frame_count"
         case sourceManifest = "source_manifest"
+    }
+}
+
+private struct LiveSenderSessionMetadataEvidenceV2: Decodable {
+    let schema: String
+    let sessionID: String
+    let createdAt: String
+    let sourceSessionSeedBase64URL: String
+    let expectedFrameCount: Int?
+    let coordinateSystem: LiveSenderCoordinateSystemEvidence
+    let authority: String
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case sessionID = "session_id"
+        case createdAt = "created_at"
+        case sourceSessionSeedBase64URL = "source_session_seed_b64u"
+        case expectedFrameCount = "expected_frame_count"
+        case coordinateSystem = "coordinate_system"
+        case authority
+    }
+}
+
+private struct LiveSenderCaptureManifestEvidence: Decodable {
+    let schema: String
+}
+
+private struct LiveSenderCoordinateSystemEvidence: Decodable {
+    let id: String
+    let units: String
+    let handedness: String
+    let worldUp: String
+    let cameraForward: String
+    let matrixLayout: String
+    let vectorConvention: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, units, handedness
+        case worldUp = "world_up"
+        case cameraForward = "camera_forward"
+        case matrixLayout = "matrix_layout"
+        case vectorConvention = "vector_convention"
+    }
+
+    func validate() throws {
+        guard !id.isEmpty,
+              units == "meters" || units == "unknown",
+              handedness == "right",
+              worldUp == "+Y",
+              cameraForward == "-Z",
+              matrixLayout == "row-major",
+              vectorConvention == "column-vector" else {
+            throw LiveSenderQueueError.invalidReference(
+                "progressive session coordinate_system is invalid"
+            )
+        }
     }
 }
 
@@ -1498,6 +1881,22 @@ private struct LiveSenderFrameMetadataEvidence: Decodable {
 
 private enum LiveSenderValidation {
     static let maximumSequenceID = 99_999_999
+
+    static func isRFC3339DateTime(_ value: String) -> Bool {
+        let pattern = "^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}T"
+            + "[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?"
+            + "(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+        guard value.range(of: pattern, options: .regularExpression) != nil else {
+            return false
+        }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if formatter.date(from: value) != nil {
+            return true
+        }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value) != nil
+    }
 
     static func sessionID(_ value: String) throws {
         guard !value.isEmpty, value.count <= 128,

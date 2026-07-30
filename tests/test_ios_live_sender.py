@@ -211,6 +211,35 @@ def test_bounded_queue_resume_and_fail_closed_validation(
     }
 
 
+def test_progressive_session_binding_is_durable_and_fail_closed(
+    live_sender_probe: tuple[Path, Path],
+    tmp_path: Path,
+) -> None:
+    result = _run(live_sender_probe, "progressive", tmp_path)
+
+    assert result == {
+        "conflicting_binding_rejected": True,
+        "corrupt_manifest_rejected": True,
+        "corrupt_manifest_restart_rejected": True,
+        "derived_session_id_matches": True,
+        "differing_expected_rejected": True,
+        "expected_count_promoted": True,
+        "finalize_payload_valid": True,
+        "idempotent_after_finalize": True,
+        "immutable_session_rejected": True,
+        "lost_finalize_ack_interrupted": True,
+        "manifest_schema_mismatch_rejected": True,
+        "manifest_reverified_before_send": True,
+        "mismatched_seed_rejected": True,
+        "missing_manifest_rejected": True,
+        "opened_before_manifest": True,
+        "pre_manifest_session_sent": True,
+        "restart_preserved_binding": True,
+        "restart_resumed_finalization": True,
+        "stale_nil_ignored": True,
+    }
+
+
 def test_sender_engine_retries_with_bounded_concurrency_and_resumes_first(
     live_sender_probe: tuple[Path, Path],
     tmp_path: Path,
@@ -230,6 +259,7 @@ def test_sender_engine_retries_with_bounded_concurrency_and_resumes_first(
         "queued_frames": 0,
         "recovery_status": "finalized",
         "resume_before_frames": True,
+        "v0_1_finalize_payload_valid": True,
     }
 
 
