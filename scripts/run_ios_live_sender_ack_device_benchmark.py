@@ -23,6 +23,14 @@ MEASURED_TRIALS = 30
 ELIGIBLE_MODELS = ("iPhone13,3", "iPhone13,4")
 SCHEME = "CaptureSplatAckBenchmarks"
 TARGET = "CaptureSplatAckBenchmarks"
+HOST_TARGET = "CaptureSplatAckBenchmarkHost"
+HOST_PRODUCT = "CaptureSplatAckBenchmarkHost.app"
+HOST_SOURCE = "tests/swift/LiveSenderAckBenchmarkHost.swift"
+PRODUCTION_APP_TARGET = "CaptureSplat"
+PRODUCTION_APP_BLUEPRINT_ID = "100000000000000000000401"
+TEST_BLUEPRINT_ID = "200000000000000000000401"
+HOST_BLUEPRINT_ID = "300000000000000000000401"
+HOST_DEPENDENCY_ID = "300000000000000000000701"
 TEST_CLASS = "LiveSenderAckBenchmarkTests"
 CONFIGURATION = "Release"
 MAXIMUM_JSON_BYTES = 16 * 1024 * 1024
@@ -66,6 +74,7 @@ FINGERPRINT_PATHS = (
     "apps/ios/CaptureSplat/CaptureSplat/Sources/LiveAuthContract.swift",
     "tests/swift/LiveSenderAckBenchmarkCore.swift",
     "tests/swift/LiveSenderAckBenchmarkTests.swift",
+    HOST_SOURCE,
     (
         "apps/ios/CaptureSplat/CaptureSplat.xcodeproj/xcshareddata/"
         "xcschemes/CaptureSplatAckBenchmarks.xcscheme"
@@ -861,6 +870,110 @@ def _source_fingerprints(repository: Path) -> dict[str, str]:
     return fingerprints
 
 
+def _pbx_object(
+    project_text: str,
+    object_id: str,
+    label: str,
+) -> str:
+    match = re.search(
+        rf"^\t\t{re.escape(object_id)} /\* [^\n]+ \*/ = \{{\n"
+        rf"(?P<body>.*?)^\t\t\}};$",
+        project_text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    if match is None:
+        raise ValueError(f"Xcode project is missing {label}")
+    return match.group("body")
+
+
+def _validate_benchmark_host_isolation(
+    repository: Path,
+) -> dict[str, Any]:
+    project_path = (
+        repository
+        / "apps/ios/CaptureSplat/CaptureSplat.xcodeproj/project.pbxproj"
+    )
+    scheme_path = (
+        repository
+        / "apps/ios/CaptureSplat/CaptureSplat.xcodeproj/xcshareddata/"
+        "xcschemes/CaptureSplatAckBenchmarks.xcscheme"
+    )
+    project_text = project_path.read_text(encoding="utf-8")
+    scheme_text = scheme_path.read_text(encoding="utf-8")
+    test_target = _pbx_object(
+        project_text,
+        TEST_BLUEPRINT_ID,
+        "benchmark test target",
+    )
+    host_target = _pbx_object(
+        project_text,
+        HOST_BLUEPRINT_ID,
+        "dedicated benchmark host target",
+    )
+    host_sources = _pbx_object(
+        project_text,
+        "300000000000000000000501",
+        "dedicated benchmark host source phase",
+    )
+    if (
+        f"{HOST_DEPENDENCY_ID} /* PBXTargetDependency */"
+        not in test_target
+        or PRODUCTION_APP_BLUEPRINT_ID in test_target
+    ):
+        raise ValueError(
+            "benchmark tests are not isolated to the dedicated host dependency"
+        )
+    if (
+        f"name = {HOST_TARGET};" not in host_target
+        or f"productName = {HOST_TARGET};" not in host_target
+        or 'productType = "com.apple.product-type.application";'
+        not in host_target
+        or f"path = {HOST_PRODUCT};" not in project_text
+        or project_text.count(
+            'PRODUCT_BUNDLE_IDENTIFIER = "$(CAPTURE_SPLAT_BUNDLE_IDENTIFIER).'
+            'AckBenchmarkHost";'
+        )
+        != 2
+    ):
+        raise ValueError("dedicated benchmark host identity changed")
+    expected_host_source = (
+        "300000000000000000000101 "
+        "/* LiveSenderAckBenchmarkHost.swift in Sources */"
+    )
+    if (
+        host_sources.count(" in Sources */") != 1
+        or expected_host_source not in host_sources
+        or "CaptureSplatApp.swift" in host_sources
+        or "CaptureController.swift" in host_sources
+    ):
+        raise ValueError(
+            "dedicated benchmark host source membership is not isolated"
+        )
+    if (
+        scheme_text.count(
+            f'BlueprintIdentifier = "{HOST_BLUEPRINT_ID}"'
+        )
+        != 2
+        or scheme_text.count(
+            f'BlueprintIdentifier = "{TEST_BLUEPRINT_ID}"'
+        )
+        != 2
+        or f'BlueprintIdentifier = "{PRODUCTION_APP_BLUEPRINT_ID}"'
+        in scheme_text
+    ):
+        raise ValueError(
+            "benchmark scheme is not isolated from the production app"
+        )
+    return {
+        "host_target": HOST_TARGET,
+        "host_product": HOST_PRODUCT,
+        "host_source": HOST_SOURCE,
+        "test_target": TARGET,
+        "production_app_target": PRODUCTION_APP_TARGET,
+        "production_app_dependency": False,
+    }
+
+
 def _repository_identity(
     repository: Path,
     *,
@@ -885,6 +998,9 @@ def _repository_identity(
         "commit": commit,
         "clean": clean,
         "source_fingerprints": _source_fingerprints(repository),
+        "benchmark_host_isolation": _validate_benchmark_host_isolation(
+            repository
+        ),
     }
 
 
@@ -1098,9 +1214,12 @@ def _parse_build_settings(output: str) -> dict[str, str]:
         "PRODUCT_BUNDLE_IDENTIFIER",
         "PRODUCT_TYPE",
         "TARGET_NAME",
+        "TEST_TARGET_NAME",
+        "TEST_HOST",
+        "BUNDLE_LOADER",
         "WRAPPER_EXTENSION",
     }
-    tracked = required | {"BUNDLE_LOADER", "TEST_HOST"}
+    tracked = required
     settings: dict[str, str] = {}
     for line in output.splitlines():
         match = re.match(r"^\s{4}([A-Z0-9_]+) = (.*)$", line)
@@ -1114,9 +1233,9 @@ def _parse_build_settings(output: str) -> dict[str, str]:
         settings[key] = value
     if not required.issubset(settings):
         raise ValueError("resolved build settings are incomplete")
-    settings.setdefault("BUNDLE_LOADER", "")
-    settings.setdefault("TEST_HOST", "")
     conditions = settings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"].split()
+    expected_host_suffix = f"/{HOST_PRODUCT}/{HOST_TARGET}"
+    test_host = settings["TEST_HOST"]
     if (
         settings["CONFIGURATION"] != "Release"
         or settings["SWIFT_OPTIMIZATION_LEVEL"] != "-O"
@@ -1130,17 +1249,18 @@ def _parse_build_settings(output: str) -> dict[str, str]:
         or settings["PRODUCT_TYPE"]
         != "com.apple.product-type.bundle.unit-test"
         or settings["TARGET_NAME"] != TARGET
+        or settings["TEST_TARGET_NAME"] != HOST_TARGET
         or settings["WRAPPER_EXTENSION"] != "xctest"
-        or settings["BUNDLE_LOADER"] != ""
-        or settings["TEST_HOST"] != ""
+        or settings["BUNDLE_LOADER"] != test_host
+        or not test_host.endswith(expected_host_suffix)
+        or "\\" in test_host
+        or f"/{PRODUCTION_APP_TARGET}.app/" in test_host
     ):
         raise ValueError(
-            "resolved benchmark build is not an optimized hostless iOS Release target"
+            "resolved benchmark build is not an optimized, dedicated-host "
+            "iOS Release target"
         )
-    return {
-        key: settings[key]
-        for key in sorted(required | {"BUNDLE_LOADER", "TEST_HOST"})
-    }
+    return {key: settings[key] for key in sorted(required)}
 
 
 def _show_build_settings(
@@ -2374,7 +2494,12 @@ def _collect_fixture(path: Path) -> dict[str, Any]:
             "PLATFORM_NAME": "fixture",
             "PRODUCT_NAME": TARGET,
             "PRODUCT_BUNDLE_IDENTIFIER": "fixture.AckBenchmarks",
-            "TEST_HOST": "",
+            "PRODUCT_TYPE": "com.apple.product-type.bundle.unit-test",
+            "TARGET_NAME": TARGET,
+            "TEST_TARGET_NAME": HOST_TARGET,
+            "TEST_HOST": f"/fixture/{HOST_PRODUCT}/{HOST_TARGET}",
+            "BUNDLE_LOADER": f"/fixture/{HOST_PRODUCT}/{HOST_TARGET}",
+            "WRAPPER_EXTENSION": "xctest",
         },
         "build_invocation": {
             "xcodebuild_process_id": None,
@@ -2476,7 +2601,13 @@ def _make_payload(
             "scheme": SCHEME,
             "target": TARGET,
             "configuration": CONFIGURATION,
-            "hostless_test_bundle": True,
+            "hostless_test_bundle": False,
+            "dedicated_test_host": {
+                "target": HOST_TARGET,
+                "product": HOST_PRODUCT,
+                "source": HOST_SOURCE,
+                "production_app_dependency": False,
+            },
             "resolved_settings": collection["resolved_build_settings"],
             "versions": build_versions,
             "destination_device_id_sha256": (
@@ -2533,7 +2664,13 @@ def _failure_payload(
             "scheme": SCHEME,
             "target": TARGET,
             "configuration": CONFIGURATION,
-            "hostless_test_bundle": True,
+            "hostless_test_bundle": False,
+            "dedicated_test_host": {
+                "target": HOST_TARGET,
+                "product": HOST_PRODUCT,
+                "source": HOST_SOURCE,
+                "production_app_dependency": False,
+            },
             "resolved_settings": None,
             "versions": None,
             "destination_device_id_sha256": _sha256(

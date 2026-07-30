@@ -41,8 +41,13 @@ identity, or non-exact retry decision fails the gate.
 
 ## Required runs
 
-Use the same shared Swift benchmark core for host characterization and the
-device test target:
+Use the same shared Swift benchmark core in two isolated harnesses: the host
+diagnostic CLI and the `CaptureSplatAckBenchmarks` device test bundle. On iOS,
+XCTest runs inside the dedicated `CaptureSplatAckBenchmarkHost` app. That host
+contains only its minimal UIKit application delegate; the test bundle depends
+on that host and compiles only the live-auth contract, sender queue, benchmark
+core, and benchmark tests. The production `CaptureSplat` app and
+`CaptureController` are not target dependencies.
 
 - counts: `360,720,1000,10000,50000`;
 - warmups: 5;
@@ -125,9 +130,16 @@ python3 scripts/run_ios_live_sender_ack_device_benchmark.py \
   --output "$CAPTURE_SPLAT_ACK_REPORT"
 ```
 
-The collector builds the dedicated benchmark target as optimized,
-whole-module Release code using the local signing configuration. Interpret the
-strict aggregate status as follows:
+The collector builds and signs the dedicated benchmark host and test bundle as
+optimized, whole-module Release code using the local signing configuration. A
+2026-07-30 physical `build-for-testing` preflight succeeded for both targets,
+with the dependency graph limited to the tests and dedicated host. The device
+then became unavailable before the hosted test launch, so that preflight
+produced no physical runtime or result-attachment evidence. A passing run still
+requires the eligible iPhone to remain connected, trusted, available, and
+unlocked for the complete collection.
+
+Interpret the strict aggregate status as follows:
 
 - `passed`: every required 360- and 720-identity physical-device gate passed
   with complete checksummed evidence;
@@ -149,11 +161,13 @@ authorize the capture-loop callback or physical two-cycle acceptance.
 
 ## Proof boundary
 
-This benchmark does not yet connect the sender to capture writers. It must
-therefore report capture-loop integration as false and writer drops and
-capture-side wait as unmeasured, not zero. The later nonblocking callback PR
-and two physical iPhone-to-Mac cycles must prove that networking does not change
-keyframe acceptance, wait on capture persistence, or create writer drops.
+The dedicated benchmark host does not build, launch, or depend on the
+production Capture Splat app or its capture loop. This benchmark does not yet
+connect the sender to capture writers. It must therefore report capture-loop
+integration as false and writer drops and capture-side wait as unmeasured, not
+zero. The later nonblocking callback PR and two physical iPhone-to-Mac cycles
+must prove that networking does not change keyframe acceptance, wait on capture
+persistence, or create writer drops.
 
 If the eligible physical 720-identity run fails any hard gate, implement the
 exact chunked, checksummed, atomically replaced index specified by issue #35

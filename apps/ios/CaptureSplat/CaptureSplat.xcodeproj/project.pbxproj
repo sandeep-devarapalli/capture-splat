@@ -28,7 +28,18 @@
 		200000000000000000000102 /* LiveSenderQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000016 /* LiveSenderQueue.swift */; };
 		200000000000000000000103 /* LiveSenderAckBenchmarkCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* LiveSenderAckBenchmarkCore.swift */; };
 		200000000000000000000104 /* LiveSenderAckBenchmarkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* LiveSenderAckBenchmarkTests.swift */; };
+		300000000000000000000101 /* LiveSenderAckBenchmarkHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 300000000000000000000002 /* LiveSenderAckBenchmarkHost.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		300000000000000000000601 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 100000000000000000000601 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 300000000000000000000401;
+			remoteInfo = CaptureSplatAckBenchmarkHost;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		100000000000000000000001 /* CaptureSplatApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureSplatApp.swift; sourceTree = "<group>"; };
@@ -55,6 +66,8 @@
 		200000000000000000000001 /* CaptureSplatAckBenchmarks.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CaptureSplatAckBenchmarks.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		200000000000000000000002 /* LiveSenderAckBenchmarkCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSenderAckBenchmarkCore.swift; sourceTree = "<group>"; };
 		200000000000000000000003 /* LiveSenderAckBenchmarkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSenderAckBenchmarkTests.swift; sourceTree = "<group>"; };
+		300000000000000000000001 /* CaptureSplatAckBenchmarkHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CaptureSplatAckBenchmarkHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		300000000000000000000002 /* LiveSenderAckBenchmarkHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSenderAckBenchmarkHost.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -66,6 +79,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		200000000000000000000201 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		300000000000000000000201 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -99,6 +119,7 @@
 			children = (
 				100000000000000000000008 /* CaptureSplat.app */,
 				200000000000000000000001 /* CaptureSplatAckBenchmarks.xctest */,
+				300000000000000000000001 /* CaptureSplatAckBenchmarkHost.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -149,6 +170,7 @@
 			children = (
 				200000000000000000000002 /* LiveSenderAckBenchmarkCore.swift */,
 				200000000000000000000003 /* LiveSenderAckBenchmarkTests.swift */,
+				300000000000000000000002 /* LiveSenderAckBenchmarkHost.swift */,
 			);
 			name = "Ack Benchmarks";
 			path = ../../../tests/swift;
@@ -184,11 +206,28 @@
 			buildRules = (
 			);
 			dependencies = (
+				300000000000000000000701 /* PBXTargetDependency */,
 			);
 			name = CaptureSplatAckBenchmarks;
 			productName = CaptureSplatAckBenchmarks;
 			productReference = 200000000000000000000001 /* CaptureSplatAckBenchmarks.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		300000000000000000000401 /* CaptureSplatAckBenchmarkHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 300000000000000000000801 /* Build configuration list for PBXNativeTarget "CaptureSplatAckBenchmarkHost" */;
+			buildPhases = (
+				300000000000000000000501 /* Sources */,
+				300000000000000000000201 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CaptureSplatAckBenchmarkHost;
+			productName = CaptureSplatAckBenchmarkHost;
+			productReference = 300000000000000000000001 /* CaptureSplatAckBenchmarkHost.app */;
+			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
@@ -204,6 +243,9 @@
 						CreatedOnToolsVersion = 26.0;
 					};
 					200000000000000000000401 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					300000000000000000000401 = {
 						CreatedOnToolsVersion = 26.0;
 					};
 				};
@@ -222,6 +264,7 @@
 			projectRoot = "";
 			targets = (
 				100000000000000000000401 /* CaptureSplat */,
+				300000000000000000000401 /* CaptureSplatAckBenchmarkHost */,
 				200000000000000000000401 /* CaptureSplatAckBenchmarks */,
 			);
 		};
@@ -273,7 +316,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		300000000000000000000501 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				300000000000000000000101 /* LiveSenderAckBenchmarkHost.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		300000000000000000000701 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 300000000000000000000401 /* CaptureSplatAckBenchmarkHost */;
+			targetProxy = 300000000000000000000601 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		100000000000000000000901 /* Debug */ = {
@@ -449,6 +508,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 100000000000000000000011 /* CaptureSplat.xcconfig */;
 			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_TESTABILITY = YES;
@@ -468,7 +528,8 @@
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
-				TEST_HOST = "";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CaptureSplatAckBenchmarkHost.app/CaptureSplatAckBenchmarkHost";
+				TEST_TARGET_NAME = CaptureSplatAckBenchmarkHost;
 			};
 			name = Debug;
 		};
@@ -476,6 +537,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 100000000000000000000011 /* CaptureSplat.xcconfig */;
 			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_TESTABILITY = YES;
@@ -498,7 +560,64 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
-				TEST_HOST = "";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CaptureSplatAckBenchmarkHost.app/CaptureSplatAckBenchmarkHost";
+				TEST_TARGET_NAME = CaptureSplatAckBenchmarkHost;
+			};
+			name = Release;
+		};
+		300000000000000000000903 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 100000000000000000000011 /* CaptureSplat.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Capture Splat ACK Benchmark Host";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(CAPTURE_SPLAT_BUNDLE_IDENTIFIER).AckBenchmarkHost";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		300000000000000000000904 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 100000000000000000000011 /* CaptureSplat.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Capture Splat ACK Benchmark Host";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(CAPTURE_SPLAT_BUNDLE_IDENTIFIER).AckBenchmarkHost";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -528,6 +647,15 @@
 			buildConfigurations = (
 				200000000000000000000903 /* Debug */,
 				200000000000000000000904 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		300000000000000000000801 /* Build configuration list for PBXNativeTarget "CaptureSplatAckBenchmarkHost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				300000000000000000000903 /* Debug */,
+				300000000000000000000904 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

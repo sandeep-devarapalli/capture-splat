@@ -331,6 +331,7 @@ def test_fixture_writes_checksummed_fail_closed_report_outside_git(
         "apps/ios/CaptureSplat/CaptureSplat/Sources/LiveAuthContract.swift",
         "tests/swift/LiveSenderAckBenchmarkCore.swift",
         "tests/swift/LiveSenderAckBenchmarkTests.swift",
+        "tests/swift/LiveSenderAckBenchmarkHost.swift",
         (
             "apps/ios/CaptureSplat/CaptureSplat.xcodeproj/xcshareddata/"
             "xcschemes/CaptureSplatAckBenchmarks.xcscheme"
@@ -455,20 +456,56 @@ def test_release_build_settings_are_fail_closed() -> None:
             ),
             "    PRODUCT_TYPE = com.apple.product-type.bundle.unit-test",
             "    TARGET_NAME = CaptureSplatAckBenchmarks",
+            (
+                "    TEST_HOST = /tmp/build/CaptureSplatAckBenchmarkHost.app/"
+                "CaptureSplatAckBenchmarkHost"
+            ),
+            (
+                "    BUNDLE_LOADER = /tmp/build/"
+                "CaptureSplatAckBenchmarkHost.app/"
+                "CaptureSplatAckBenchmarkHost"
+            ),
+            "    TEST_TARGET_NAME = CaptureSplatAckBenchmarkHost",
             "    WRAPPER_EXTENSION = xctest",
         ]
     )
     parsed = runner._parse_build_settings(release)
     assert parsed["SWIFT_OPTIMIZATION_LEVEL"] == "-O"
-    assert parsed["TEST_HOST"] == ""
-    assert parsed["BUNDLE_LOADER"] == ""
+    assert parsed["TEST_TARGET_NAME"] == "CaptureSplatAckBenchmarkHost"
+    assert parsed["TEST_HOST"] == parsed["BUNDLE_LOADER"]
 
     debug = release.replace(
         "CAPTURE_SPLAT_ACK_BENCHMARK_OPTIMIZED",
         "CAPTURE_SPLAT_ACK_BENCHMARK_OPTIMIZED DEBUG",
     )
-    with pytest.raises(ValueError, match="not an optimized hostless"):
+    with pytest.raises(ValueError, match="not an optimized, dedicated-host"):
         runner._parse_build_settings(debug)
+
+    production_host = release.replace(
+        "CaptureSplatAckBenchmarkHost",
+        "CaptureSplat",
+    )
+    with pytest.raises(ValueError, match="dedicated-host"):
+        runner._parse_build_settings(production_host)
+
+
+def test_xcode_graph_uses_only_the_dedicated_benchmark_host() -> None:
+    runner = _load_runner()
+    isolation = runner._validate_benchmark_host_isolation(_repository())
+    assert isolation == {
+        "host_target": "CaptureSplatAckBenchmarkHost",
+        "host_product": "CaptureSplatAckBenchmarkHost.app",
+        "host_source": "tests/swift/LiveSenderAckBenchmarkHost.swift",
+        "test_target": "CaptureSplatAckBenchmarks",
+        "production_app_target": "CaptureSplat",
+        "production_app_dependency": False,
+    }
+    host_source = (
+        _repository() / "tests/swift/LiveSenderAckBenchmarkHost.swift"
+    ).read_text()
+    assert "UIApplicationDelegate" in host_source
+    assert "CaptureController" not in host_source
+    assert "ARKit" not in host_source
 
 
 def _passing_gate_arguments(runner: object) -> dict[str, object]:

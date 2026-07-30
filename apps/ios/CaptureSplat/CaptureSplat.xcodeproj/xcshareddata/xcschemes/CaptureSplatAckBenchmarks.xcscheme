@@ -15,6 +15,20 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
+               BlueprintIdentifier = "300000000000000000000401"
+               BuildableName = "CaptureSplatAckBenchmarkHost.app"
+               BlueprintName = "CaptureSplatAckBenchmarkHost"
+               ReferencedContainer = "container:CaptureSplat.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
                BlueprintIdentifier = "200000000000000000000401"
                BuildableName = "CaptureSplatAckBenchmarks.xctest"
                BlueprintName = "CaptureSplatAckBenchmarks"
@@ -29,6 +43,15 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
       codeCoverageEnabled = "NO">
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "300000000000000000000401"
+            BuildableName = "CaptureSplatAckBenchmarkHost.app"
+            BlueprintName = "CaptureSplatAckBenchmarkHost"
+            ReferencedContainer = "container:CaptureSplat.xcodeproj">
+         </BuildableReference>
+      </MacroExpansion>
       <Testables>
          <TestableReference
             skipped = "NO"
