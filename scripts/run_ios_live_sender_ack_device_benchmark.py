@@ -20,7 +20,7 @@ COUNTS = (360, 720, 1_000, 10_000, 50_000)
 HARD_GATE_COUNTS = (360, 720)
 WARMUP_TRIALS = 5
 MEASURED_TRIALS = 30
-ELIGIBLE_MODELS = ("iPhone13,3", "iPhone13,4")
+ELIGIBLE_MODELS = ("iPhone17,2",)
 SCHEME = "CaptureSplatAckBenchmarks"
 TARGET = "CaptureSplatAckBenchmarks"
 HOST_TARGET = "CaptureSplatAckBenchmarkHost"
@@ -37,19 +37,19 @@ MAXIMUM_JSON_BYTES = 16 * 1024 * 1024
 BENCHMARK_MAXIMUM_BYTES = (2**63 - 1) // 4
 PRODUCTION_STATE_PAYLOAD_CAP_BYTES = 48 * 1024 * 1024 - 4096
 
-REPORT_SCHEMA = "capture_splat.live_sender_ack_device_benchmark_report.v0.1"
+REPORT_SCHEMA = "capture_splat.live_sender_ack_device_benchmark_report.v0.2"
 ENVELOPE_SCHEMA = (
-    "capture_splat.live_sender_ack_device_benchmark_report_envelope.v0.1"
+    "capture_splat.live_sender_ack_device_benchmark_report_envelope.v0.2"
 )
-SUMMARY_SCHEMA = "capture_splat.live_sender_ack_device_benchmark_summary.v0.1"
-PLAN_SCHEMA = "capture_splat.live_sender_ack_device_benchmark_plan.v0.1"
-FIXTURE_SCHEMA = "capture_splat.live_sender_ack_device_benchmark_fixture.v0.1"
-RECONCILE_SCHEMA = "capture_splat.live_sender_ack_benchmark_reconcile_phase.v0.1"
-REOPEN_SCHEMA = "capture_splat.live_sender_ack_benchmark_reopen_phase.v0.1"
+SUMMARY_SCHEMA = "capture_splat.live_sender_ack_device_benchmark_summary.v0.2"
+PLAN_SCHEMA = "capture_splat.live_sender_ack_device_benchmark_plan.v0.2"
+FIXTURE_SCHEMA = "capture_splat.live_sender_ack_device_benchmark_fixture.v0.2"
+RECONCILE_SCHEMA = "capture_splat.live_sender_ack_benchmark_reconcile_phase.v0.2"
+REOPEN_SCHEMA = "capture_splat.live_sender_ack_benchmark_reopen_phase.v0.2"
 UNPACED_SCHEMA = (
-    "capture_splat.live_sender_ack_benchmark_unpaced_stream_phase.v0.1"
+    "capture_splat.live_sender_ack_benchmark_unpaced_stream_phase.v0.2"
 )
-PACED_SCHEMA = "capture_splat.live_sender_ack_benchmark_paced_stream_phase.v0.1"
+PACED_SCHEMA = "capture_splat.live_sender_ack_benchmark_paced_stream_phase.v0.2"
 
 HARD_GATE_BUDGETS = {
     "payload_bytes_less_than": 24 * 1024 * 1024,
@@ -105,7 +105,7 @@ PLATFORM_KEYS = {
     "architecture",
     "thermal_state",
     "is_physical_device",
-    "is_oldest_supported_lidar_iphone",
+    "is_designated_ack_benchmark_device",
     "optimized_build",
     "physical_gate_result",
 }
@@ -372,7 +372,7 @@ def _validate_memory(value: object) -> dict[str, Any]:
 def _expected_physical_gate(platform: dict[str, Any]) -> str:
     if not platform["is_physical_device"]:
         return "not_evaluated_non_physical"
-    if not platform["is_oldest_supported_lidar_iphone"]:
+    if not platform["is_designated_ack_benchmark_device"]:
         return "not_evaluated_ineligible_device"
     if not platform["optimized_build"]:
         return "not_evaluated_unoptimized_build"
@@ -392,7 +392,7 @@ def _validate_platform(value: object) -> dict[str, Any]:
         _require_string(platform[key], f"platform.{key}", maximum_bytes=512)
     for key in (
         "is_physical_device",
-        "is_oldest_supported_lidar_iphone",
+        "is_designated_ack_benchmark_device",
         "optimized_build",
     ):
         _require_bool(platform[key], f"platform.{key}")
@@ -400,12 +400,12 @@ def _validate_platform(value: object) -> dict[str, Any]:
         raise ValueError("platform thermal state is unknown to this contract")
     if platform["physical_gate_result"] not in PHYSICAL_GATE_RESULTS:
         raise ValueError("platform physical gate result is invalid")
-    expected_oldest = (
+    expected_designated = (
         platform["is_physical_device"]
         and platform["machine"] in ELIGIBLE_MODELS
     )
-    if platform["is_oldest_supported_lidar_iphone"] is not expected_oldest:
-        raise ValueError("platform oldest-supported-device claim is inconsistent")
+    if platform["is_designated_ack_benchmark_device"] is not expected_designated:
+        raise ValueError("platform designated benchmark-device claim is inconsistent")
     if platform["is_physical_device"] and (
         platform["operating_system"] != "ios"
         or platform["architecture"] != "arm64"
@@ -1587,7 +1587,7 @@ def _run_test_invocation(
         _canonical(
             {
                 "schema": (
-                    "capture_splat.live_sender_ack_device_benchmark_progress.v0.1"
+                    "capture_splat.live_sender_ack_device_benchmark_progress.v0.2"
                 ),
                 "phase": phase,
                 "count": count,
@@ -2179,11 +2179,11 @@ def _evaluate_hard_gate(
         }
     if (
         first["machine"] not in ELIGIBLE_MODELS
-        or not first["is_oldest_supported_lidar_iphone"]
+        or not first["is_designated_ack_benchmark_device"]
     ):
         return {
             "status": "not_evaluated_ineligible_device",
-            "reasons": ["device is not iPhone13,3 or iPhone13,4"],
+            "reasons": ["device is not the designated iPhone17,2"],
             "checks": checks,
             "budgets": HARD_GATE_BUDGETS,
             "eligible_device_models": list(ELIGIBLE_MODELS),
@@ -2781,6 +2781,7 @@ def _dry_run_plan(
         "schema": PLAN_SCHEMA,
         "scheme": SCHEME,
         "configuration": CONFIGURATION,
+        "eligible_device_models": list(ELIGIBLE_MODELS),
         "destination_device_id_sha256": _sha256(device_id.encode("utf-8")),
         "build_settings_command": [
             *_build_settings_command(repository),

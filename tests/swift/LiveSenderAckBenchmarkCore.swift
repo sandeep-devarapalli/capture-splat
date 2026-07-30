@@ -100,7 +100,7 @@ public struct LiveSenderAckBenchmarkPlatform: Codable, Equatable, Sendable {
     public let architecture: String
     public let thermalState: String
     public let isPhysicalDevice: Bool
-    public let isOldestSupportedLiDARiPhone: Bool
+    public let isDesignatedACKBenchmarkDevice: Bool
     public let optimizedBuild: Bool
     public let physicalGateResult: String
 
@@ -110,7 +110,8 @@ public struct LiveSenderAckBenchmarkPlatform: Codable, Equatable, Sendable {
         case machine, architecture
         case thermalState = "thermal_state"
         case isPhysicalDevice = "is_physical_device"
-        case isOldestSupportedLiDARiPhone = "is_oldest_supported_lidar_iphone"
+        case isDesignatedACKBenchmarkDevice =
+            "is_designated_ack_benchmark_device"
         case optimizedBuild = "optimized_build"
         case physicalGateResult = "physical_gate_result"
     }
@@ -380,15 +381,15 @@ public enum LiveSenderAckBenchmarkError: Error, Equatable, LocalizedError, Senda
 }
 
 public enum LiveSenderAckBenchmarkCore {
-    public static let trialSchema = "capture_splat.live_sender_ack_benchmark_trial.v0.1"
+    public static let trialSchema = "capture_splat.live_sender_ack_benchmark_trial.v0.2"
     public static let reconcilePhaseSchema =
-        "capture_splat.live_sender_ack_benchmark_reconcile_phase.v0.1"
+        "capture_splat.live_sender_ack_benchmark_reconcile_phase.v0.2"
     public static let reopenPhaseSchema =
-        "capture_splat.live_sender_ack_benchmark_reopen_phase.v0.1"
+        "capture_splat.live_sender_ack_benchmark_reopen_phase.v0.2"
     public static let unpacedStreamPhaseSchema =
-        "capture_splat.live_sender_ack_benchmark_unpaced_stream_phase.v0.1"
+        "capture_splat.live_sender_ack_benchmark_unpaced_stream_phase.v0.2"
     public static let pacedStreamPhaseSchema =
-        "capture_splat.live_sender_ack_benchmark_paced_stream_phase.v0.1"
+        "capture_splat.live_sender_ack_benchmark_paced_stream_phase.v0.2"
     private static let processEvidence = LiveSenderAckBenchmarkProcessEvidence(
         launchID: UUID().uuidString.lowercased(),
         processID: Int(Darwin.getpid())
@@ -1141,7 +1142,7 @@ public enum LiveSenderAckBenchmarkCore {
         guard platform.isPhysicalDevice else {
             return "not_evaluated_non_physical"
         }
-        guard platform.isOldestSupportedLiDARiPhone else {
+        guard platform.isDesignatedACKBenchmarkDevice else {
             return "not_evaluated_ineligible_device"
         }
         guard platform.optimizedBuild else {
@@ -1635,8 +1636,8 @@ public enum LiveSenderAckBenchmarkCore {
         #endif
 
         let model = machine()
-        let oldestSupportedLiDAR = isPhysicalDevice
-            && (model == "iPhone13,3" || model == "iPhone13,4")
+        let designatedACKBenchmarkDevice = isPhysicalDevice
+            && model == "iPhone17,2"
         return LiveSenderAckBenchmarkPlatform(
             operatingSystem: operatingSystem,
             operatingSystemVersion: ProcessInfo.processInfo.operatingSystemVersionString,
@@ -1644,11 +1645,11 @@ public enum LiveSenderAckBenchmarkCore {
             architecture: architecture(),
             thermalState: thermalState(),
             isPhysicalDevice: isPhysicalDevice,
-            isOldestSupportedLiDARiPhone: oldestSupportedLiDAR,
+            isDesignatedACKBenchmarkDevice: designatedACKBenchmarkDevice,
             optimizedBuild: optimizedBuild(),
             physicalGateResult: physicalGateResult(
                 isPhysicalDevice: isPhysicalDevice,
-                isEligibleDevice: oldestSupportedLiDAR
+                isEligibleDevice: designatedACKBenchmarkDevice
             )
         )
     }

@@ -17,7 +17,7 @@ def _decode_report(path: Path) -> dict[str, object]:
     envelope = json.loads(path.read_bytes())
     assert set(envelope) == {"schema", "payload_sha256", "payload_base64"}
     assert envelope["schema"] == (
-        "capture_splat.live_sender_ack_benchmark_report_envelope.v0.1"
+        "capture_splat.live_sender_ack_benchmark_report_envelope.v0.2"
     )
     payload_bytes = base64.b64decode(envelope["payload_base64"], validate=True)
     assert envelope["payload_sha256"] == (
@@ -91,7 +91,8 @@ def _passing_gate_inputs() -> dict[str, object]:
 def _eligible_platform() -> dict[str, object]:
     return {
         "is_physical_device": True,
-        "is_oldest_supported_lidar_iphone": True,
+        "machine": "iPhone17,2",
+        "is_designated_ack_benchmark_device": True,
         "optimized_build": True,
     }
 
@@ -129,7 +130,7 @@ def test_release_runner_uses_process_cold_reopen_and_checksums_report(
         "hard_gate_status": "not_evaluated_non_physical",
         "payload_sha256": summary["payload_sha256"],
         "report": str(report),
-        "schema": "capture_splat.live_sender_ack_benchmark_summary.v0.1",
+        "schema": "capture_splat.live_sender_ack_benchmark_summary.v0.2",
     }
 
     payload = _decode_report(report)
@@ -146,7 +147,7 @@ def test_release_runner_uses_process_cold_reopen_and_checksums_report(
         "progressive_streams",
         "aggregates",
     }
-    assert payload["schema"] == "capture_splat.live_sender_ack_benchmark_report.v0.1"
+    assert payload["schema"] == "capture_splat.live_sender_ack_benchmark_report.v0.2"
     assert payload["run_profile"] == "test_override"
     assert payload["matrix"] == {
         "counts": [1, 3],
@@ -157,10 +158,7 @@ def test_release_runner_uses_process_cold_reopen_and_checksums_report(
         "paced_duration_seconds": 1,
     }
     assert payload["hard_gate"]["status"] == "not_evaluated_non_physical"
-    assert payload["hard_gate"]["eligible_device_models"] == [
-        "iPhone13,3",
-        "iPhone13,4",
-    ]
+    assert payload["hard_gate"]["eligible_device_models"] == ["iPhone17,2"]
     assert payload["capture_isolation"] == {
         "capture_loop_connected": False,
         "writer_drops": "unmeasured",
@@ -191,7 +189,7 @@ def test_release_runner_uses_process_cold_reopen_and_checksums_report(
     unpaced = streams["unpaced"]
     paced = streams["paced"]
     assert unpaced["schema"] == (
-        "capture_splat.live_sender_ack_benchmark_unpaced_stream_phase.v0.1"
+        "capture_splat.live_sender_ack_benchmark_unpaced_stream_phase.v0.2"
     )
     assert unpaced["seed_state"]["acknowledged_frame_count"] == 0
     assert unpaced["seed_state"]["pending_frame_count"] == 3
@@ -204,7 +202,7 @@ def test_release_runner_uses_process_cold_reopen_and_checksums_report(
         "scope": "benchmark_only_not_product_cap",
     }
     assert paced["schema"] == (
-        "capture_splat.live_sender_ack_benchmark_paced_stream_phase.v0.1"
+        "capture_splat.live_sender_ack_benchmark_paced_stream_phase.v0.2"
     )
     assert paced["configuration"] == {
         "initial_acknowledged_frame_count": 1,
@@ -302,8 +300,11 @@ def test_hard_gate_rejects_ineligible_builds_and_test_profiles() -> None:
     assert runner._hard_gate_status(True, nonphysical, inputs) == (
         "not_evaluated_non_physical"
     )
-    newer_device = platform | {"is_oldest_supported_lidar_iphone": False}
-    assert runner._hard_gate_status(True, newer_device, inputs) == (
+    other_device = platform | {
+        "machine": "iPhone17,1",
+        "is_designated_ack_benchmark_device": False,
+    }
+    assert runner._hard_gate_status(True, other_device, inputs) == (
         "not_evaluated_ineligible_device"
     )
     unoptimized = platform | {"optimized_build": False}

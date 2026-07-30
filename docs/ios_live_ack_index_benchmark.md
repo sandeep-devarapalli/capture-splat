@@ -14,8 +14,14 @@ enter `CaptureController`.
 
 The current product accepts at most 360 video frames. The current
 representation passes only when both 360 identities and the 720-identity
-two-times safety case satisfy every hard gate below on an iPhone 12 Pro or
-iPhone 12 Pro Max running an optimized Release build.
+two-times safety case satisfy every hard gate below on the designated physical
+acceptance device: an iPhone 16 Pro Max reporting `iPhone17,2`, running an
+optimized Release build.
+
+This is an iPhone 16 Pro Max-specific decision gate. A pass does not establish
+ACK latency, reopen latency, memory, throughput, backlog, storage scheduling, or
+thermal behavior on older supported LiDAR iPhones. Broader supported-device
+acceptance remains separate.
 
 The 1,000, 10,000, and 50,000 identity cases characterize future scaling. A
 failure outside the supported 720-identity envelope does not by itself require
@@ -74,6 +80,11 @@ The strict result records:
 - exact duplicate/conflict decisions after reopen; and
 - whether the hard gate was evaluated, passed, failed, or blocked.
 
+Benchmark artifact v0.2 records
+`is_designated_ack_benchmark_device`; it does not reinterpret the v0.1
+`is_oldest_supported_lidar_iphone` field. Published v0.1 evidence remains
+historical evidence for its original device policy.
+
 Host and Simulator results are diagnostic only. They must report
 `not_evaluated_non_physical` and cannot close issue #35.
 
@@ -82,8 +93,8 @@ Host and Simulator results are diagnostic only. They must report
 Run both harnesses from the repository root on a Mac with the repository's
 supported Xcode installed. Before a physical acceptance run:
 
-- connect, trust, unlock, and enable Developer Mode on an iPhone 12 Pro or
-  iPhone 12 Pro Max;
+- connect, trust, unlock, and enable Developer Mode on the designated iPhone 16
+  Pro Max, and verify that it reports `iPhone17,2`;
 - obtain its device identifier with `xcrun xctrace list devices`;
 - copy
   `apps/ios/CaptureSplat/CaptureSplat/Config/CaptureSplat.local.xcconfig.example`
@@ -100,7 +111,7 @@ physical gate:
 
 ```bash
 python3 scripts/benchmark_ios_live_sender_ack_index.py \
-  --output /tmp/capture-splat-live-ack-host-v0.1.json
+  --output /tmp/capture-splat-live-ack-host-v0.2.json
 ```
 
 Set the connected device identifier, then inspect the physical execution plan
@@ -124,7 +135,7 @@ keep the Mac and unlocked iPhone powered and connected. The collector's default
 Run the acceptance collector only after reviewing that plan:
 
 ```bash
-CAPTURE_SPLAT_ACK_REPORT='/tmp/capture-splat-live-ack-device-v0.1.json'
+CAPTURE_SPLAT_ACK_REPORT='/tmp/capture-splat-live-ack-device-v0.2.json'
 python3 scripts/run_ios_live_sender_ack_device_benchmark.py \
   --device-id "$CAPTURE_SPLAT_ACK_DEVICE_ID" \
   --output "$CAPTURE_SPLAT_ACK_REPORT"
@@ -147,8 +158,8 @@ Interpret the strict aggregate status as follows:
   correctness, process-isolation, or evidence check failed, including an
   incomplete collection;
 - `not_evaluated_non_physical`: host or Simulator evidence only;
-- `not_evaluated_ineligible_device`: a physical device other than the oldest
-  supported LiDAR iPhone models;
+- `not_evaluated_ineligible_device`: a physical device other than the
+  designated iPhone 16 Pro Max reporting `iPhone17,2`;
 - `not_evaluated_unoptimized_build`: the device evidence did not report the
   optimized-build marker; and
 - `not_evaluated_fixture`: synthetic collector-fixture evidence, not a physical
@@ -169,7 +180,8 @@ zero. The later nonblocking callback PR and two physical iPhone-to-Mac cycles
 must prove that networking does not change keyframe acceptance, wait on capture
 persistence, or create writer drops.
 
-If the eligible physical 720-identity run fails any hard gate, implement the
+If the designated physical 720-identity run fails any hard gate, implement the
 exact chunked, checksummed, atomically replaced index specified by issue #35
 before capture-loop integration. If it passes, retain the current exact ledger
-and its 360-frame product cap.
+and its 360-frame product cap for this designated-device gate. Neither outcome
+replaces broader supported-device or capture-loop acceptance.

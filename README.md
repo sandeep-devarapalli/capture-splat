@@ -492,8 +492,8 @@ open a frame queue or upload capture evidence. The ACK-index benchmark in
 [issue #35](https://github.com/sandeep-devarapalli/capture-splat/issues/35)
 uses the predeclared
 [Release benchmark protocol](docs/ios_live_ack_index_benchmark.md) before any
-post-atomic-write callback is allowed. The eligible oldest-device run and
-two-cycle physical-device acceptance remain open.
+post-atomic-write callback is allowed. The designated iPhone 16 Pro Max
+(`iPhone17,2`) run and two-cycle physical-device acceptance remain open.
 
 ## Linux, Windows, And Cloud GPUs
 

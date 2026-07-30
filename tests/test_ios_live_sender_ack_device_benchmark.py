@@ -87,11 +87,11 @@ def _platform() -> dict[str, object]:
     return {
         "operating_system": "ios",
         "operating_system_version": "18.5",
-        "machine": "iPhone13,3",
+        "machine": "iPhone17,2",
         "architecture": "arm64",
         "thermal_state": "nominal",
         "is_physical_device": True,
-        "is_oldest_supported_lidar_iphone": True,
+        "is_designated_ack_benchmark_device": True,
         "optimized_build": True,
         "physical_gate_result": (
             "physical_trial_requires_aggregate_gate_evaluation"
@@ -121,7 +121,7 @@ def _correctness(count: int) -> dict[str, object]:
 def _reconcile(count: int, process_index: int) -> dict[str, object]:
     return {
         "schema": (
-            "capture_splat.live_sender_ack_benchmark_reconcile_phase.v0.1"
+            "capture_splat.live_sender_ack_benchmark_reconcile_phase.v0.2"
         ),
         "configuration": {
             "acknowledged_frame_count": count,
@@ -141,7 +141,7 @@ def _reconcile(count: int, process_index: int) -> dict[str, object]:
 def _reopen(count: int, process_index: int) -> dict[str, object]:
     return {
         "schema": (
-            "capture_splat.live_sender_ack_benchmark_reopen_phase.v0.1"
+            "capture_splat.live_sender_ack_benchmark_reopen_phase.v0.2"
         ),
         "configuration": {
             "acknowledged_frame_count": count,
@@ -161,7 +161,7 @@ def _unpaced(process_index: int) -> dict[str, object]:
     elapsed = 60_000_000_000
     return {
         "schema": (
-            "capture_splat.live_sender_ack_benchmark_unpaced_stream_phase.v0.1"
+            "capture_splat.live_sender_ack_benchmark_unpaced_stream_phase.v0.2"
         ),
         "final_acknowledged_frame_count": 720,
         "queue_limits": _queue_limits(720),
@@ -186,7 +186,7 @@ def _unpaced(process_index: int) -> dict[str, object]:
 def _paced(process_index: int) -> dict[str, object]:
     return {
         "schema": (
-            "capture_splat.live_sender_ack_benchmark_paced_stream_phase.v0.1"
+            "capture_splat.live_sender_ack_benchmark_paced_stream_phase.v0.2"
         ),
         "configuration": {
             "initial_acknowledged_frame_count": 420,
@@ -219,7 +219,7 @@ def _fixture() -> dict[str, object]:
     counts = (360, 720)
     return {
         "schema": (
-            "capture_splat.live_sender_ack_device_benchmark_fixture.v0.1"
+            "capture_splat.live_sender_ack_device_benchmark_fixture.v0.2"
         ),
         "matrix": {
             "counts": list(counts),
@@ -254,7 +254,7 @@ def _decode_report(path: Path) -> dict[str, object]:
     envelope = json.loads(path.read_bytes())
     assert set(envelope) == {"schema", "payload_base64", "payload_sha256"}
     assert envelope["schema"] == (
-        "capture_splat.live_sender_ack_device_benchmark_report_envelope.v0.1"
+        "capture_splat.live_sender_ack_device_benchmark_report_envelope.v0.2"
     )
     payload_bytes = base64.b64decode(
         envelope["payload_base64"],
@@ -269,6 +269,35 @@ def _decode_report(path: Path) -> dict[str, object]:
             f"non-finite JSON value: {value}"
         ),
     )
+
+
+@pytest.mark.parametrize(
+    ("artifact", "expected_error"),
+    [
+        ("fixture", "unexpected device benchmark fixture schema"),
+        ("phase", "unexpected reconcile phase schema"),
+    ],
+)
+def test_v01_benchmark_artifacts_are_not_reinterpreted(
+    tmp_path: Path,
+    artifact: str,
+    expected_error: str,
+) -> None:
+    runner = _load_runner()
+    fixture = _fixture()
+    if artifact == "fixture":
+        fixture["schema"] = (
+            "capture_splat.live_sender_ack_device_benchmark_fixture.v0.1"
+        )
+    else:
+        fixture["reconcile"]["360"][0]["schema"] = (
+            "capture_splat.live_sender_ack_benchmark_reconcile_phase.v0.1"
+        )
+    fixture_path = tmp_path / f"{artifact}.json"
+    _write_fixture(fixture_path, fixture)
+
+    with pytest.raises(ValueError, match=expected_error):
+        runner._collect_fixture(fixture_path)
 
 
 def test_fixture_writes_checksummed_fail_closed_report_outside_git(
@@ -294,6 +323,9 @@ def test_fixture_writes_checksummed_fail_closed_report_outside_git(
     )
 
     summary = json.loads(completed.stdout)
+    assert summary["schema"] == (
+        "capture_splat.live_sender_ack_device_benchmark_summary.v0.2"
+    )
     assert summary["hard_gate_status"] == "not_evaluated_fixture"
     assert summary["m1b_physical_capture_acceptance"] == (
         "not_evaluated_capture_loop_disconnected"
@@ -302,7 +334,11 @@ def test_fixture_writes_checksummed_fail_closed_report_outside_git(
     assert stat.S_IMODE(report_path.stat().st_mode) == 0o600
 
     payload = _decode_report(report_path)
+    assert payload["schema"] == (
+        "capture_splat.live_sender_ack_device_benchmark_report.v0.2"
+    )
     assert payload["hard_gate"]["status"] == "not_evaluated_fixture"
+    assert payload["hard_gate"]["eligible_device_models"] == ["iPhone17,2"]
     assert payload["capture_isolation"] == {
         "capture_loop_connected": False,
         "writer_drops": "unmeasured",
@@ -357,6 +393,10 @@ def test_dry_run_declares_352_distinct_one_test_process_invocations() -> None:
     )
     plan = json.loads(completed.stdout)
     invocations = plan["test_invocations"]
+    assert plan["schema"] == (
+        "capture_splat.live_sender_ack_device_benchmark_plan.v0.2"
+    )
+    assert plan["eligible_device_models"] == ["iPhone17,2"]
     assert plan["test_invocation_count"] == 352
     assert len(invocations) == 352
     assert plan["one_separate_xcodebuild_process_per_sample"] is True
@@ -658,7 +698,7 @@ def test_device_gate_rejects_required_performance_and_provenance_failures() -> N
         (
             {
                 "is_physical_device": False,
-                "is_oldest_supported_lidar_iphone": False,
+                "is_designated_ack_benchmark_device": False,
                 "physical_gate_result": "not_evaluated_non_physical",
             },
             "not_evaluated_non_physical",
@@ -666,7 +706,23 @@ def test_device_gate_rejects_required_performance_and_provenance_failures() -> N
         (
             {
                 "machine": "iPhone17,1",
-                "is_oldest_supported_lidar_iphone": False,
+                "is_designated_ack_benchmark_device": False,
+                "physical_gate_result": "not_evaluated_ineligible_device",
+            },
+            "not_evaluated_ineligible_device",
+        ),
+        (
+            {
+                "machine": "iPhone13,3",
+                "is_designated_ack_benchmark_device": False,
+                "physical_gate_result": "not_evaluated_ineligible_device",
+            },
+            "not_evaluated_ineligible_device",
+        ),
+        (
+            {
+                "machine": "iPhone13,4",
+                "is_designated_ack_benchmark_device": False,
                 "physical_gate_result": "not_evaluated_ineligible_device",
             },
             "not_evaluated_ineligible_device",
@@ -699,6 +755,29 @@ def test_device_gate_classifies_ineligible_platforms(
         summary["platform"].update(platform_updates)
 
     assert runner._evaluate_hard_gate(**arguments)["status"] == expected_status
+
+
+@pytest.mark.parametrize(
+    "platform_updates",
+    [
+        {
+            "is_designated_ack_benchmark_device": False,
+            "physical_gate_result": "not_evaluated_ineligible_device",
+        },
+        {
+            "machine": "iPhone13,3",
+            "physical_gate_result": (
+                "physical_trial_requires_aggregate_gate_evaluation"
+            ),
+        },
+    ],
+)
+def test_platform_rejects_forged_designated_device_claim(
+    platform_updates: dict[str, object],
+) -> None:
+    runner = _load_runner()
+    with pytest.raises(ValueError, match="designated benchmark-device"):
+        runner._validate_platform(_platform() | platform_updates)
 
 
 @pytest.mark.parametrize(
