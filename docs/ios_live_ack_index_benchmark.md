@@ -124,13 +124,22 @@ python3 scripts/run_ios_live_sender_ack_device_benchmark.py \
   --device-id "$CAPTURE_SPLAT_ACK_DEVICE_ID"
 ```
 
-The plan must report 352 separate test invocations: five counts, two measured
-phases, and 5 warmups plus 30 measured trials produce 350 invocations, followed
-by one unpaced and one paced stream invocation. The paced invocation alone is
-at least 60 seconds and can run longer while draining. Device launches plus the
-10,000- and 50,000-identity cases make the complete run a multi-hour operation;
-keep the Mac and unlocked iPhone powered and connected. The collector's default
+The plan must report 352 separate test invocations. It first runs the 140
+required 360- and 720-identity matrix invocations, then the required unpaced and
+paced streams, and finally the 210 non-gating 1,000-, 10,000-, and
+50,000-identity diagnostics. Each count has two measured phases with 5 warmups
+plus 30 measured trials. The paced invocation alone is at least 60 seconds and
+can run longer while draining. Device launches plus the 10,000- and
+50,000-identity cases make the complete run a multi-hour operation; keep the
+Mac and unlocked iPhone powered and connected. The collector's default
 7,200-second command timeout applies to each command, not to the total run.
+
+Two initial physical attempts using the former all-counts-before-streams order
+reached a degraded Xcode device service after 350 matrix launches, before the
+required stream evidence could be collected. Those failed diagnostic reports
+remain historical evidence and must not be reinterpreted or reused.
+Required-first scheduling changes no schema, sample count, budget, attachment
+validation, or gate semantics.
 
 Run the acceptance collector only after reviewing that plan:
 

@@ -83,6 +83,20 @@ FINGERPRINT_PATHS = (
     "scripts/run_ios_live_sender_ack_device_benchmark.py",
 )
 
+
+def _collection_schedule() -> tuple[tuple[str, int], ...]:
+    return (
+        *(("count", count) for count in HARD_GATE_COUNTS),
+        ("unpaced", 720),
+        ("paced", 720),
+        *(
+            ("count", count)
+            for count in COUNTS
+            if count not in HARD_GATE_COUNTS
+        ),
+    )
+
+
 STATE_KEYS = {
     "payload_bytes",
     "envelope_bytes",
@@ -2309,7 +2323,8 @@ def _collect_real(
         "reconcile": {},
         "cold_reopen": {},
     }
-    for count in COUNTS:
+
+    def collect_count(count: int) -> None:
         for phase in ("reconcile", "cold_reopen"):
             phase_records: list[dict[str, Any]] = []
             for sample_index in range(WARMUP_TRIALS + MEASURED_TRIALS):
@@ -2333,28 +2348,23 @@ def _collect_real(
                     )
                 )
             records[phase][count] = phase_records
-    unpaced = _run_test_invocation(
-        repository=repository,
-        device_id=device_id,
-        derived_data=derived_data,
-        result_root=result_root,
-        phase="unpaced",
-        count=None,
-        sample_kind="measured",
-        sample_index=0,
-        timeout_seconds=timeout_seconds,
-    )
-    paced = _run_test_invocation(
-        repository=repository,
-        device_id=device_id,
-        derived_data=derived_data,
-        result_root=result_root,
-        phase="paced",
-        count=None,
-        sample_kind="measured",
-        sample_index=0,
-        timeout_seconds=timeout_seconds,
-    )
+
+    streams: dict[str, dict[str, Any]] = {}
+    for group, value in _collection_schedule():
+        if group == "count":
+            collect_count(value)
+            continue
+        streams[group] = _run_test_invocation(
+            repository=repository,
+            device_id=device_id,
+            derived_data=derived_data,
+            result_root=result_root,
+            phase=group,
+            count=None,
+            sample_kind="measured",
+            sample_index=0,
+            timeout_seconds=timeout_seconds,
+        )
     return {
         "run_profile": "acceptance",
         "matrix": {
@@ -2372,8 +2382,8 @@ def _collect_real(
         },
         "reconcile": records["reconcile"],
         "cold_reopen": records["cold_reopen"],
-        "unpaced": unpaced,
-        "paced": paced,
+        "unpaced": streams["unpaced"],
+        "paced": streams["paced"],
     }
 
 
@@ -2732,7 +2742,8 @@ def _dry_run_plan(
     root = Path("<temporary-root>")
     derived = root / "DerivedData"
     commands: list[dict[str, Any]] = []
-    for count in COUNTS:
+
+    def append_count(count: int) -> None:
         for phase in ("reconcile", "cold_reopen"):
             for sample_index in range(WARMUP_TRIALS + MEASURED_TRIALS):
                 method = _method_name(phase, count)
@@ -2759,12 +2770,16 @@ def _dry_run_plan(
                         ),
                     }
                 )
-    for phase in ("unpaced", "paced"):
-        method = _method_name(phase)
+
+    for group, value in _collection_schedule():
+        if group == "count":
+            append_count(value)
+            continue
+        method = _method_name(group)
         commands.append(
             {
-                "phase": phase,
-                "count": 720,
+                "phase": group,
+                "count": value,
                 "sample_kind": "measured",
                 "sample_index": 0,
                 "test_identifier": _test_identifier(method),
@@ -2772,7 +2787,7 @@ def _dry_run_plan(
                     repository,
                     device_id,
                     derived,
-                    root / "results" / f"{phase}-720-0.xcresult",
+                    root / "results" / f"{group}-{value}-0.xcresult",
                     method,
                 ),
             }
