@@ -79,6 +79,22 @@ throttling from actual drops, records processing-budget overruns, and reports
 time spent with mesh, map-only, pose-only, or hidden guidance under each thermal
 policy.
 
+## Dormant live sender foundation
+
+M1B-1 compiles an isolated bounded sender foundation into the app target. It
+implements QR invitation parsing, P-256 device identity, Keychain-backed grants,
+TLS 1.3 leaf-certificate pinning, signed requests with durable counters, a
+checksummed frame/byte-bounded queue, ACK/resume reconciliation, limited
+in-flight uploads, retry, paired desktop/device queue binding, and
+thermal/storage/background/network pause policy.
+
+It is deliberately dormant. `CaptureController.swift`, keyframe acceptance,
+atomic writers, capture UI, local-network permissions, and Bonjour activation
+are unchanged. The deterministic host probe uses only immutable file references
+and finalized replay fixtures; it never retains `ARFrame` or pixel buffers.
+See [iOS Live Sender M1B-1](../../../docs/ios_live_sender.md) for the integration
+boundary and remaining physical gates.
+
 Saved frames include `capture_quality` metadata. The host pipeline uses accepted
 keyframes for ingest and COLMAP export, so rejected candidates remain diagnostic
 evidence rather than trainer input.

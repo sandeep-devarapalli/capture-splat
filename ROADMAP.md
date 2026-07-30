@@ -28,7 +28,10 @@ Capture Splat has implemented the core public capture-to-3DGS path:
   semantics. This is proposal-only evidence transport, not live 3DGS.
 - The authenticated-LAN boundary now has a canonical QR pairing, device
   identity, TLS pin, scoped grant, revocation epoch, and per-request anti-replay
-  contract. The iPhone sender and physical-device acceptance remain open.
+  contract. A dormant bounded Swift sender foundation now persists identity,
+  grants, counters, paired desktop/device-bound queue state, ACK/resume
+  progress, and capture-first pressure policy without entering the capture
+  loop. Physical integration and device acceptance remain open.
 
 These are implemented capabilities, not a blanket high-quality claim. A
 physical capture, finite PLY, viewer load, or aligned frame remains evidence
@@ -44,7 +47,7 @@ Calibration outcomes are owned by World Studio.
 | Milestone | Outcome | Status |
 |---|---|---|
 | Live Session Foundation | Strict replay-first source-frame, camera, quality, sidecar, ACK, resume, and finalization contract | completed |
-| Authenticated Sender And Device Acceptance | Explicit pairing, TLS, bounded store-and-forward sender, thermal safety, and two-cycle physical-device acceptance | in progress: pairing/auth contract |
+| Authenticated Sender And Device Acceptance | Explicit pairing, TLS, bounded store-and-forward sender, thermal safety, and two-cycle physical-device acceptance | in progress: pairing/auth plus tested sender foundation; capture hookup and physical evidence open |
 | Calibration Capture Evidence | Guided and synchronized experimental imagery with apparatus/scale provenance, without inferred physics authority | planned and evidence-blocked |
 
 The completed foundation is permanent `proposal_only` evidence transport. The authenticated
@@ -90,10 +93,11 @@ Studio may compile into its target Newton runtime after separate validation.
 - Complete TestFlight packaging and distribution metadata.
 - Add release-level startup, long-session thermal, and two-cycle finalization
   evidence across supported LiDAR iPhones.
-- Implement the documented bounded store-and-forward live sender after the
-  paired receiver boundary lands. LAN transport remains disabled until
-  explicit opt-in, QR-bound receiver identity, TLS pinning, a current scoped
-  grant, and authenticated request replay protection all pass.
+- Integrate the dormant bounded store-and-forward foundation only after an
+  additive live-session contract binds a pre-capture source seed to the
+  finalized `capture.json`, then add explicit opt-in, QR/Bonjour UI, and a
+  minimal callback after atomic frame writes. LAN transport remains disabled
+  until the current grant, TLS pin, replay protection, and pressure gates pass.
 - Add task/robot/site briefs, calibration-trial recording, matched demonstration capture,
   and deployment recapture as additive evidence workflows after the active sender/device
   gate. None may weaken local-first capture or infer physical parameters.

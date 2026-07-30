@@ -464,12 +464,19 @@ already loaded in World Studio. See [Live Session Phase 1](docs/live_session.md)
 for the contract, transport, recovery behavior, and the bounded future iOS
 sender design.
 
-M1 adds the strict [live pairing and authentication contract](docs/live_auth.md)
+M1A adds the strict [live pairing and authentication contract](docs/live_auth.md)
 for QR-bound World Studio identity, Bonjour discovery, certificate pinning,
 P-256 request authentication, scoped grants, expiry, revocation epochs, and
-anti-replay counters. This contract does not enable iPhone networking: the
-receiver remains loopback-only until pairing succeeds, and the capture loop is
-unchanged. The bounded sender is a separate follow-up.
+anti-replay counters. M1B-1 now provides the dormant
+[bounded Swift sender foundation](docs/ios_live_sender.md): persistent device
+identity and grants, signed TLS transport, a checksummed frame/byte-bounded
+queue bound to the paired desktop/device, resume reconciliation, limited
+in-flight uploads, retry, and capture-first pressure policy.
+
+The sender foundation is exercised with finalized replay fixtures and is not
+wired into `CaptureController`. QR scanning, Bonjour UI, local-network
+permission activation, the atomic-write callback, and two-cycle physical-device
+acceptance remain open. No iPhone networking starts in this change.
 
 ## Linux, Windows, And Cloud GPUs
 
