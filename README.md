@@ -488,12 +488,12 @@ counters live under Application Support. App launch performs no discovery or
 connection.
 
 The sender is still not wired into `CaptureController`, and pairing does not
-open a frame queue or upload capture evidence. The ACK-index benchmark in
+open a frame queue or upload capture evidence. The checksum-bound
+[Release benchmark](docs/ios_live_ack_index_benchmark.md) passed on the
+designated iPhone 16 Pro Max (`iPhone17,2`), closing
 [issue #35](https://github.com/sandeep-devarapalli/capture-splat/issues/35)
-uses the predeclared
-[Release benchmark protocol](docs/ios_live_ack_index_benchmark.md) before any
-post-atomic-write callback is allowed. The designated iPhone 16 Pro Max
-(`iPhone17,2`) run and two-cycle physical-device acceptance remain open.
+without an ACK-index redesign. The next integration is one nonblocking callback
+after atomic frame writes, followed by two-cycle physical-device acceptance.
 
 ## Linux, Windows, And Cloud GPUs
 

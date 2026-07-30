@@ -179,6 +179,32 @@ Only `passed` closes the ACK-index decision. A command failure, a checksummed
 Even `passed` leaves capture-writer interference unmeasured and does not
 authorize the capture-loop callback or physical two-cycle acceptance.
 
+## Published result
+
+The strict required-first run passed on the designated physical iPhone 16 Pro
+Max (`iPhone17,2`) at commit
+`1a75f5cea52fc6b809ece9ee282842ef71b87055`. The canonical report payload
+SHA-256 is
+`sha256:f2db7812b89b0f3ca7817e5682c9b707cd4da963ae44d94b21213b4d7c9858ca`;
+the outer report file SHA-256 is
+`a75d59a6c1e8a9d8c3e125db0e2a4bf36a2bb61bf05fc3354b3036e3f9eccda5`.
+
+All 142 required processes produced unique, complete evidence. At 720
+identities, the canonical payload and envelope were 81,925 and 109,405 bytes.
+The unpaced stream sustained 130.814 durable ACK/s. The paced 5 ACK/s stream
+had maximum backlog 1 and final backlog 0. Required thermal states were nominal,
+and all predeclared size, latency, memory, throughput, correctness, restart,
+and process-isolation checks passed.
+
+The 1,000-identity diagnostic also completed. CoreDevice availability degraded
+after required collection, leaving 99 missing non-gating 10,000/50,000
+diagnostic attachments; the report preserves those failures as
+`diagnostic_future_scale_failed`. They do not demote the 360/720 product gate.
+The decision is to retain the exact ledger and current 360-frame product cap,
+without implementing the conditional compact index. The checksum-bound result
+and evidence boundary are published in
+[issue #35](https://github.com/sandeep-devarapalli/capture-splat/issues/35).
+
 ## Proof boundary
 
 The dedicated benchmark host does not build, launch, or depend on the

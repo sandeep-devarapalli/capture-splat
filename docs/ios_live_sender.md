@@ -102,12 +102,14 @@ the raw `capture.json` bytes in this phase. That proof boundary must remain
 visible in the finalized handoff.
 
 The exact acknowledged-frame hash ledger remains authoritative until verified
-finalization. Its long-session size and latency gate is tracked in
-[issue #35](https://github.com/sandeep-devarapalli/capture-splat/issues/35).
-The fixed matrix, numeric budgets, result fields, and proof boundary are in the
-[ACK-index benchmark protocol](ios_live_ack_index_benchmark.md).
-Do not prune hashes or raise the 48 MiB state limit; if the benchmark fails,
-land the specified chunked checksummed index before capture-loop integration.
+finalization. Its checksum-bound long-session gate passed on the designated
+iPhone 16 Pro Max and closed
+[issue #35](https://github.com/sandeep-devarapalli/capture-splat/issues/35)
+without a storage redesign. The fixed matrix, numeric budgets, result fields,
+and proof boundary are in the
+[ACK-index benchmark protocol](ios_live_ack_index_benchmark.md). Retain the
+exact ledger and current 360-frame product cap; do not prune hashes or raise
+the 48 MiB state limit.
 
 ## Pairing application wiring
 
@@ -142,14 +144,12 @@ capture files.
 
 ## Next integration order
 
-1. Complete issue #35's
-   [Release benchmark](ios_live_ack_index_benchmark.md) at 360 and 720
-   accepted-frame identities, with 1k/10k/50k stress characterization.
-2. If the 720-frame size, persistence, reopen, memory, throughput, or exact
-   duplicate/conflict gates fail, land the chunked checksummed exact ACK index.
-3. Add one nonblocking callback only after each declared frame file is
+1. The checksum-bound
+   [Release benchmark](ios_live_ack_index_benchmark.md) passed at 360 and 720
+   accepted-frame identities; retain the exact ledger and 360-frame cap.
+2. Add one nonblocking callback only after each declared frame file is
    atomically durable. Do not wait for optional sidecars that are still writing.
-4. Run two physical iPhone-to-Mac cycles, including receiver restart and Wi-Fi
+3. Run two physical iPhone-to-Mac cycles, including receiver restart and Wi-Fi
    interruption, while measuring memory, storage, thermal state, writer drops,
    throughput, recovery, and finalization.
 
