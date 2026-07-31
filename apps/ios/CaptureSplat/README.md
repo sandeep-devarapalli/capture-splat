@@ -79,9 +79,9 @@ throttling from actual drops, records processing-budget overruns, and reports
 time spent with mesh, map-only, pose-only, or hidden guidance under each thermal
 policy.
 
-## World Studio pairing and dormant sender
+## World Studio pairing and bounded sender
 
-M1B-1 compiles an isolated bounded sender foundation into the app target. It
+M1B compiles the bounded sender into the app target. It
 implements QR invitation parsing, P-256 device identity, Keychain-backed grants,
 TLS 1.3 leaf-certificate pinning, signed requests with durable counters, a
 checksummed frame/byte-bounded queue, ACK/resume reconciliation, limited
@@ -99,14 +99,52 @@ cache and durable request counters live under
 The app exposes one current Mac at a time; revoke and forget it before pairing
 another.
 
-The frame sender remains deliberately dormant. `CaptureController.swift`,
-keyframe acceptance, and atomic writers are unchanged; pairing does not open a
-queue or upload a capture. The additive v0.2 contract derives a stable session
-ID from an atomically persisted random seed before `capture.json` exists and
-binds the final manifest reference only at finalization. The deterministic host
-probe uses only immutable file references and never retains `ARFrame` or pixel
-buffers. See [iOS Live Sender M1B-1](../../../docs/ios_live_sender.md) for the
-ACK-index gate, integration boundary, and remaining physical gates.
+One long-lived bounded serial bridge now receives capture events. A frame event
+is emitted only after its RGB, depth, and enabled-confidence files are
+atomically written and one bounded immutable accepted-frame record is committed
+under `metadata/live/accepted-frames/`. This O(1)-per-frame journal write
+precedes the callback; hashing, networking, ACKs, masks, optional previews, and
+other sidecars remain off the capture queues. The bridge never retains
+`ARFrame` or pixel buffers. It writes canonical live metadata and checksummed
+Application Support binding/queue state before upload.
+
+The additive v0.2 contract derives a stable session ID from an atomically
+persisted random seed before `capture.json` exists. Before capture start returns
+accepted, the app synchronously writes canonical `metadata/live/session.json`,
+derives its stable session ID, inspects the file's exact path, size, and
+SHA-256, and records that immutable reference in `pending-capture.json`. A
+first-frame crash therefore reloads the same seed and identity. Atomic
+`capture.json` publication is followed by an exact path, byte-size, and SHA-256
+journal marker; only that marker triggers the final schema binding. The
+checksummed
+`pending-capture.json` and `current-session.json` Application Support pointers
+restore only the exact previously user-authorized transfer and journal after
+restart. This performs no unsolicited Bonjour discovery, never synthesizes a
+missing `capture.json`, and cannot re-finalize a partial local capture.
+Backgrounding, network loss, loss of pairing authorization, and serious or
+critical thermal transitions cancel active transport while source capture
+continues independently. Recovery can wake the one sender worker only when the
+currently paired desktop exactly matches the durable pointer/binding, the app
+is foreground, the network is available, and thermal policy permits transfer.
+
+A zero-frame manifest failure automatically clears the transfer pointers only
+after the accepted-frame journal is verified empty and no finalization marker
+exists. Any nonempty journal or manifest/finalization failure remains protected
+for explicit recovery. The pairing sheet then offers a confirmed **Abandon
+Pending Live Transfer** action. It removes only Application Support's fixed
+`pending-capture.json` and `current-session.json` pointers; the capture source,
+journal, queue, session binding, and metadata remain intact.
+
+The queue's frame/byte limits bound a sliding send window. Durable journal
+records beyond current capacity stay local; after ACKs drain queued records,
+the one sender worker incrementally refills the window and eventually enqueues
+the finalization marker. A capture need not fit in the queue at once. The exact
+ledger still retains its separate 360-frame product cap.
+Two physical iPhone-to-Mac cycles with receiver restart and Wi-Fi interruption
+remain required before any physical LAN/device acceptance claim. Live and
+progressive evidence remains `proposal_only`, never measurement, collision,
+navigation, semantic, or physics authority. See
+[iOS Live Sender M1B](../../../docs/ios_live_sender.md).
 
 Saved frames include `capture_quality` metadata. The host pipeline uses accepted
 keyframes for ingest and COLMAP export, so rejected candidates remain diagnostic

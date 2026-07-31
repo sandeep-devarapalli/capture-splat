@@ -28,15 +28,25 @@ Capture Splat has implemented the core public capture-to-3DGS path:
   semantics. This is proposal-only evidence transport, not live 3DGS.
 - The authenticated-LAN boundary now has a canonical QR pairing, device
   identity, TLS pin, scoped grant, revocation epoch, and per-request anti-replay
-  contract. A dormant bounded Swift sender foundation now persists identity,
-  grants, counters, paired desktop/device-bound queue state, ACK/resume
-  progress, and capture-first pressure policy without entering the capture
-  loop. The additive v0.2 session-seed/final-manifest contract now permits
-  progressive transfer before `capture.json` exists while preserving v0.1
-  replay. The app now performs explicit QR scanning, exact Bonjour resolution,
-  Mac approval, and Application Support recovery without starting discovery at
-  launch or opening a frame queue. Capture integration and physical acceptance
-  remain open.
+  contract. One long-lived bounded serial bridge now receives nonblocking
+  events only after atomic RGB/depth/enabled-confidence writes and an immutable,
+  bounded accepted-frame journal commit. The O(1)-per-frame journal, canonical
+  live metadata, checksummed pending/current recovery pointers, paired
+  desktop/device binding, and queue make an authorized pending transfer
+  restart-safe without retaining `ARFrame` or pixel buffers or waiting on
+  capture queues for hashing, networking, ACKs, masks, optional previews, or
+  other sidecars. The seed-bearing canonical session metadata and its exact
+  path/size/SHA-256 reference are durable before capture start returns accepted,
+  so a first-frame crash cannot replace session identity. Queue limits are a
+  sliding send window that is incrementally refilled from the journal as ACKs
+  drain it. QR/Bonjour pairing is active, but restart recovery performs no
+  unsolicited discovery. The exact ledger remains capped at 360 frames, and
+  only an exact path/size/SHA-256 marker committed after atomic `capture.json`
+  publication triggers the v0.2 final binding. Durable recovery wakes only for
+  the exact paired desktop while foreground, network, and thermal gates permit.
+  A confirmed abandon action removes only fixed pending/current Application
+  Support pointers, preserving capture, journal, queue, and binding evidence.
+  Physical LAN acceptance remains open.
 
 These are implemented capabilities, not a blanket high-quality claim. A
 physical capture, finite PLY, viewer load, or aligned frame remains evidence
@@ -52,7 +62,7 @@ Calibration outcomes are owned by World Studio.
 | Milestone | Outcome | Status |
 |---|---|---|
 | Live Session Foundation | Strict replay-first source-frame, camera, quality, sidecar, ACK, resume, and finalization contract | completed |
-| Authenticated Sender And Device Acceptance | Explicit pairing, TLS, bounded store-and-forward sender, thermal safety, and two-cycle physical-device acceptance | in progress: pairing UI, auth, Application Support recovery, sender foundation, and ACK-index gate complete; capture hookup and two-cycle physical evidence open |
+| Authenticated Sender And Device Acceptance | Explicit pairing, TLS, bounded store-and-forward sender, thermal safety, and two-cycle physical-device acceptance | in progress: pairing UI, auth, durable accepted-frame journal, Application Support pending/current recovery, exact-ledger gate, and capture sender binding implemented; physical LAN and two-cycle evidence open |
 | Calibration Capture Evidence | Guided and synchronized experimental imagery with apparatus/scale provenance, without inferred physics authority | planned and evidence-blocked |
 
 The completed foundation is permanent `proposal_only` evidence transport. The authenticated
@@ -99,12 +109,21 @@ Studio may compile into its target Newton runtime after separate validation.
 - Add release-level startup, long-session thermal, and two-cycle finalization
   evidence across supported LiDAR iPhones.
 - Issue #35's exact ACK-index benchmark passed on the designated iPhone 16 Pro
-  Max, retaining the exact ledger and current 360-frame cap. Integrate the
-  dormant bounded store-and-forward foundation through one nonblocking
-  callback after atomic frame writes. Explicit QR/Bonjour pairing and
-  Application Support recovery are active, but they do not open a frame queue.
-  LAN evidence transfer remains disabled until a current grant, TLS pin, replay
-  protection, and pressure gates pass.
+  Max, retaining the exact ledger and current 360-frame cap. The capture sender
+  binding uses one bounded serial bridge and commits one immutable
+  accepted-frame journal record after each required atomic frame write before
+  notifying it. Previously authorized pending transfers recover from
+  checksummed pending/current Application Support pointers without unsolicited
+  discovery. The synchronous seed/metadata/reference claim closes the
+  first-frame crash window, while incremental journal refill keeps the bounded
+  queue a send window rather than a whole-capture limit. Background, network,
+  pairing, and serious/critical thermal transitions cancel transport work
+  without changing local capture. A zero-frame manifest failure clears recovery
+  only after confirming the journal is empty; nonempty failures remain
+  protected for recovery or the confirmed, evidence-preserving abandon action.
+  Run two physical iPhone-to-Mac cycles with receiver restart and Wi-Fi
+  interruption before accepting LAN transfer, device restart recovery,
+  throughput, thermal behavior, writer-drop behavior, or finalization.
 - Add task/robot/site briefs, calibration-trial recording, matched demonstration capture,
   and deployment recapture as additive evidence workflows after the active sender/device
   gate. None may weaken local-first capture or infer physical parameters.
