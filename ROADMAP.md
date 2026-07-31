@@ -7,6 +7,10 @@ Capture Splat has implemented the core public capture-to-3DGS path:
 - Video 3DGS Max records quality-gated RGB-D keyframes, indexed continuous
   HEVC video, per-frame ARKit poses/intrinsics, exposure telemetry, person
   masks, mesh evidence, and capture events.
+- Video 3DGS candidate selection arms expensive quality analysis only after
+  the existing 5 cm baseline, or 7 cm in the same sector, and reports
+  lightweight movement waits separately from quality holds. Thermal pressure
+  reduces candidate-analysis cadence without weakening acceptance thresholds.
 - Intent-aware guidance covers Room, Desk / Cluster, Object Orbit, Corridor,
   Wall / Facade, Outdoor, RoomPlan + 3DGS, and Detail Repair. Only Object
   Orbit permits an explicit subject lock.

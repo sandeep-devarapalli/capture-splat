@@ -229,6 +229,7 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var guidanceArrowSystemImage = "arrow.up.circle"
     @Published var acceptedKeyframes = 0
     @Published var skippedKeyframes = 0
+    @Published var noveltyWaits = 0
     @Published var lastKeyframeDecision = "Waiting"
     @Published var keyframeScore = 0.0
     @Published var captureQualityText = "Quality waiting"
@@ -302,9 +303,9 @@ final class CaptureController: NSObject, ObservableObject {
         }
         switch thermalStateText {
         case "serious":
-            return "Mesh hidden to cool the phone. Capture continues."
+            return "Thermal Serious: stop and preserve this capture, then cool to Nominal."
         case "critical":
-            return "Live surface guidance paused. Recording continues."
+            return "Thermal Critical: stop now and preserve this capture."
         default:
             return nil
         }
@@ -409,6 +410,7 @@ final class CaptureController: NSObject, ObservableObject {
     private var lastAcceptedCameraPosition: SIMD3<Float>?
     private var scheduledFrameCount = 0
     private var isWritingFrame = false
+    private var lastWriterBusyDropUptime: TimeInterval = -.infinity
     private var automaticStopReason: String?
     private var isAutomaticStopScheduled = false
     private var rgbRateSamples: [TimeInterval] = []
@@ -431,6 +433,10 @@ final class CaptureController: NSObject, ObservableObject {
     private var keyframeEvents: [[String: Any]] = []
     private var keyframeEventsWereTruncated = false
     private var keyframeSkipReasonCounts: [String: Int] = [:]
+    private var noveltyWaitEvents: [[String: Any]] = []
+    private var noveltyWaitEventsWereTruncated = false
+    private var noveltyWaitReasonCounts: [String: Int] = [:]
+    private var keyframePreflightIssueCounts: [String: Int] = [:]
     private let minBlurScore = 0.006
     private let maxAngularVelocityDegPerSec = 40.0
     private let maxTranslationSpeedMetersPerSec = 0.8
@@ -857,6 +863,7 @@ final class CaptureController: NSObject, ObservableObject {
             lastAcceptedCameraPosition = nil
             scheduledFrameCount = 0
             isWritingFrame = false
+            lastWriterBusyDropUptime = -.infinity
             rgbFrames = 0
             depthFrames = 0
             imuRows = 0
@@ -877,7 +884,7 @@ final class CaptureController: NSObject, ObservableObject {
             coverageHintText = "Coverage 0/\(coverageSectors.count)"
             readinessState = "Not ready"
             nextAction = scanTargetMode == "video_3dgs"
-                ? "Move slowly with overlapping views"
+                ? "Side-step 7-10 cm, then hold briefly"
                 : "Move slowly around the subject"
             missingSectorCount = coverageSectors.count
             backgroundWarning = scanTargetMode == "video_3dgs"
@@ -886,6 +893,7 @@ final class CaptureController: NSObject, ObservableObject {
             guidanceArrowSystemImage = "arrow.up.circle"
             acceptedKeyframes = 0
             skippedKeyframes = 0
+            noveltyWaits = 0
             lastKeyframeDecision = "Waiting"
             keyframeScore = 0
             captureQualityText = "Quality waiting"
@@ -911,6 +919,10 @@ final class CaptureController: NSObject, ObservableObject {
             keyframeEvents.removeAll()
             keyframeEventsWereTruncated = false
             keyframeSkipReasonCounts.removeAll()
+            noveltyWaitEvents.removeAll()
+            noveltyWaitEventsWereTruncated = false
+            noveltyWaitReasonCounts.removeAll()
+            keyframePreflightIssueCounts.removeAll()
             lastAcceptedExposureMean = nil
             roomStartPosition = lockedRoomWorldTransform.map { cameraPosition($0) }
             roomLastAcceptedPosition = nil
@@ -2050,6 +2062,14 @@ final class CaptureController: NSObject, ObservableObject {
         scanTargetMode == "video_3dgs" ? videoMinimumKeyframeInterval : minimumKeyframeInterval
     }
 
+    private func activeKeyframeCandidateInterval(for thermalState: ProcessInfo.ThermalState) -> TimeInterval {
+        CaptureKeyframePolicy.candidateInterval(
+            baseInterval: activeMinimumKeyframeInterval,
+            thermalGuidanceInterval: liveGuidanceInterval(for: thermalState),
+            isVideo3DGS: scanTargetMode == "video_3dgs"
+        )
+    }
+
     private var activeMaxCapturedFrames: Int {
         scanTargetMode == "video_3dgs" ? maxVideoCapturedFrames : maxCapturedFrames
     }
@@ -2659,6 +2679,18 @@ final class CaptureController: NSObject, ObservableObject {
             guidanceText = scanTargetMode == "video_3dgs"
                 ? currentCaptureIntentOption.guidance
                 : (canStartForCurrentTargetMode ? "Start with a slow orbit and keep overlap between views." : targetLockDetail)
+        } else if thermalStateText == "critical" {
+            readinessState = "Hold"
+            nextAction = "Stop now and preserve"
+            backgroundWarning = "Thermal state is Critical; this run is not valid thermal evidence."
+            guidanceArrowSystemImage = "stop.circle"
+            guidanceText = "Stop recording now, preserve the local capture, and cool the phone to Nominal."
+        } else if thermalStateText == "serious" {
+            readinessState = "Hold"
+            nextAction = "Stop and cool to Nominal"
+            backgroundWarning = "Thermal state is Serious; continuing will not count as a measured acceptance run."
+            guidanceArrowSystemImage = "stop.circle"
+            guidanceText = "Stop and preserve this capture, then let the phone return to Nominal."
         } else if trackingStatus != "normal" {
             readinessState = "Hold"
             nextAction = "Pause until tracking is normal"
@@ -2671,7 +2703,7 @@ final class CaptureController: NSObject, ObservableObject {
             backgroundWarning = "Low LiDAR coverage; avoid dark, glassy, or far surfaces."
             guidanceArrowSystemImage = "arrow.down.forward.circle"
             guidanceText = "Aim at nearer textured surfaces; LiDAR depth coverage is low."
-        } else if droppedFrames > 0 && rgbRate < 1.5 {
+        } else if ProcessInfo.processInfo.systemUptime - lastWriterBusyDropUptime < 1 {
             readinessState = "Hold"
             nextAction = "Slow down"
             backgroundWarning = "Capture is skipping frames; move more slowly."
@@ -2695,6 +2727,12 @@ final class CaptureController: NSObject, ObservableObject {
             backgroundWarning = "Room training needs translation and overlap, not only rotation."
             guidanceArrowSystemImage = "arrow.left.and.right.circle"
             guidanceText = "Move sideways along the perimeter before the next accepted keyframe."
+        } else if lastKeyframeDecision.contains("Novelty wait") {
+            readinessState = "Hold"
+            nextAction = lastKeyframeDecision.replacingOccurrences(of: "Novelty wait:", with: "Move")
+            backgroundWarning = "This is a lightweight movement wait, not a rejected keyframe."
+            guidanceArrowSystemImage = "arrow.left.and.right.circle"
+            guidanceText = captureBlockerDetail
         } else if lastKeyframeDecision.contains("fast_motion") {
             readinessState = "Hold"
             nextAction = "Slow your movement"
@@ -3258,6 +3296,12 @@ final class CaptureController: NSObject, ObservableObject {
         return min(max(Int(normalized * Double(sectorCount)), 0), sectorCount - 1)
     }
 
+    private func cameraTransformIsFinite(_ transform: simd_float4x4) -> Bool {
+        transform.rows.allSatisfy { row in
+            row.allSatisfy(\.isFinite)
+        }
+    }
+
     private func appendCoverageHistorySample(timestamp: TimeInterval, sectorIndex: Int, guidancePointCount: Int) {
         if coverageHistory.count >= maxCoverageHistorySamples {
             coverageHistoryWasTruncated = true
@@ -3337,18 +3381,31 @@ final class CaptureController: NSObject, ObservableObject {
             "schema": "capture_splat.keyframe_report.v0.1",
             "capture_model": "quality_gated_smart_keyframes",
             "minimum_keyframe_interval_seconds": activeMinimumKeyframeInterval,
+            "active_candidate_interval_seconds_at_finalization": activeKeyframeCandidateInterval(
+                for: ProcessInfo.processInfo.thermalState
+            ),
+            "candidate_interval_policy": scanTargetMode == "video_3dgs"
+                ? "thermal_adaptive_0.2_0.5_1.0_seconds"
+                : "fixed_minimum_interval",
             "max_captured_frames": activeMaxCapturedFrames,
             "continuous_video_target_fps": videoRecorder.targetFPS,
             "continuous_video_sampling_policy": "thermal_adaptive_15_10_6",
             "keyframe_score_threshold": activeKeyframeScoreThreshold,
             "accepted_keyframes": acceptedKeyframes,
             "skipped_keyframe_candidates": skippedKeyframes,
+            "quality_gate_hold_count": skippedKeyframes,
+            "novelty_wait_observations": noveltyWaits,
             "last_keyframe_decision": lastKeyframeDecision,
             "last_keyframe_score": keyframeScore,
             "skip_reason_counts": keyframeSkipReasonCounts,
+            "novelty_wait_reason_counts": noveltyWaitReasonCounts,
+            "candidate_preflight_issue_counts": keyframePreflightIssueCounts,
             "event_sample_count": keyframeEvents.count,
             "events_truncated": keyframeEventsWereTruncated,
             "events": keyframeEvents,
+            "novelty_event_sample_count": noveltyWaitEvents.count,
+            "novelty_events_truncated": noveltyWaitEventsWereTruncated,
+            "novelty_events": noveltyWaitEvents,
             "authority": [
                 "capture_guidance_only": true,
                 "image_quality_authority": false,
@@ -3385,10 +3442,15 @@ final class CaptureController: NSObject, ObservableObject {
             "profile_text": captureProfileText,
             "profile_detail": captureProfileDetail,
             "minimum_keyframe_interval_seconds": activeMinimumKeyframeInterval,
+            "active_candidate_interval_seconds_at_finalization": activeKeyframeCandidateInterval(
+                for: ProcessInfo.processInfo.thermalState
+            ),
             "max_captured_frames": activeMaxCapturedFrames,
             "keyframe_score_threshold": activeKeyframeScoreThreshold,
             "accepted_keyframes": acceptedKeyframes,
             "skipped_keyframe_candidates": skippedKeyframes,
+            "quality_gate_hold_count": skippedKeyframes,
+            "novelty_wait_observations": noveltyWaits,
             "capture_blocker_status": captureBlockerStatus,
             "capture_blocker_detail": captureBlockerDetail,
             "last_accepted_view_hint": lastAcceptedViewHint,
@@ -3420,6 +3482,9 @@ final class CaptureController: NSObject, ObservableObject {
             "capture_intent": captureIntent,
             "accepted_frame_target": activeMaxCapturedFrames,
             "minimum_keyframe_interval_seconds": activeMinimumKeyframeInterval,
+            "candidate_interval_policy": scanTargetMode == "video_3dgs"
+                ? "thermal_adaptive_0.2_0.5_1.0_seconds"
+                : "fixed_minimum_interval",
             "continuous_video_target_fps": videoRecorder.targetFPS,
             "continuous_video_sampling_policy": "thermal_adaptive_15_10_6",
             "quality_gate": [
@@ -3435,7 +3500,15 @@ final class CaptureController: NSObject, ObservableObject {
                 "max_angular_velocity_deg_s": maxAngularVelocityDegPerSec,
                 "max_translation_speed_m_s": maxTranslationSpeedMetersPerSec,
             ],
-            "selection_policy": "quality_gated_rgbd_keyframes_plus_continuous_video",
+            "selection_policy": scanTargetMode == "video_3dgs"
+                ? "novelty_armed_quality_gated_rgbd_keyframes_plus_continuous_video"
+                : "quality_gated_rgbd_keyframes_plus_continuous_video",
+            "novelty_prefilter": [
+                "enabled": scanTargetMode == "video_3dgs",
+                "base_parallax_meters": minVideoParallaxMeters,
+                "same_sector_multiplier": 1.4,
+                "quality_thresholds_unchanged": true,
+            ],
             "rejected_frames_are_trainer_input": false,
             "authority": [
                 "capture_guidance_only": true,
@@ -4117,7 +4190,7 @@ final class CaptureController: NSObject, ObservableObject {
             "tracking_state": trackingStatus,
         ])
         keyframeScore = decision.score
-        lastKeyframeDecision = accepted ? "Accepted: \(decision.reason)" : "Skipped: \(decision.reason)"
+        lastKeyframeDecision = accepted ? "Accepted: \(decision.reason)" : "Quality hold: \(decision.reason)"
         captureQualityText = String(
             format: "blur %.3f | exp %.2f | move %.2fm | rot %.0f deg/s",
             decision.blurScore,
@@ -4130,6 +4203,53 @@ final class CaptureController: NSObject, ObservableObject {
             skippedKeyframes += 1
             keyframeSkipReasonCounts[decision.reason, default: 0] += 1
         }
+    }
+
+    private func recordNoveltyWait(
+        _ decision: CaptureNoveltyDecision,
+        timestamp: TimeInterval,
+        sectorIndex: Int,
+        repeatsSector: Bool
+    ) {
+        let reason = repeatsSector ? "same_sector_baseline" : "new_sector_baseline"
+        if noveltyWaitEvents.count >= maxKeyframeEventSamples {
+            noveltyWaitEventsWereTruncated = true
+            noveltyWaitEvents.removeFirst(noveltyWaitEvents.count - maxKeyframeEventSamples + 1)
+        }
+        noveltyWaitEvents.append([
+            "timestamp": timestamp,
+            "reason": reason,
+            "sector_index": sectorIndex,
+            "observed_parallax_meters": decision.observedParallaxMeters,
+            "required_parallax_meters": decision.requiredParallaxMeters,
+            "remaining_parallax_meters": decision.remainingParallaxMeters,
+            "thermal_state": thermalStateText,
+        ])
+        noveltyWaits += 1
+        noveltyWaitReasonCounts[reason, default: 0] += 1
+        keyframeScore = 0
+        lastKeyframeDecision = "Novelty wait: \(decision.remainingCentimeters) cm remaining"
+        captureQualityText = String(
+            format: "viewpoint %.2fm / %.2fm required",
+            decision.observedParallaxMeters,
+            decision.requiredParallaxMeters
+        )
+        captureBlockerStatus = "Viewpoint change"
+        captureBlockerDetail = "Side-step \(decision.remainingCentimeters) cm more, keep textured edges visible, then hold briefly for the haptic."
+        lastAcceptedViewHint = repeatsSector
+            ? "Same view sector: reach 7 cm total baseline before the next quality check."
+            : "New view sector: reach 5 cm total baseline before the next quality check."
+    }
+
+    private func recordKeyframePreflightIssue(_ disposition: CaptureNoveltyDisposition) {
+        keyframePreflightIssueCounts[disposition.rawValue, default: 0] += 1
+        keyframeScore = 0
+        lastKeyframeDecision = "Preflight hold: \(disposition.rawValue)"
+        captureQualityText = "Quality check not run"
+        captureBlockerStatus = "Tracking hold"
+        captureBlockerDetail = disposition == .invalidPose
+            ? "Camera pose is unavailable. Pause until ARKit tracking is normal."
+            : "Keyframe policy is unavailable. Stop and preserve this capture."
     }
 
     private func updateCaptureBlocker(accepted: Bool, decision: KeyframeDecision) {
@@ -4168,6 +4288,15 @@ final class CaptureController: NSObject, ObservableObject {
         case "needs_translation_not_pan":
             captureBlockerStatus = "Needs translation"
             captureBlockerDetail = "Do not only rotate. Side-step while keeping the same subject or wall in view."
+        case "too_similar_to_last_keyframe":
+            captureBlockerStatus = "Viewpoint change"
+            captureBlockerDetail = "Side-step 7-10 cm, keep textured edges visible, then hold briefly for the haptic."
+        case "angle_already_covered":
+            captureBlockerStatus = "New viewpoint"
+            captureBlockerDetail = "Move to a less-covered angle while keeping the previous textured area in view."
+        case "score_below_threshold":
+            captureBlockerStatus = "Stronger viewpoint"
+            captureBlockerDetail = "Add a 7-10 cm side-step, keep texture across the frame, then hold briefly."
         case "fast_motion":
             captureBlockerStatus = "Fast motion"
             captureBlockerDetail = "Slow down; let one sharp frame land before moving on."
@@ -5076,7 +5205,8 @@ extension CaptureController: ARSessionDelegate {
             videoRecorder.append(frame: frame, captureDevice: Self.primaryCaptureDevice)
             schedulePersonMask(from: frame)
         }
-        let baseGuidanceInterval = liveGuidanceInterval(for: ProcessInfo.processInfo.thermalState)
+        let thermalState = ProcessInfo.processInfo.thermalState
+        let baseGuidanceInterval = liveGuidanceInterval(for: thermalState)
         let guidanceInterval = usesSubjectTargetGuidance && !isObjectTargetLocked
             ? min(baseGuidanceInterval, 0.2)
             : baseGuidanceInterval
@@ -5111,19 +5241,59 @@ extension CaptureController: ARSessionDelegate {
         }
         guard !isWritingFrame else {
             droppedFrames += 1
+            lastWriterBusyDropUptime = ProcessInfo.processInfo.systemUptime
             return
         }
-        guard frame.timestamp - lastCandidateFrameTimestamp >= activeMinimumKeyframeInterval else { return }
-        lastCandidateFrameTimestamp = frame.timestamp
-        if !shouldRefreshLiveGuidance {
-            candidateDepthValidRatio = measureValidDepthRatio(sceneDepth.depthMap)
-            validDepthRatio = candidateDepthValidRatio
+        guard frame.timestamp - lastCandidateFrameTimestamp >= activeKeyframeCandidateInterval(for: thermalState) else {
+            return
         }
+        lastCandidateFrameTimestamp = frame.timestamp
         guard scheduledFrameCount < activeMaxCapturedFrames else {
             stopAtUsefulFrameLimit()
             return
         }
+        if scanTargetMode == "video_3dgs", !cameraTransformIsFinite(frame.camera.transform) {
+            recordKeyframePreflightIssue(.invalidPose)
+            updateGuidance()
+            return
+        }
         let sectorIndex = coverageSectorIndex(for: frame.camera.transform)
+        if scanTargetMode == "video_3dgs" {
+            let currentPosition = cameraPosition(frame.camera.transform)
+            let observedParallax = lastAcceptedCameraPosition.map {
+                Double(simd_distance(currentPosition, $0))
+            } ?? 0
+            let noveltyDecision = CaptureKeyframePolicy.videoNoveltyDecision(
+                hasAcceptedFrame: lastAcceptedCameraPosition != nil,
+                observedParallaxMeters: observedParallax,
+                currentSectorIndex: sectorIndex,
+                lastAcceptedSectorIndex: lastAcceptedSectorIndex,
+                baseParallaxMeters: minVideoParallaxMeters
+            )
+            switch noveltyDecision.disposition {
+            case .evaluateQuality:
+                break
+            case .waitForMovement where trackingStatus == "normal":
+                recordNoveltyWait(
+                    noveltyDecision,
+                    timestamp: frame.timestamp,
+                    sectorIndex: sectorIndex,
+                    repeatsSector: lastAcceptedSectorIndex == sectorIndex
+                )
+                updateGuidance()
+                return
+            case .waitForMovement:
+                break
+            case .invalidPose, .invalidPolicy:
+                recordKeyframePreflightIssue(noveltyDecision.disposition)
+                updateGuidance()
+                return
+            }
+        }
+        if !shouldRefreshLiveGuidance {
+            candidateDepthValidRatio = measureValidDepthRatio(sceneDepth.depthMap)
+            validDepthRatio = candidateDepthValidRatio
+        }
         let frameQuality = estimateFrameQuality(from: frame)
         let keyframeDecision = evaluateKeyframeCandidate(
             depthValidRatio: candidateDepthValidRatio,

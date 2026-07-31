@@ -26,6 +26,7 @@
 		100000000000000000000117 /* LivePairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000021 /* LivePairingView.swift */; };
 		100000000000000000000118 /* LiveCaptureSenderBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000022 /* LiveCaptureSenderBridge.swift */; };
 		100000000000000000000119 /* LiveCaptureJournal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000023 /* LiveCaptureJournal.swift */; };
+		100000000000000000000120 /* CaptureKeyframePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000024 /* CaptureKeyframePolicy.swift */; };
 		200000000000000000000101 /* LiveAuthContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000014 /* LiveAuthContract.swift */; };
 		200000000000000000000102 /* LiveSenderQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000016 /* LiveSenderQueue.swift */; };
 		200000000000000000000103 /* LiveSenderAckBenchmarkCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* LiveSenderAckBenchmarkCore.swift */; };
@@ -67,6 +68,7 @@
 		100000000000000000000021 /* LivePairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePairingView.swift; sourceTree = "<group>"; };
 		100000000000000000000022 /* LiveCaptureSenderBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCaptureSenderBridge.swift; sourceTree = "<group>"; };
 		100000000000000000000023 /* LiveCaptureJournal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCaptureJournal.swift; sourceTree = "<group>"; };
+		100000000000000000000024 /* CaptureKeyframePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureKeyframePolicy.swift; sourceTree = "<group>"; };
 		200000000000000000000001 /* CaptureSplatAckBenchmarks.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CaptureSplatAckBenchmarks.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		200000000000000000000002 /* LiveSenderAckBenchmarkCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSenderAckBenchmarkCore.swift; sourceTree = "<group>"; };
 		200000000000000000000003 /* LiveSenderAckBenchmarkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSenderAckBenchmarkTests.swift; sourceTree = "<group>"; };
@@ -137,6 +139,7 @@
 				100000000000000000000004 /* CaptureModels.swift */,
 				100000000000000000000005 /* NPYWriter.swift */,
 				100000000000000000000006 /* CaptureController.swift */,
+				100000000000000000000024 /* CaptureKeyframePolicy.swift */,
 				100000000000000000000009 /* CaptureVideoRecorder.swift */,
 				100000000000000000000013 /* CaptureLibrary.swift */,
 				100000000000000000000014 /* LiveAuthContract.swift */,
@@ -298,6 +301,7 @@
 				100000000000000000000104 /* CaptureModels.swift in Sources */,
 				100000000000000000000105 /* NPYWriter.swift in Sources */,
 				100000000000000000000106 /* CaptureController.swift in Sources */,
+				100000000000000000000120 /* CaptureKeyframePolicy.swift in Sources */,
 				100000000000000000000107 /* CaptureVideoRecorder.swift in Sources */,
 				100000000000000000000109 /* CaptureLibrary.swift in Sources */,
 				100000000000000000000110 /* LiveAuthContract.swift in Sources */,

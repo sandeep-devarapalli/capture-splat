@@ -56,7 +56,7 @@ scripts/setup_vksplat.sh external/vksplat
 # scripts/setup_gsplat.sh external/gsplat
 ```
 
-Open `apps/ios/CaptureSplat/CaptureSplat.xcodeproj` in Xcode, set your signing team, run on a physical iPhone, choose **Video 3DGS**, record a slow overlapping scan, and export the capture folder to your computer.
+Open `apps/ios/CaptureSplat/CaptureSplat.xcodeproj` in Xcode, set your signing team, run on a physical iPhone, choose **Video 3DGS**, side-step 7-10 cm and briefly hold for each accepted-frame haptic, then export the capture folder to your computer.
 
 Resolve the capture intent into a host-side processing recipe before starting
 SfM or training:
