@@ -64,6 +64,11 @@ struct ContentView: View {
     @State private var captureLibrary: [CaptureLibraryItem] = []
     @State private var selectedCaptureID: String?
     @State private var reviewCaptureID: String?
+    private let liveSender: LiveCaptureSenderBridge
+
+    init(liveSender: LiveCaptureSenderBridge) {
+        self.liveSender = liveSender
+    }
 
     var body: some View {
         ZStack {
@@ -95,6 +100,12 @@ struct ContentView: View {
         }
         .task {
             await livePairing.restore()
+            liveSender.setPairedDesktopID(
+                livePairing.snapshot.hasCurrentPairing
+                    ? livePairing.snapshot.desktopID
+                    : nil
+            )
+            liveSender.setForeground(scenePhase == .active)
             capture.prepareSensors()
             capture.setScanTargetMode(scanMode.controllerTargetMode)
             capture.setSpatialGuidanceVisible(viewMode == .guidance)
@@ -117,11 +128,17 @@ struct ContentView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
+            liveSender.setForeground(phase == .active)
             if phase == .active {
                 refreshCaptureLibrary()
             } else if phase == .background {
                 livePairing.handleBackgrounding()
             }
+        }
+        .onChange(of: livePairing.snapshot.hasCurrentPairing) { _, active in
+            liveSender.setPairedDesktopID(
+                active ? livePairing.snapshot.desktopID : nil
+            )
         }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
@@ -130,7 +147,10 @@ struct ContentView: View {
             case .camera:
                 cameraSettingsSheet
             case .livePairing:
-                LivePairingView(coordinator: livePairing)
+                LivePairingView(
+                    coordinator: livePairing,
+                    liveSender: liveSender
+                )
             case .review:
                 pointCloudReviewSheet
             case .roomPlan:

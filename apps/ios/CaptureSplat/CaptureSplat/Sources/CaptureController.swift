@@ -253,6 +253,8 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var coverageNavigationText = "Target sector will appear while scanning."
     @Published var scanTargetMode = "video_3dgs"
     @Published var isCaptureLockEnabled = true
+    private weak var liveSenderEventSink: (any LiveCaptureSenderEventSink)?
+    private var liveSenderCaptureActive = false
     private let videoRecorder = CaptureVideoRecorder()
     private var planeAnchors: [UUID: ARPlaneAnchor] = [:]
     private var meshAnchors: [UUID: ARMeshAnchor] = [:]
@@ -278,6 +280,10 @@ final class CaptureController: NSObject, ObservableObject {
     @Published var roomPlanReportFile: URL?
     @Published var roomPlanSemanticsFile: URL?
     @Published var isSpatialGuidanceVisible = true
+
+    func setLiveSenderEventSink(_ sink: any LiveCaptureSenderEventSink) {
+        liveSenderEventSink = sink
+    }
     @Published private(set) var spatialGuidanceMode = "pose_only"
     @Published private(set) var spatialGuidanceStatus = "RGB tracking"
     @Published private(set) var spatialGuidanceFaceBudget = 0
@@ -959,6 +965,12 @@ final class CaptureController: NSObject, ObservableObject {
             depthRateSamples.removeAll()
             imuRateSamples.removeAll()
             gpsRateSamples.removeAll()
+            let liveStart = LiveCaptureSessionStartedEvent(
+                captureRoot: directory,
+                createdAt: Date()
+            )
+            liveSenderCaptureActive =
+                liveSenderEventSink?.captureStarted(liveStart) == .accepted
             isRecording = true
             lastSpatialGuidancePolicy = ""
             applySpatialGuidanceThermalPolicy(ProcessInfo.processInfo.thermalState)
@@ -1054,6 +1066,33 @@ final class CaptureController: NSObject, ObservableObject {
         writeSessionSidecars()
         do {
             let directory = try writeCaptureManifest()
+            if liveSenderCaptureActive {
+                do {
+                    let manifest = try LiveCaptureFileEvidence.reference(
+                        captureRoot: directory,
+                        relativePath: "capture.json",
+                        mediaType: "application/json"
+                    )
+                    let liveFinalization = LiveCaptureFinalizedEvent(
+                        captureRoot: directory,
+                        finalSequenceID: frames.count,
+                        manifestRelativePath: manifest.relativePath,
+                        manifestSizeBytes: manifest.sizeBytes,
+                        manifestSHA256: manifest.sha256
+                    )
+                    try LiveCaptureJournal.commitFinalization(liveFinalization)
+                    liveSenderEventSink?.captureFinalized(liveFinalization)
+                } catch {
+                    logger.error(
+                        "Live finalization journal failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                    appendSessionEvent("live_journal_finalization_failed", details: [
+                        "final_sequence_id": frames.count,
+                        "error": error.localizedDescription,
+                    ])
+                }
+                liveSenderCaptureActive = false
+            }
             appendSessionEvent("finalization_completed", details: [
                 "video_status": videoResult.status,
                 "mesh_status": meshResult.status,
@@ -1076,6 +1115,13 @@ final class CaptureController: NSObject, ObservableObject {
             completionHaptic.notificationOccurred(videoResult.succeeded ? .success : .warning)
             capturePackageState = .ready
         } catch {
+            if liveSenderCaptureActive, frames.isEmpty,
+               let directory = currentSessionDirectory {
+                liveSenderEventSink?.captureAborted(
+                    LiveCaptureAbortedEvent(captureRoot: directory)
+                )
+            }
+            liveSenderCaptureActive = false
             appendSessionEvent("finalization_failed", details: ["error": error.localizedDescription])
             writeSessionSidecars()
             writeFinalizationReport(
@@ -5119,7 +5165,48 @@ extension CaptureController: ARSessionDelegate {
         let trackingState = trackingStateText(frame.camera.trackingState)
         let timestamp = frame.timestamp
         let imageResolution = frame.camera.imageResolution
+        let featurePointCount = latestFeaturePointCount
+        let shouldJournalLiveFrame = liveSenderCaptureActive
         activeResolution = Resolution(w: Int(imageResolution.width), h: Int(imageResolution.height))
+        let liveFrameEvent = LiveCaptureFrameCommittedEvent(
+            captureRoot: directory,
+            sequenceID: index,
+            timestamp: timestamp,
+            sourceRelativePath: "rgb/\(rgbName)",
+            sourceWidth: Int(imageResolution.width),
+            sourceHeight: Int(imageResolution.height),
+            depthRelativePath: "depth/\(depthName)",
+            depthWidth: intrinsics.w,
+            depthHeight: intrinsics.h,
+            confidenceRelativePath: confidenceBuffer == nil
+                ? nil
+                : "confidence/\(confidenceName)",
+            cameraToWorld: transform.rows
+                .flatMap { $0 }
+                .map(Double.init),
+            flX: Double(intrinsics.flX),
+            flY: Double(intrinsics.flY),
+            cx: Double(intrinsics.cx),
+            cy: Double(intrinsics.cy),
+            trackingState: trackingState,
+            quality: LiveCaptureFrameQualityEvent(
+                reason: keyframeDecision.reason,
+                score: keyframeDecision.score,
+                blurScore: keyframeDecision.blurScore,
+                exposureMean: keyframeDecision.exposureMean,
+                exposureDelta: keyframeDecision.exposureDelta,
+                clippedHighlightFraction: keyframeDecision.clippedHighlightFraction,
+                nearClippedHighlightFraction: keyframeDecision.nearClippedHighlightFraction,
+                clippedShadowFraction: keyframeDecision.clippedShadowFraction,
+                featureGridCoverage: keyframeDecision.featureGridCoverage,
+                parallaxMeters: keyframeDecision.parallaxMeters,
+                angularVelocityDegPerSec: keyframeDecision.angularVelocityDegPerSec,
+                translationSpeedMetersPerSec: keyframeDecision.translationSpeedMetersPerSec,
+                colmapOverlapScore: keyframeDecision.colmapOverlapScore,
+                validDepthRatio: candidateDepthValidRatio,
+                featurePointCount: featurePointCount
+            )
+        )
         let objectMatteRecord = makeObjectMatteFrameRecord(
             frame: frame,
             depthMap: depthBuffer,
@@ -5136,7 +5223,6 @@ extension CaptureController: ARSessionDelegate {
         writeQueue.async { [weak self] in
             guard let self else { return }
             var writeError: Error?
-            var previewStatus: (count: Int, url: URL?)?
             autoreleasepool {
                 do {
                     try self.writeJPEG(from: rgbBuffer, to: rgbURL)
@@ -5144,18 +5230,6 @@ extension CaptureController: ARSessionDelegate {
                     if let confidenceBuffer {
                         try self.writeConfidence(confidenceBuffer, to: confidenceURL)
                     }
-                    let previewSamples = self.makePointCloudPreviewSamples(
-                        depthMap: depthBuffer,
-                        rgbBuffer: rgbBuffer,
-                        transform: transform,
-                        intrinsics: intrinsics,
-                        frameIndex: index
-                    )
-                    previewStatus = self.appendPointCloudPreviewSamples(
-                        previewSamples,
-                        directory: directory,
-                        frameIndex: index
-                    )
                 } catch {
                     writeError = error
                 }
@@ -5167,6 +5241,16 @@ extension CaptureController: ARSessionDelegate {
                     self.statusText = "Frame write failed: \(writeError.localizedDescription)"
                 }
                 return
+            }
+
+            var journalError: Error?
+            if shouldJournalLiveFrame {
+                do {
+                    try LiveCaptureJournal.commitAcceptedFrame(liveFrameEvent)
+                    self.liveSenderEventSink?.frameCommitted(liveFrameEvent)
+                } catch {
+                    journalError = error
+                }
             }
             DispatchQueue.main.async {
                 self.frames.append(CapturedFrame(
@@ -5193,16 +5277,43 @@ extension CaptureController: ARSessionDelegate {
                         translationSpeedMetersPerSec: keyframeDecision.translationSpeedMetersPerSec,
                         colmapOverlapScore: keyframeDecision.colmapOverlapScore,
                         validDepthRatio: candidateDepthValidRatio,
-                        featurePointCount: self.latestFeaturePointCount
+                        featurePointCount: featurePointCount
                     ),
                     personMask: self.nearestPersonMaskPath(to: timestamp)
                 ))
+                if let journalError {
+                    self.liveSenderCaptureActive = false
+                    self.logger.error(
+                        "Live accepted-frame journal failed for sequence \(index, privacy: .public): \(journalError.localizedDescription, privacy: .public)"
+                    )
+                    self.appendSessionEvent(
+                        "live_journal_frame_failed",
+                        arTimestamp: timestamp,
+                        details: [
+                            "sequence_id": index,
+                            "error": journalError.localizedDescription,
+                        ]
+                    )
+                }
+            }
+
+            let previewSamples = self.makePointCloudPreviewSamples(
+                depthMap: depthBuffer,
+                rgbBuffer: rgbBuffer,
+                transform: transform,
+                intrinsics: intrinsics,
+                frameIndex: index
+            )
+            let previewStatus = self.appendPointCloudPreviewSamples(
+                previewSamples,
+                directory: directory,
+                frameIndex: index
+            )
+            DispatchQueue.main.async {
                 self.rgbFrames += 1
                 self.depthFrames += 1
-                if let previewStatus {
-                    self.pointCloudPreviewPointCount = previewStatus.count
-                    self.pointCloudPreviewFile = previewStatus.url
-                }
+                self.pointCloudPreviewPointCount = previewStatus.count
+                self.pointCloudPreviewFile = previewStatus.url
                 self.rgbRate = self.recordRateSample(&self.rgbRateSamples, at: timestamp)
                 self.depthRate = self.recordRateSample(&self.depthRateSamples, at: timestamp)
                 self.validDepthRatio = candidateDepthValidRatio

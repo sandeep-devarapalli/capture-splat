@@ -506,6 +506,207 @@ public enum LiveSenderQueueError: Error, Equatable, LocalizedError, Sendable {
     }
 }
 
+struct LiveConfinedFileSnapshot: Sendable {
+    let url: URL
+    let device: UInt64
+    let inode: UInt64
+    let size: Int64
+    let modifiedSeconds: Int
+    let modifiedNanoseconds: Int
+    let sha256: String?
+}
+
+enum LiveBoundedRegularFile {
+    static func read(
+        url: URL,
+        maximumBytes: Int,
+        field: String
+    ) throws -> Data {
+        let descriptor = Darwin.open(
+            url.path,
+            O_RDONLY | O_NOFOLLOW | O_CLOEXEC
+        )
+        guard descriptor >= 0 else {
+            throw LiveSenderQueueError.stateCorrupt(
+                "\(field) is missing or unsafe"
+            )
+        }
+        let handle = FileHandle(
+            fileDescriptor: descriptor,
+            closeOnDealloc: true
+        )
+        var before = stat()
+        guard Darwin.fstat(descriptor, &before) == 0,
+              before.st_mode & S_IFMT == S_IFREG,
+              before.st_size > 0,
+              before.st_size <= off_t(maximumBytes) else {
+            try? handle.close()
+            throw LiveSenderQueueError.stateCorrupt(
+                "\(field) is not a bounded regular file"
+            )
+        }
+        do {
+            let data = try handle.readToEnd() ?? Data()
+            var after = stat()
+            guard Darwin.fstat(descriptor, &after) == 0,
+                  before.st_dev == after.st_dev,
+                  before.st_ino == after.st_ino,
+                  before.st_size == after.st_size,
+                  before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
+                  before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
+                  data.count == Int(after.st_size) else {
+                try? handle.close()
+                throw LiveSenderQueueError.stateCorrupt(
+                    "\(field) changed while being read"
+                )
+            }
+            try handle.close()
+            return data
+        } catch let error as LiveSenderQueueError {
+            throw error
+        } catch {
+            try? handle.close()
+            throw LiveSenderQueueError.stateCorrupt(
+                "\(field) could not be read"
+            )
+        }
+    }
+}
+
+enum LiveConfinedFile {
+    static func inspect(
+        captureRoot: URL,
+        relativePath: String,
+        calculateSHA256: Bool
+    ) throws -> LiveConfinedFileSnapshot {
+        try LiveSenderValidation.safeRelativePath(relativePath)
+        let root = captureRoot.standardizedFileURL
+        var directoryFD = Darwin.open(
+            root.path,
+            O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+        )
+        guard directoryFD >= 0 else {
+            throw LiveSenderQueueError.sourceOutsideCaptureRoot(relativePath)
+        }
+        defer {
+            if directoryFD >= 0 {
+                Darwin.close(directoryFD)
+            }
+        }
+
+        let components = relativePath.split(
+            separator: "/",
+            omittingEmptySubsequences: false
+        ).map(String.init)
+        guard let fileName = components.last else {
+            throw LiveSenderQueueError.unsafeRelativePath(relativePath)
+        }
+        for component in components.dropLast() {
+            let nextFD = component.withCString {
+                Darwin.openat(
+                    directoryFD,
+                    $0,
+                    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+                )
+            }
+            guard nextFD >= 0 else {
+                throw fileOpenError(relativePath)
+            }
+            Darwin.close(directoryFD)
+            directoryFD = nextFD
+        }
+
+        let fileFD = fileName.withCString {
+            Darwin.openat(
+                directoryFD,
+                $0,
+                O_RDONLY | O_NOFOLLOW | O_CLOEXEC
+            )
+        }
+        guard fileFD >= 0 else {
+            throw fileOpenError(relativePath)
+        }
+        defer { Darwin.close(fileFD) }
+
+        let before = try status(
+            fileDescriptor: fileFD,
+            relativePath: relativePath
+        )
+        let digest: String?
+        if calculateSHA256 {
+            guard Darwin.lseek(fileFD, 0, SEEK_SET) >= 0 else {
+                throw LiveSenderQueueError.sourceMissing(relativePath)
+            }
+            let handle = FileHandle(
+                fileDescriptor: fileFD,
+                closeOnDealloc: false
+            )
+            var hasher = SHA256()
+            do {
+                while true {
+                    try Task.checkCancellation()
+                    guard let chunk = try handle.read(
+                        upToCount: 1024 * 1024
+                    ), !chunk.isEmpty else {
+                        break
+                    }
+                    hasher.update(data: chunk)
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw LiveSenderQueueError.sourceMissing(relativePath)
+            }
+            digest = "sha256:" + hasher.finalize().hex
+        } else {
+            digest = nil
+        }
+        let after = try status(
+            fileDescriptor: fileFD,
+            relativePath: relativePath
+        )
+        guard before.st_dev == after.st_dev,
+              before.st_ino == after.st_ino,
+              before.st_size == after.st_size,
+              before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
+              before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec else {
+            throw LiveSenderQueueError.sourceChecksumMismatch(relativePath)
+        }
+        return LiveConfinedFileSnapshot(
+            url: root.appendingPathComponent(relativePath).standardizedFileURL,
+            device: UInt64(after.st_dev),
+            inode: UInt64(after.st_ino),
+            size: Int64(after.st_size),
+            modifiedSeconds: after.st_mtimespec.tv_sec,
+            modifiedNanoseconds: after.st_mtimespec.tv_nsec,
+            sha256: digest
+        )
+    }
+
+    private static func status(
+        fileDescriptor: Int32,
+        relativePath: String
+    ) throws -> stat {
+        var value = stat()
+        guard Darwin.fstat(fileDescriptor, &value) == 0 else {
+            throw LiveSenderQueueError.sourceMissing(relativePath)
+        }
+        guard value.st_mode & S_IFMT == S_IFREG else {
+            throw LiveSenderQueueError.sourceNotRegularFile(relativePath)
+        }
+        return value
+    }
+
+    private static func fileOpenError(
+        _ relativePath: String
+    ) -> LiveSenderQueueError {
+        if errno == ELOOP || errno == EMLINK {
+            return .sourceSymlink(relativePath)
+        }
+        return .sourceMissing(relativePath)
+    }
+}
+
 public actor LiveSenderQueue {
     private static let stateSchema = "capture_splat.live_sender_queue_state.v0.1"
     private static let envelopeSchema = "capture_splat.live_sender_queue_envelope.v0.1"
@@ -513,7 +714,6 @@ public actor LiveSenderQueue {
     private static let maximumEnvelopeBytes = 64 * 1024 * 1024
 
     private let captureRoot: URL
-    private let resolvedCaptureRoot: URL
     private let stateURL: URL
     private let limits: LiveSenderQueueLimits
     private let fileManager: FileManager
@@ -548,7 +748,6 @@ public actor LiveSenderQueue {
         }
 
         self.captureRoot = standardizedRoot
-        self.resolvedCaptureRoot = resolvedRoot
         self.stateURL = standardizedState
         self.limits = limits
         self.fileManager = fileManager
@@ -908,24 +1107,18 @@ public actor LiveSenderQueue {
             sha256: reference.sha256,
             mediaType: reference.mediaType
         )
-        let url = try confinedURL(for: reference.relativePath)
-        var info = stat()
-        guard Darwin.lstat(url.path, &info) == 0 else {
-            throw LiveSenderQueueError.sourceMissing(reference.relativePath)
-        }
-        guard info.st_mode & S_IFMT != S_IFLNK else {
-            throw LiveSenderQueueError.sourceSymlink(reference.relativePath)
-        }
-        guard info.st_mode & S_IFMT == S_IFREG else {
-            throw LiveSenderQueueError.sourceNotRegularFile(reference.relativePath)
-        }
-        guard info.st_size == reference.sizeBytes else {
+        let evidence = try LiveConfinedFile.inspect(
+            captureRoot: captureRoot,
+            relativePath: reference.relativePath,
+            calculateSHA256: true
+        )
+        guard evidence.size == reference.sizeBytes else {
             throw LiveSenderQueueError.sourceSizeMismatch(reference.relativePath)
         }
-        guard try Self.sha256(of: url) == reference.sha256 else {
+        guard evidence.sha256 == reference.sha256 else {
             throw LiveSenderQueueError.sourceChecksumMismatch(reference.relativePath)
         }
-        return url
+        return evidence.url
     }
 
     private func verify(_ frame: LiveSenderFrameReference) throws {
@@ -1151,28 +1344,6 @@ public actor LiveSenderQueue {
             )
         }
         return data
-    }
-
-    private func confinedURL(for relativePath: String) throws -> URL {
-        try LiveSenderValidation.safeRelativePath(relativePath)
-        var componentURL = captureRoot
-        for component in relativePath.split(separator: "/", omittingEmptySubsequences: false) {
-            componentURL.appendPathComponent(String(component), isDirectory: false)
-            var info = stat()
-            if Darwin.lstat(componentURL.path, &info) == 0, info.st_mode & S_IFMT == S_IFLNK {
-                throw LiveSenderQueueError.sourceSymlink(relativePath)
-            }
-        }
-
-        let standardized = captureRoot.appendingPathComponent(relativePath).standardizedFileURL
-        let resolved = standardized.resolvingSymlinksInPath()
-        let rootPrefix = resolvedCaptureRoot.path.hasSuffix("/")
-            ? resolvedCaptureRoot.path
-            : resolvedCaptureRoot.path + "/"
-        guard resolved.path.hasPrefix(rootPrefix) else {
-            throw LiveSenderQueueError.sourceOutsideCaptureRoot(relativePath)
-        }
-        return standardized
     }
 
     private func validate(_ session: LiveSenderSessionReference) throws {
@@ -1472,7 +1643,11 @@ public actor LiveSenderQueue {
     private func loadState() throws -> PersistentState {
         let data: Data
         do {
-            data = try Data(contentsOf: stateURL, options: .mappedIfSafe)
+            data = try LiveBoundedRegularFile.read(
+                url: stateURL,
+                maximumBytes: Self.maximumEnvelopeBytes,
+                field: "sender queue state"
+            )
         } catch {
             throw LiveSenderQueueError.stateCorrupt("unable to read sender queue state")
         }
@@ -1555,27 +1730,6 @@ public actor LiveSenderQueue {
 
     private static func sha256(_ data: Data) -> String {
         "sha256:" + SHA256.hash(data: data).hex
-    }
-
-    private static func sha256(of url: URL) throws -> String {
-        let handle: FileHandle
-        do {
-            handle = try FileHandle(forReadingFrom: url)
-        } catch {
-            throw LiveSenderQueueError.sourceMissing(url.lastPathComponent)
-        }
-        defer {
-            try? handle.close()
-        }
-        var hasher = SHA256()
-        do {
-            while let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty {
-                hasher.update(data: chunk)
-            }
-        } catch {
-            throw LiveSenderQueueError.sourceMissing(url.lastPathComponent)
-        }
-        return "sha256:" + hasher.finalize().hex
     }
 
     private static func atomicWrite(_ data: Data, to destination: URL, fileManager: FileManager) throws {
@@ -1879,7 +2033,7 @@ private struct LiveSenderFrameMetadataEvidence: Decodable {
     }
 }
 
-private enum LiveSenderValidation {
+enum LiveSenderValidation {
     static let maximumSequenceID = 99_999_999
 
     static func isRFC3339DateTime(_ value: String) -> Bool {
