@@ -159,6 +159,33 @@ def test_pairing_and_environment_changes_cancel_or_wake_the_single_drive(
     }
 
 
+@pytest.mark.parametrize(
+    "scenario",
+    ["thermal-deferral", "critical-thermal-deferral"],
+)
+def test_thermal_pause_defers_live_preparation_until_nominal(
+    live_capture_sender_bridge_probe: tuple[Path, Path],
+    tmp_path: Path,
+    scenario: str,
+) -> None:
+    result = _run(
+        live_capture_sender_bridge_probe,
+        scenario,
+        tmp_path,
+    )
+
+    assert result == {
+        "accepted_callbacks_deferred": True,
+        "binding_ready_under_thermal_pause": True,
+        "journal_durable_during_pause": True,
+        "live_preparation_deferred": True,
+        "nominal_backfill_finalized": True,
+        "restart_deferred_journal_backfill": True,
+        "start_disposition": "accepted",
+        "transfer_pointer_cleared_after_resume": True,
+    }
+
+
 def test_pending_capture_is_promoted_after_a_prebinding_crash(
     live_capture_sender_bridge_probe: tuple[Path, Path],
     tmp_path: Path,

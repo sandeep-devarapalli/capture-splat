@@ -134,6 +134,13 @@ def test_pairing_wiring_stays_outside_the_capture_loop() -> None:
     assert "Abandon Pending Live Transfer" in pairing_view
     assert "try await liveSender.abandonPendingTransfer()" in pairing_view
     assert "never deleted by live transfer recovery" in pairing_view
+    assert "Open Projects for Manual Export" in pairing_view
+    assert '"clearing the durable live transfer.' in pairing_view
+    assert "onOpenProjects()" in pairing_view
+
+    manual_export = pairing_view.index("Open Projects for Manual Export")
+    abandon = pairing_view.index("Abandon Pending Live Transfer")
+    assert manual_export < abandon
 
     app = (source_root / "CaptureSplatApp.swift").read_text(encoding="utf-8")
     assert "hasPendingLiveTransfer: LivePairingCoordinator" in app

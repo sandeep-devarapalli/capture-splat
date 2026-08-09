@@ -50,6 +50,13 @@ returning to foreground, regaining network, or leaving serious/critical thermal
 state wakes the same bounded worker; receiver-retry backoff continues without a
 new frame event while those gates remain open.
 
+At serious or critical thermal pressure, the bridge also defers live frame
+hashing, metadata construction, and queue admission. The accepted-frame journal
+is already durable, so cooling or relaunch can backfill the exact same evidence
+before resume. Local capture and `capture.json` finalization remain independent;
+after finalization the operator may manually export from Projects without
+clearing the durable live transfer.
+
 The capture callback runs only after RGB, depth, and enabled-confidence files
 are atomically written and the immutable accepted-frame journal record is
 durable. It returns without waiting for checksum work, networking, ACKs,

@@ -6,6 +6,7 @@ struct LivePairingView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var coordinator: LivePairingCoordinator
     let liveSender: LiveCaptureSenderBridge
+    let onOpenProjects: () -> Void
     @State private var isScanning = false
     @State private var pastedInvitation = ""
     @State private var scannerError: String?
@@ -295,11 +296,20 @@ struct LivePairingView: View {
                 .foregroundStyle(.orange)
             Text(
                 "Capture Splat will resume this transfer only with its paired Mac. "
-                    + "If the capture cannot be finalized, you can abandon publication "
-                    + "without deleting any source capture evidence."
+                    + "You can manually export the local capture from Projects without "
+                    + "clearing the durable live transfer. If the capture cannot be finalized, "
+                    + "you can abandon publication without deleting source evidence."
             )
             .font(.subheadline)
             .foregroundStyle(.secondary)
+            Button {
+                onOpenProjects()
+                dismiss()
+            } label: {
+                Label("Open Projects for Manual Export", systemImage: "square.and.arrow.up")
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("live-sender-open-projects")
             if let transferRecoveryError {
                 Text(transferRecoveryError)
                     .font(.caption)

@@ -149,7 +149,11 @@ struct ContentView: View {
             case .livePairing:
                 LivePairingView(
                     coordinator: livePairing,
-                    liveSender: liveSender
+                    liveSender: liveSender,
+                    onOpenProjects: {
+                        selectedTab = .projects
+                        refreshCaptureLibrary()
+                    }
                 )
             case .review:
                 pointCloudReviewSheet
@@ -195,6 +199,10 @@ struct ContentView: View {
     private var capturePanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             capturePanelHeader
+
+            if showsThermalLocalExportFallback {
+                liveThermalFallbackCard
+            }
 
             if isCapturePanelExpanded {
                 ScrollView {
@@ -244,6 +252,67 @@ struct ContentView: View {
         .padding(10)
         .frame(maxWidth: 560)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var showsThermalLocalExportFallback: Bool {
+        let thermalPressure = capture.thermalStateText == "serious"
+            || capture.thermalStateText == "critical"
+        return livePairing.snapshot.hasCurrentPairing && thermalPressure
+            && (capture.isRecording || capture.isFinalizing
+                || capture.currentSessionDirectory != nil)
+    }
+
+    private var liveThermalFallbackCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Thermal local-export mode", systemImage: "thermometer.sun")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.orange)
+
+            Text(thermalLocalExportMessage)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if capture.isFinalizing {
+                ProgressView("Finalizing local capture")
+                    .font(.caption2)
+            } else if !capture.isRecording,
+                      let directory = capture.currentSessionDirectory,
+                      capture.isCapturePackageReady
+                        || capture.hasRecoverablePartialCapture {
+                HStack(spacing: 8) {
+                    ShareLink(item: directory) {
+                        Label(
+                            capture.isCapturePackageReady
+                                ? "Manual Export"
+                                : "Share Partial",
+                            systemImage: "square.and.arrow.up"
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Projects") {
+                        selectedTab = .projects
+                        refreshCaptureLibrary()
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        .padding(10)
+        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityIdentifier("thermal-local-export-fallback")
+    }
+
+    private var thermalLocalExportMessage: String {
+        if capture.isRecording {
+            return "Any active live sending and preparation are paused. Stop to finalize locally, then export manually. Any pending transfer remains available for later resume when conditions allow."
+        }
+        if capture.isFinalizing {
+            return "Network sending remains paused while the local capture finalizes."
+        }
+        return "The local capture is ready to share. Manual export does not clear any pending live transfer; it remains available for later resume when conditions allow."
     }
 
     private var capturePanelHeader: some View {
