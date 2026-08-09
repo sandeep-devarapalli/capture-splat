@@ -12,6 +12,7 @@ from capture_splat.scene_transform import (
     disambiguate_flip_with_ply,
     estimate_package_orientation_transform,
     load_camera_to_worlds,
+    load_named_camera_to_worlds,
     load_ply_positions,
     metric_package_status,
     resolve_normalization_policy,
@@ -63,6 +64,29 @@ def test_load_camera_to_worlds_inverts_w2c(tmp_path: Path) -> None:
 
     assert c2w.shape == (1, 4, 4)
     assert np.allclose(c2w[0][:3, 3], [-1, -2, -3])
+
+
+def test_camera_pose_loaders_honor_blank_points_and_comments(tmp_path: Path) -> None:
+    sparse = tmp_path / "0"
+    sparse.mkdir()
+    (sparse / "images.txt").write_text(
+        "# images\n"
+        "1 1 0 0 0 1 2 3 1 first.jpg\n"
+        "# blank POINTS2D row follows\n"
+        "\n"
+        "# next image\n"
+        "2 1 0 0 0 4 5 6 1 second.jpg\n"
+        "100.5 200.5 1 300.5 400.5 2 500.5 600.5 3 700.5 800.5 4\n",
+        encoding="utf-8",
+    )
+
+    c2w = load_camera_to_worlds(sparse)
+    named = load_named_camera_to_worlds(sparse)
+
+    assert c2w.shape == (2, 4, 4)
+    assert set(named) == {"first.jpg", "second.jpg"}
+    assert np.allclose(named["first.jpg"][:3, 3], [-1, -2, -3])
+    assert np.allclose(named["second.jpg"][:3, 3], [-4, -5, -6])
 
 
 def test_similarity_from_cameras_normalizes_median_distance() -> None:
@@ -125,7 +149,10 @@ def test_package_orientation_transform_fits_matched_camera_centers(tmp_path: Pat
         lines = ["# images"]
         for index, center in enumerate(centers, start=1):
             tx, ty, tz = (-np.asarray(center)).tolist()
-            lines.extend((f"{index} 1 0 0 0 {tx} {ty} {tz} 1 {index:06d}.jpg", ""))
+            lines.extend((
+                f"{index} 1 0 0 0 {tx} {ty} {tz} 1 {index:06d}.jpg",
+                f"100.5 200.5 {index} 300.5 400.5 {index} 500.5 600.5 {index} 700.5 800.5 {index}",
+            ))
         (path / "images.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     write_centers(before, source_centers)

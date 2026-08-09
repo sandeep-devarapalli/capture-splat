@@ -5,7 +5,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import numpy as np
 
@@ -120,21 +120,36 @@ def quaternion_wxyz_to_matrix(qw: float, qx: float, qy: float, qz: float) -> np.
     ])
 
 
+def _colmap_image_headers(images_txt: Path) -> Iterator[tuple[list[float], str]]:
+    expect_header = True
+    for line in images_txt.read_text(encoding="utf-8").splitlines():
+        if line.startswith("#"):
+            continue
+        if not expect_header:
+            expect_header = True
+            continue
+        if not line.strip():
+            continue
+        expect_header = False
+        parts = line.split()
+        if len(parts) < 10:
+            continue
+        try:
+            int(parts[0])
+            pose = [float(value) for value in parts[1:8]]
+            int(parts[8])
+        except ValueError:
+            continue
+        yield pose, parts[9]
+
+
 def load_camera_to_worlds(sparse_dir: Path) -> np.ndarray:
     images_txt = sparse_dir / "images.txt"
     if not images_txt.exists():
         raise FileNotFoundError(f"images.txt missing: {images_txt}")
     poses = []
-    for line in images_txt.read_text(encoding="utf-8").splitlines():
-        parts = line.split()
-        if len(parts) < 10 or line.startswith("#"):
-            continue
-        try:
-            float(parts[9])
-            continue
-        except ValueError:
-            pass
-        qw, qx, qy, qz, tx, ty, tz = (float(value) for value in parts[1:8])
+    for pose, _name in _colmap_image_headers(images_txt):
+        qw, qx, qy, qz, tx, ty, tz = pose
         rotation_w2c = quaternion_wxyz_to_matrix(qw, qx, qy, qz)
         c2w = np.eye(4)
         c2w[:3, :3] = rotation_w2c.T
@@ -150,21 +165,13 @@ def load_named_camera_to_worlds(sparse_dir: Path) -> dict[str, np.ndarray]:
     if not images_txt.exists():
         raise FileNotFoundError(f"images.txt missing: {images_txt}")
     poses: dict[str, np.ndarray] = {}
-    for line in images_txt.read_text(encoding="utf-8").splitlines():
-        parts = line.split()
-        if len(parts) < 10 or line.startswith("#"):
-            continue
-        try:
-            int(parts[0])
-            int(parts[8])
-            qw, qx, qy, qz, tx, ty, tz = (float(value) for value in parts[1:8])
-        except ValueError:
-            continue
+    for pose, name in _colmap_image_headers(images_txt):
+        qw, qx, qy, qz, tx, ty, tz = pose
         rotation_w2c = quaternion_wxyz_to_matrix(qw, qx, qy, qz)
         c2w = np.eye(4)
         c2w[:3, :3] = rotation_w2c.T
         c2w[:3, 3] = -rotation_w2c.T @ np.array([tx, ty, tz])
-        poses[parts[9]] = c2w
+        poses[name] = c2w
     if not poses:
         raise ValueError(f"no registered camera poses in {images_txt}")
     return poses
