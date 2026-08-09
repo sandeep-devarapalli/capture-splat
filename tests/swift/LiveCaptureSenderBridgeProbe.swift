@@ -240,6 +240,8 @@ private actor SlidingWindowRequester: LiveAuthenticatedRequesting {
     private var contiguousCount = 0
     private var completedSequences: [Int] = []
     private var didFinalize = false
+    private var requestCount = 0
+    private var requestLog: [String] = []
 
     init(
         authorization: LiveSenderAuthorizationBinding,
@@ -263,6 +265,8 @@ private actor SlidingWindowRequester: LiveAuthenticatedRequesting {
         body: LiveAuthenticatedBody,
         now: Date
     ) async throws -> Data {
+        requestCount += 1
+        requestLog.append("\(method) \(path)")
         if path.hasSuffix("/finalize") {
             guard contiguousCount == finalSequenceID else {
                 throw LiveAuthenticatedRequestError.corruptBody(
@@ -321,6 +325,14 @@ private actor SlidingWindowRequester: LiveAuthenticatedRequesting {
 
     func finalized() -> Bool {
         didFinalize
+    }
+
+    func calls() -> Int {
+        requestCount
+    }
+
+    func requests() -> [String] {
+        requestLog
     }
 
     private func acknowledgement(
@@ -438,6 +450,10 @@ private enum LiveCaptureSenderBridgeProbe {
             try await tinyCapacity(root: root)
         case "current-pending-conflict":
             try await currentPendingConflict(root: root)
+        case "thermal-deferral":
+            try await thermalDeferral(root: root, thermalState: .serious)
+        case "critical-thermal-deferral":
+            try await thermalDeferral(root: root, thermalState: .critical)
         default:
             throw LiveAuthContractError.invalid("unknown probe scenario")
         }
@@ -1718,6 +1734,215 @@ private enum LiveCaptureSenderBridgeProbe {
                 symlinkClearedTargetPreserved,
         ])
         _ = bridge
+    }
+
+    private static func thermalDeferral(
+        root: URL,
+        thermalState: LiveSenderThermalState
+    ) async throws {
+        let documents = root.appendingPathComponent(
+            "Thermal/Documents",
+            isDirectory: true
+        )
+        let capture = documents.appendingPathComponent(
+            "capture-thermal",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: capture,
+            withIntermediateDirectories: true
+        )
+        let paths = try LiveApplicationSupportPaths(
+            root: root.appendingPathComponent(
+                "Thermal/Application Support/v0.1"
+            )
+        )
+        let authorization = try fixtureAuthorization()
+        let sessionID = try LiveSenderProgressiveSessionIdentity.sessionID(
+            sourceSessionSeedBase64URL:
+                "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        )
+        let requester = SlidingWindowRequester(
+            authorization: authorization,
+            sessionID: sessionID,
+            finalSequenceID: 1
+        )
+        let connector = SlidingWindowConnector(
+            context: connectionContext(authorization: authorization),
+            requester: requester
+        )
+        var firstBridge: LiveCaptureSenderBridge? = try LiveCaptureSenderBridge(
+            paths: paths,
+            documentsRoot: documents,
+            connector: connector,
+            random: FixedRandom(Data(0..<32)),
+            limits: try queueLimits(),
+            policy: try LiveSenderPolicy(
+                minimumAvailableStorageBytes: 0,
+                requiresForeground: false,
+                pausesAtSeriousThermalState: true
+            ),
+            retryPolicy: try LiveSenderRetryPolicy(),
+            monitorNetwork: false,
+            initialNetworkAvailable: true,
+            initialThermalState: thermalState
+        )
+        firstBridge!.setPairedDesktopID(authorization.desktopID)
+        let started = firstBridge!.captureStarted(
+            LiveCaptureSessionStartedEvent(
+                captureRoot: capture,
+                createdAt: try LiveAuthTime.parse(
+                    "2026-07-30T10:00:00.000Z"
+                )
+            )
+        )
+        let bindingStore = LiveCaptureSessionBindingStore(paths: paths)
+        let bindingReady = try await eventually {
+            let binding = try bindingStore.load(
+                desktopID: authorization.desktopID,
+                sessionID: sessionID
+            )
+            let pending = try bindingStore.loadPending(
+                documentsRoot: documents
+            )
+            let current = try bindingStore.loadCurrent()
+            return binding != nil
+                && current == binding
+                && pending == nil
+        }
+        guard let bindingDuringPause = try bindingStore.loadCurrent() else {
+            throw LiveSenderQueueError.sessionNotLoaded
+        }
+
+        let frame = try prepareFrameEvidence(capture: capture)
+        try LiveCaptureJournal.commitAcceptedFrame(frame)
+        let frameDisposition = firstBridge!.frameCommitted(frame)
+        _ = try write(
+            capture,
+            path: "capture.json",
+            data: Data("{\"schema\":\"capture_splat.capture.v0.1\"}".utf8)
+        )
+        let manifest = try LiveCaptureFileEvidence.reference(
+            captureRoot: capture,
+            relativePath: "capture.json",
+            mediaType: "application/json"
+        )
+        let finalization = LiveCaptureFinalizedEvent(
+            captureRoot: capture,
+            finalSequenceID: 1,
+            manifestRelativePath: "capture.json",
+            manifestSizeBytes: manifest.sizeBytes,
+            manifestSHA256: manifest.sha256
+        )
+        try LiveCaptureJournal.commitFinalization(finalization)
+        let finalizationDisposition = firstBridge!.captureFinalized(finalization)
+        let initialPausedSnapshot = try await queueSnapshot(
+            paths: paths,
+            documents: documents,
+            authorization: authorization,
+            sessionID: sessionID
+        )
+        let metadataURL = capture.appendingPathComponent(
+            "metadata/live/frames/00000001.json"
+        )
+        let journalFrames = try LiveCaptureJournal.loadAcceptedFrames(
+            captureRoot: capture
+        )
+        let journalFinalization = try LiveCaptureJournal.loadFinalization(
+            captureRoot: capture
+        )
+        let journalDurable =
+            journalFrames.count == 1
+            && journalFrames[0].sequenceID == frame.sequenceID
+            && journalFrames[0].sourceRelativePath
+                == frame.sourceRelativePath
+            && journalFinalization?.finalSequenceID
+                == finalization.finalSequenceID
+            && journalFinalization?.manifestSHA256
+                == finalization.manifestSHA256
+        let pointerDurableBeforeRestart =
+            try bindingStore.loadCurrent() == bindingDuringPause
+        firstBridge = nil
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let restartBridge = try LiveCaptureSenderBridge(
+            paths: paths,
+            documentsRoot: documents,
+            connector: connector,
+            random: FixedRandom(Data(repeating: 0xff, count: 32)),
+            limits: try queueLimits(),
+            policy: try LiveSenderPolicy(
+                minimumAvailableStorageBytes: 0,
+                requiresForeground: false,
+                pausesAtSeriousThermalState: true
+            ),
+            retryPolicy: try LiveSenderRetryPolicy(),
+            monitorNetwork: false,
+            initialNetworkAvailable: true,
+            initialThermalState: thermalState
+        )
+        restartBridge.setPairedDesktopID(authorization.desktopID)
+        try await Task.sleep(nanoseconds: 150_000_000)
+        let restartedPausedSnapshot = try await queueSnapshot(
+            paths: paths,
+            documents: documents,
+            authorization: authorization,
+            sessionID: sessionID
+        )
+        let pointerDurableAfterRestart =
+            try bindingStore.loadCurrent() == bindingDuringPause
+        let callsDuringPause = await requester.calls()
+        let pausedWithoutPreparation =
+            !FileManager.default.fileExists(atPath: metadataURL.path)
+            && initialPausedSnapshot.queuedFrameCount == 0
+            && !initialPausedSnapshot.finalizationPending
+            && restartedPausedSnapshot.queuedFrameCount == 0
+            && !restartedPausedSnapshot.finalizationPending
+            && callsDuringPause == 0
+
+        restartBridge.setThermalStateForTesting(.nominal)
+        let resumed = await eventually(timeout: 4) {
+            await requester.finalized()
+        }
+        let currentCleared = try await eventually {
+            try bindingStore.loadCurrent() == nil
+        }
+        let completedSequences = await requester.sequences()
+        let requestCountAfterResume = await requester.calls()
+        let requestTrace = await requester.requests()
+        let sessionPath = "\(LiveAuthContract.liveAPIRoot)/sessions/\(sessionID)"
+        let expectedRequestTrace = [
+            "PUT \(sessionPath)",
+            "GET \(sessionPath)",
+            "PUT \(sessionPath)",
+            "GET \(sessionPath)",
+            "PUT \(sessionPath)/frames/1",
+            "PUT \(sessionPath)/frames/1/assets/source",
+            "PUT \(sessionPath)/frames/1/assets/depth",
+            "PUT \(sessionPath)/frames/1/assets/confidence",
+            "POST \(sessionPath)/finalize",
+        ]
+
+        emit([
+            "accepted_callbacks_deferred":
+                frameDisposition == .accepted
+                && finalizationDisposition == .accepted,
+            "binding_ready_under_thermal_pause": bindingReady,
+            "journal_durable_during_pause": journalDurable,
+            "live_preparation_deferred": pausedWithoutPreparation,
+            "restart_deferred_journal_backfill":
+                pointerDurableBeforeRestart
+                && pointerDurableAfterRestart,
+            "nominal_backfill_finalized":
+                resumed
+                && completedSequences == [1]
+                && requestCountAfterResume == 9
+                && requestTrace == expectedRequestTrace
+                && FileManager.default.fileExists(atPath: metadataURL.path),
+            "transfer_pointer_cleared_after_resume": currentCleared,
+            "start_disposition": started.rawValue,
+        ])
+        _ = restartBridge
     }
 
     private enum MetadataTamper {

@@ -1283,6 +1283,13 @@ final class LiveCaptureSenderEnvironmentState: @unchecked Sendable {
         return value
     }
 
+    func currentThermalState() -> LiveSenderThermalState {
+        lock.lock()
+        let value = thermalState
+        lock.unlock()
+        return value
+    }
+
     @discardableResult
     func refreshThermalState() -> LiveSenderThermalState {
         let value = Self.currentThermalState()
@@ -1399,6 +1406,9 @@ private actor LiveCaptureSenderRuntime {
                 return active != nil
             case .frame(let event):
                 guard active != nil else { return false }
+                guard !livePreparationPausedForThermalPressure() else {
+                    return false
+                }
                 _ = try await admit(event)
                 return true
             case .finalized:
@@ -1522,6 +1532,16 @@ private actor LiveCaptureSenderRuntime {
         active = nil
         lastError = nil
         lastSummary = nil
+    }
+
+    private func livePreparationPausedForThermalPressure() -> Bool {
+        guard policy.pausesAtSeriousThermalState else { return false }
+        switch environmentState.currentThermalState() {
+        case .serious, .critical:
+            return true
+        case .nominal, .fair:
+            return false
+        }
     }
 
     private func restore() async throws {
@@ -1803,10 +1823,17 @@ private actor LiveCaptureSenderRuntime {
     private func restoreCaptureJournal(
         _ candidate: ActiveSession
     ) async throws -> Bool {
+        guard !livePreparationPausedForThermalPressure() else {
+            return false
+        }
         let frames = try LiveCaptureJournal.loadAcceptedFrames(
             captureRoot: candidate.captureRoot
         )
         for frame in frames {
+            guard !Task.isCancelled,
+                  !livePreparationPausedForThermalPressure() else {
+                return false
+            }
             guard try await admit(frame, into: candidate) else {
                 return false
             }
@@ -1814,6 +1841,10 @@ private actor LiveCaptureSenderRuntime {
         if let finalization = try LiveCaptureJournal.loadFinalization(
             captureRoot: candidate.captureRoot
         ) {
+            guard !Task.isCancelled,
+                  !livePreparationPausedForThermalPressure() else {
+                return false
+            }
             guard try await finalize(finalization, into: candidate) else {
                 throw LiveSenderQueueError.finalizationConflict
             }
@@ -2052,6 +2083,7 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
     private var documentsRoot: URL?
     private let runtime: LiveCaptureSenderRuntime?
     private let random: (any LiveRandomSource)?
+    private let pausesLivePreparationAtSeriousThermalState: Bool
     private let driveTaskSlot = DriveTaskSlot()
 
     static func application(
@@ -2090,10 +2122,12 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
         retryPolicy: LiveSenderRetryPolicy,
         monitorNetwork: Bool,
         initialNetworkAvailable: Bool,
+        initialThermalState: LiveSenderThermalState? = nil,
         outerRetrySleeper: any LiveSenderSleeping = SystemLiveSenderSleeper()
     ) throws {
         let environmentState = LiveCaptureSenderEnvironmentState(
-            networkAvailable: initialNetworkAvailable
+            networkAvailable: initialNetworkAvailable,
+            thermalState: initialThermalState
         )
         let recoveryStore = LiveCaptureSessionBindingStore(paths: paths)
         let runtime = LiveCaptureSenderRuntime(
@@ -2111,6 +2145,8 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
         self.documentsRoot = documentsRoot.standardizedFileURL
         self.runtime = runtime
         self.random = random
+        pausesLivePreparationAtSeriousThermalState =
+            policy.pausesAtSeriousThermalState
         var capturedEvents: AsyncStream<LiveCaptureBridgeEvent>.Continuation?
         let events = AsyncStream(
             bufferingPolicy: .bufferingOldest(Self.ingressCapacity)
@@ -2149,12 +2185,11 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
             object: nil,
             queue: nil
         ) { [weak self] _ in
-            let state = self?.environmentState?.refreshThermalState()
-            if state == .serious || state == .critical {
-                self?.driveTaskSlot.cancel()
-            } else {
-                self?.wakeSender()
+            guard let self,
+                  let state = self.environmentState?.refreshThermalState() else {
+                return
             }
+            self.applyThermalTransition(state)
         }
         if monitorNetwork {
             let monitor = NWPathMonitor()
@@ -2180,6 +2215,7 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
     private init() {
         runtime = nil
         random = nil
+        pausesLivePreparationAtSeriousThermalState = false
     }
 
     deinit {
@@ -2262,14 +2298,20 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
     func frameCommitted(
         _ event: LiveCaptureFrameCommittedEvent
     ) -> LiveCaptureIngressDisposition {
-        yield(.frame(event))
+        if livePreparationPausedForThermalPressure {
+            return .accepted
+        }
+        return yield(.frame(event))
     }
 
     @discardableResult
     func captureFinalized(
         _ event: LiveCaptureFinalizedEvent
     ) -> LiveCaptureIngressDisposition {
-        yield(.finalized(event))
+        if livePreparationPausedForThermalPressure {
+            return .accepted
+        }
+        return yield(.finalized(event))
     }
 
     @discardableResult
@@ -2293,7 +2335,10 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
     func setForeground(_ value: Bool) {
         environmentState?.setForeground(value)
         if value {
-            wakeSender()
+            guard let state = environmentState?.refreshThermalState() else {
+                return
+            }
+            applyThermalTransition(state)
         } else {
             driveTaskSlot.cancel()
         }
@@ -2309,8 +2354,36 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
         }
     }
 
+#if CAPTURE_SPLAT_LIVE_TESTING
+    func setThermalStateForTesting(_ value: LiveSenderThermalState) {
+        environmentState?.setThermalStateForTesting(value)
+        applyThermalTransition(value)
+    }
+#endif
+
     private func wakeSender() {
         _ = sendContinuation?.yield(())
+    }
+
+    private func applyThermalTransition(_ state: LiveSenderThermalState) {
+        if state == .serious || state == .critical {
+            driveTaskSlot.cancel()
+        } else {
+            wakeSender()
+        }
+    }
+
+    private var livePreparationPausedForThermalPressure: Bool {
+        guard pausesLivePreparationAtSeriousThermalState,
+              let environmentState else {
+            return false
+        }
+        switch environmentState.currentThermalState() {
+        case .serious, .critical:
+            return true
+        case .nominal, .fair:
+            return false
+        }
     }
 
     private func yield(

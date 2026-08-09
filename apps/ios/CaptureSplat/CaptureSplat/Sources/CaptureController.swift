@@ -303,9 +303,9 @@ final class CaptureController: NSObject, ObservableObject {
         }
         switch thermalStateText {
         case "serious":
-            return "Thermal Serious: stop and preserve this capture, then cool to Nominal."
+            return "Thermal Serious: any active live transfer is paused. Stop and finalize locally, then export from Projects."
         case "critical":
-            return "Thermal Critical: stop now and preserve this capture."
+            return "Thermal Critical: any active live transfer is paused. Stop now and finalize locally for manual export."
         default:
             return nil
         }
@@ -2687,10 +2687,10 @@ final class CaptureController: NSObject, ObservableObject {
             guidanceText = "Stop recording now, preserve the local capture, and cool the phone to Nominal."
         } else if thermalStateText == "serious" {
             readinessState = "Hold"
-            nextAction = "Stop and cool to Nominal"
-            backgroundWarning = "Thermal state is Serious; continuing will not count as a measured acceptance run."
+            nextAction = "Stop for local export"
+            backgroundWarning = "Any active live transfer is paused; this run will not count as measured thermal or live acceptance."
             guidanceArrowSystemImage = "stop.circle"
-            guidanceText = "Stop and preserve this capture, then let the phone return to Nominal."
+            guidanceText = "Stop to finalize locally, then export from Projects. Any pending live transfer remains available for later resume when conditions allow."
         } else if trackingStatus != "normal" {
             readinessState = "Hold"
             nextAction = "Pause until tracking is normal"

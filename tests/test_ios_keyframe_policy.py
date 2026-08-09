@@ -123,9 +123,29 @@ def test_capture_controller_arms_novelty_before_unchanged_quality_gate() -> None
     assert ") skipped" not in content
     assert "droppedFrames > 0 && rgbRate < 1.5" not in source
     assert "systemUptime - lastWriterBusyDropUptime < 1" in source
-    assert "Thermal Serious: stop and preserve this capture" in source
+    assert "Thermal Serious: any active live transfer is paused" in source
     assert 'else if thermalStateText == "serious"' in source
     assert "Capture continues." not in source
     assert "Recording continues." not in source
     assert project.count("CaptureKeyframePolicy.swift in Sources") == 2
     assert project.count("path = CaptureKeyframePolicy.swift") == 1
+
+
+def test_thermal_pause_exposes_manual_local_export_without_abandoning_resume() -> None:
+    content = (SOURCES / "ContentView.swift").read_text(encoding="utf-8")
+    fallback = _swift_function(content, "private var liveThermalFallbackCard")
+
+    fallback_invocation = content.index("if showsThermalLocalExportFallback {")
+    expanded_branch = content.index("if isCapturePanelExpanded {")
+    assert fallback_invocation < expanded_branch
+    assert "livePairing.snapshot.hasCurrentPairing" in content
+    assert 'capture.thermalStateText == "serious"' in content
+    assert 'capture.thermalStateText == "critical"' in content
+    assert "Thermal local-export mode" in fallback
+    assert "Manual Export" in fallback
+    assert "ShareLink(item: directory)" in fallback
+    assert "capture.isCapturePackageReady" in fallback
+    assert "capture.hasRecoverablePartialCapture" in fallback
+    assert "pending transfer" in content
+    assert "abandonPendingTransfer" not in fallback
+    assert "stopRecording()" not in fallback

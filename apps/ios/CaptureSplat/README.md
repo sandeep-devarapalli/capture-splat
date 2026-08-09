@@ -126,6 +126,10 @@ critical thermal transitions cancel active transport while source capture
 continues independently. Recovery can wake the one sender worker only when the
 currently paired desktop exactly matches the durable pointer/binding, the app
 is foreground, the network is available, and thermal policy permits transfer.
+Serious/critical thermal pressure also defers live hashing and queue admission;
+the durable accepted-frame journal is backfilled after cooling or relaunch.
+After local finalization, **Manual Export** and **Projects** sharing remain
+available without abandoning or deleting the pending live transfer.
 
 A zero-frame manifest failure automatically clears the transfer pointers only
 after the accepted-frame journal is verified empty and no finalization marker

@@ -269,6 +269,13 @@ inert unless the currently paired desktop exactly matches its pointer/binding,
 the app is foreground, the network is available, and thermal policy permits;
 allowed transitions wake only the single sender worker.
 
+Serious/critical thermal pressure also defers live hashing and queue admission,
+leaving only the durable accepted-frame journal for later backfill. Stop and
+finalize the local capture, then use **Manual Export** or the **Projects** share
+action without abandoning the pending transfer. Cooling or relaunch may resume
+that exact transfer later; the warm run still does not count as thermal or live
+acceptance evidence.
+
 If `capture.json` publication fails with zero accepted frames, the bridge
 automatically clears its pending/current recovery pointers only after verifying
 that the accepted-frame journal is empty and no finalization marker exists. A
