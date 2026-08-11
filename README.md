@@ -436,7 +436,13 @@ evidence; trained splats are review proposals, not metric, collision, semantic,
 or navigation authority. Finite PLY and QA decisions are not high-quality
 claims.
 
-### Replay a capture live to World Studio
+### Replay an exported capture to World Studio
+
+The production iPhone workflow is local-first: record and finalize on device,
+then use **Manual Export** from Projects. Live transfer is not required for
+capture, reconstruction, or World Studio review. The authenticated sender work
+remains an optional experiment for devices that can pass separate thermal and
+throughput gates.
 
 Phase 1 can replay an existing capture into World Studio while it is listening
 on loopback:
@@ -492,8 +498,8 @@ open a frame queue or upload capture evidence. The checksum-bound
 [Release benchmark](docs/ios_live_ack_index_benchmark.md) passed on the
 designated iPhone 16 Pro Max (`iPhone17,2`), closing
 [issue #35](https://github.com/sandeep-devarapalli/capture-splat/issues/35)
-without an ACK-index redesign. The next integration is one nonblocking callback
-after atomic frame writes, followed by two-cycle physical-device acceptance.
+without an ACK-index redesign. Any future integration must remain opt-in and
+cannot become a release dependency for the manual-export production path.
 
 ## Linux, Windows, And Cloud GPUs
 

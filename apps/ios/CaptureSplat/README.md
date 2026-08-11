@@ -81,6 +81,10 @@ policy.
 
 ## World Studio pairing and dormant sender
 
+Manual Export from Projects is the production iPhone workflow. Pairing and the
+dormant sender are optional transport experiments; capture, reconstruction,
+and World Studio package review never depend on them.
+
 M1B-1 compiles an isolated bounded sender foundation into the app target. It
 implements QR invitation parsing, P-256 device identity, Keychain-backed grants,
 TLS 1.3 leaf-certificate pinning, signed requests with durable counters, a

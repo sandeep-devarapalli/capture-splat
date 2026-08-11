@@ -52,14 +52,16 @@ Calibration outcomes are owned by World Studio.
 | Milestone | Outcome | Status |
 |---|---|---|
 | Live Session Foundation | Strict replay-first source-frame, camera, quality, sidecar, ACK, resume, and finalization contract | completed |
-| Authenticated Sender And Device Acceptance | Explicit pairing, TLS, bounded store-and-forward sender, thermal safety, and two-cycle physical-device acceptance | in progress: pairing UI, auth, Application Support recovery, sender foundation, and ACK-index gate complete; capture hookup and two-cycle physical evidence open |
+| Authenticated Sender And Device Acceptance | Optional paired TLS transport with bounded store-and-forward, thermal safety, and device evidence | experimental and evidence-blocked on iPhone; production capture uses local finalization and manual export |
 | Calibration Capture Evidence | Guided and synchronized experimental imagery with apparatus/scale provenance, without inferred physics authority | planned and evidence-blocked |
 
-The completed foundation is permanent `proposal_only` evidence transport. The authenticated
-sender cannot close until physical-device tests cover capture throughput, finalization,
-disconnect/recovery, thermal downgrade, and receiver identity. Calibration recording cannot
-close from code alone; it requires measured apparatus, synchronized trials, checksums, and
-declared downstream validation.
+The completed foundation is permanent `proposal_only` evidence transport. Manual export is
+the production iPhone boundary and does not depend on the authenticated sender. The sender
+may be revisited for other devices or after measured thermal optimization, but promotion
+requires physical evidence for throughput, finalization, disconnect/recovery, thermal
+behavior, and receiver identity. Calibration recording cannot close from code alone; it
+requires measured apparatus, synchronized trials, checksums, and declared downstream
+validation.
 
 ## R2S2R Capture Program
 
@@ -72,7 +74,7 @@ checkpoints with the existing milestone structure:
 | CS-R2S2 Asset Capture And Calibration Trials | Record apparatus-backed object and interaction evidence without inferring physics | planned and evidence-blocked |
 | CS-R2S3 Matched Open-Loop And Task Demonstration Capture | Record initial state, command timeline, observations, and outcomes for real/sim comparison | planned |
 | CS-R2S4 Deployment Recapture And Change Evidence | Relocalize to a site revision and emit immutable changed/unchanged/unknown evidence | planned |
-| CS-R2S5 Physical Device Acceptance | Thermal, storage, clocks, networking, finalization, privacy, and apparatus acceptance | tracked by Authenticated Sender And Device Acceptance |
+| CS-R2S5 Physical Device Acceptance | Thermal, storage, clocks, local finalization, manual export, privacy, and apparatus acceptance; networking is an optional sub-gate | tracked independently from experimental live transport |
 
 Capture Splat stays simulator-independent. The
 [Newton Simulation Handoff](docs/newton_simulation_handoff.md) describes evidence World
@@ -80,6 +82,8 @@ Studio may compile into its target Newton runtime after separate validation.
 
 ## Acceptance Gates
 
+- Treat local finalization plus Manual Export as the required iPhone data path;
+  live transfer is optional and cannot block reconstruction work.
 - Finish physical acceptance of live spatial guidance and shared-session
   RoomPlan using a controlled 90-120 second capture.
 - Verify mesh/map update p95, keyframe throughput, thermal downgrade duration,
@@ -99,12 +103,10 @@ Studio may compile into its target Newton runtime after separate validation.
 - Add release-level startup, long-session thermal, and two-cycle finalization
   evidence across supported LiDAR iPhones.
 - Issue #35's exact ACK-index benchmark passed on the designated iPhone 16 Pro
-  Max, retaining the exact ledger and current 360-frame cap. Integrate the
-  dormant bounded store-and-forward foundation through one nonblocking
-  callback after atomic frame writes. Explicit QR/Bonjour pairing and
-  Application Support recovery are active, but they do not open a frame queue.
-  LAN evidence transfer remains disabled until a current grant, TLS pin, replay
-  protection, and pressure gates pass.
+  Max, retaining the exact ledger and current 360-frame cap. Keep the dormant
+  bounded store-and-forward foundation optional. Any future capture hookup must
+  pass current-grant, TLS-pin, replay-protection, pressure, and physical thermal
+  gates without weakening local capture or manual export.
 - Add task/robot/site briefs, calibration-trial recording, matched demonstration capture,
   and deployment recapture as additive evidence workflows after the active sender/device
   gate. None may weaken local-first capture or infer physical parameters.
