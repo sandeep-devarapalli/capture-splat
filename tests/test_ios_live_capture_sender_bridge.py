@@ -296,3 +296,44 @@ def test_current_plus_mismatched_pending_recovery_fails_closed(
         "mismatched_pending_was_structurally_valid": True,
         "recovery_failed_closed": True,
     }
+
+
+def test_physical_acceptance_toggle_is_persisted_local_first_and_bounded(
+    live_capture_sender_bridge_probe: tuple[Path, Path],
+    tmp_path: Path,
+) -> None:
+    result = _run(
+        live_capture_sender_bridge_probe,
+        "physical-acceptance",
+        tmp_path,
+    )
+
+    assert result == {
+        "ack_latency_observed_after_validation": True,
+        "ack_retry_count_observed": True,
+        "blocked_request_has_no_false_ack_sample": True,
+        "bounded_recent_ack_samples": True,
+        "bounded_recent_samples": True,
+        "bounded_recent_transitions": True,
+        "default_enabled": True,
+        "disabled_finalize_disposition": "disabled",
+        "disabled_frame_disposition": "disabled",
+        "disabled_start_disposition": "disabled",
+        "disabled_wakes_cancelled": True,
+        "enabled_start_disposition": "accepted",
+        "finalization_evidence_recorded": True,
+        "finalized_queue_is_empty": True,
+        "local_journal_preserved": True,
+        "observed_start_disposition": "accepted",
+        "pending_transfer_preserved": True,
+        "preference_disabled_persisted": True,
+        "preference_enabled_persisted": True,
+        "queue_evidence_loss_is_zero": True,
+        "queue_overflow_counted": True,
+        "reenabled_woke_sender": True,
+        "report_is_canonical_and_strict": True,
+        "request_started": True,
+        "session_metadata_absent_while_disabled": True,
+        "telemetry_is_bounded": True,
+        "telemetry_write_error_absent": True,
+    }

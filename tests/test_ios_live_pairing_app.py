@@ -137,6 +137,10 @@ def test_pairing_wiring_stays_outside_the_capture_loop() -> None:
     assert "Open Projects for Manual Export" in pairing_view
     assert '"clearing the durable live transfer.' in pairing_view
     assert "onOpenProjects()" in pairing_view
+    assert 'Toggle("Send captures live"' in pairing_view
+    assert 'accessibilityIdentifier("live-transfer-enabled")' in pairing_view
+    assert "liveSender.setLiveTransferEnabled(enabled)" in pairing_view
+    assert "continues saving accepted frames and metadata locally" in pairing_view
 
     manual_export = pairing_view.index("Open Projects for Manual Export")
     abandon = pairing_view.index("Abandon Pending Live Transfer")

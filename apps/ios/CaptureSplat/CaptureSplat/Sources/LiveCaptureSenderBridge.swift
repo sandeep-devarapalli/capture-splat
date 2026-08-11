@@ -85,6 +85,741 @@ enum LiveCaptureIngressDisposition: String, Sendable {
     case disabled
 }
 
+final class LiveCaptureTransferPreference: @unchecked Sendable {
+    static let defaultsKey = "capture_splat.live_transfer_enabled.v0.1"
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    var isEnabled: Bool {
+        guard defaults.object(forKey: Self.defaultsKey) != nil else {
+            return true
+        }
+        return defaults.bool(forKey: Self.defaultsKey)
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: Self.defaultsKey)
+    }
+}
+
+struct LivePhysicalAcceptanceTransition: Codable, Equatable, Sendable {
+    let timestamp: String
+    let kind: String
+    let value: String
+}
+
+struct LivePhysicalAcceptanceRunSample: Codable, Equatable, Sendable {
+    let timestamp: String
+    let durationSeconds: Double
+    let attemptedFrames: Int
+    let acknowledgedFrames: Int
+    let acknowledgedFramesPerSecond: Double
+
+    enum CodingKeys: String, CodingKey {
+        case timestamp
+        case durationSeconds = "duration_seconds"
+        case attemptedFrames = "attempted_frames"
+        case acknowledgedFrames = "acknowledged_frames"
+        case acknowledgedFramesPerSecond = "acknowledged_frames_per_second"
+    }
+}
+
+struct LivePhysicalAcceptanceRequestSample: Codable, Equatable, Sendable {
+    let timestamp: String
+    let operation: String
+    let latencyMilliseconds: Double
+    let retryCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case timestamp, operation
+        case latencyMilliseconds = "latency_ms"
+        case retryCount = "retry_count"
+    }
+}
+
+struct LivePhysicalAcceptanceTelemetryReport: Codable, Equatable, Sendable {
+    static let schemaValue = "capture_splat.m1b_physical_acceptance_telemetry.v0.1"
+    static let maximumRecentTransitions = 64
+    static let maximumRunSamples = 64
+    static let maximumRequestSamples = 128
+
+    var schema = Self.schemaValue
+    var transferEnabled: Bool
+    var captureDirectoryName: String
+    var sessionID: String?
+    var startedAt: String
+    var updatedAt: String
+    var ingressEventCounts: [String: Int]
+    var ingressDispositionCounts: [String: Int]
+    var queueMaximumFrames: Int
+    var queueMaximumBytes: Int64
+    var queueCurrentFrames: Int
+    var queueCurrentBytes: Int64
+    var queuePeakFrames: Int
+    var queuePeakBytes: Int64
+    var queueOverflowCount: Int
+    var queueEvidenceLossCount: Int
+    var senderRunCount: Int
+    var senderRunStatusCounts: [String: Int]
+    var attemptedFrameCount: Int
+    var acknowledgedFrameCount: Int
+    var interruptionCounts: [String: Int]
+    var pauseReasonCounts: [String: Int]
+    var receiverMissingRanges: [LiveSenderMissingRange]
+    var finalizationState: String
+    var finalSequenceID: Int?
+    var manifestSHA256: String?
+    var transitionCount: Int
+    var recentTransitions: [LivePhysicalAcceptanceTransition]
+    var runSampleCount: Int
+    var recentRunSamples: [LivePhysicalAcceptanceRunSample]
+    var requestAcknowledgementLatencyAvailable: Bool
+    var requestAcknowledgementLatencyNote: String
+    var requestAcknowledgementSampleCount: Int
+    var requestAcknowledgementLatencySumMilliseconds: Double
+    var requestAcknowledgementLatencyMeanMilliseconds: Double
+    var requestAcknowledgementLatencyP95Milliseconds: Double
+    var requestAcknowledgementLatencyMaxMilliseconds: Double
+    var requestRetryCount: Int
+    var recentRequestAcknowledgementSamples: [
+        LivePhysicalAcceptanceRequestSample
+    ]
+    var telemetryWriteCount: Int
+    var lastSenderError: String?
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case transferEnabled = "transfer_enabled"
+        case captureDirectoryName = "capture_directory_name"
+        case sessionID = "session_id"
+        case startedAt = "started_at"
+        case updatedAt = "updated_at"
+        case ingressEventCounts = "ingress_event_counts"
+        case ingressDispositionCounts = "ingress_disposition_counts"
+        case queueMaximumFrames = "queue_maximum_frames"
+        case queueMaximumBytes = "queue_maximum_bytes"
+        case queueCurrentFrames = "queue_current_frames"
+        case queueCurrentBytes = "queue_current_bytes"
+        case queuePeakFrames = "queue_peak_frames"
+        case queuePeakBytes = "queue_peak_bytes"
+        case queueOverflowCount = "queue_overflow_count"
+        case queueEvidenceLossCount = "queue_evidence_loss_count"
+        case senderRunCount = "sender_run_count"
+        case senderRunStatusCounts = "sender_run_status_counts"
+        case attemptedFrameCount = "attempted_frame_count"
+        case acknowledgedFrameCount = "acknowledged_frame_count"
+        case interruptionCounts = "interruption_counts"
+        case pauseReasonCounts = "pause_reason_counts"
+        case receiverMissingRanges = "receiver_missing_ranges"
+        case finalizationState = "finalization_state"
+        case finalSequenceID = "final_sequence_id"
+        case manifestSHA256 = "manifest_sha256"
+        case transitionCount = "transition_count"
+        case recentTransitions = "recent_transitions"
+        case runSampleCount = "run_sample_count"
+        case recentRunSamples = "recent_run_samples"
+        case requestAcknowledgementLatencyAvailable =
+            "request_acknowledgement_latency_available"
+        case requestAcknowledgementLatencyNote =
+            "request_acknowledgement_latency_note"
+        case requestAcknowledgementSampleCount =
+            "request_acknowledgement_sample_count"
+        case requestAcknowledgementLatencySumMilliseconds =
+            "request_acknowledgement_latency_sum_ms"
+        case requestAcknowledgementLatencyMeanMilliseconds =
+            "request_acknowledgement_latency_mean_ms"
+        case requestAcknowledgementLatencyP95Milliseconds =
+            "request_acknowledgement_latency_p95_ms"
+        case requestAcknowledgementLatencyMaxMilliseconds =
+            "request_acknowledgement_latency_max_ms"
+        case requestRetryCount = "request_retry_count"
+        case recentRequestAcknowledgementSamples =
+            "recent_request_acknowledgement_samples"
+        case telemetryWriteCount = "telemetry_write_count"
+        case lastSenderError = "last_sender_error"
+    }
+
+    func validate() throws {
+        let counts = [
+            ingressEventCounts,
+            ingressDispositionCounts,
+            senderRunStatusCounts,
+            interruptionCounts,
+            pauseReasonCounts,
+        ].flatMap(\.values)
+        guard schema == Self.schemaValue,
+              LiveAuthValidation.matches(
+                  captureDirectoryName,
+                  "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+              ),
+              counts.allSatisfy({ $0 >= 0 }),
+              queueMaximumFrames > 0,
+              queueMaximumBytes > 0,
+              queueCurrentFrames >= 0,
+              queueCurrentBytes >= 0,
+              queuePeakFrames >= queueCurrentFrames,
+              queuePeakBytes >= queueCurrentBytes,
+              queueOverflowCount >= 0,
+              queueEvidenceLossCount >= 0,
+              senderRunCount >= 0,
+              attemptedFrameCount >= 0,
+              acknowledgedFrameCount >= 0,
+              transitionCount >= recentTransitions.count,
+              recentTransitions.count <= Self.maximumRecentTransitions,
+              runSampleCount >= recentRunSamples.count,
+              recentRunSamples.count <= Self.maximumRunSamples,
+              requestAcknowledgementSampleCount
+                >= recentRequestAcknowledgementSamples.count,
+              recentRequestAcknowledgementSamples.count
+                <= Self.maximumRequestSamples,
+              requestAcknowledgementLatencySumMilliseconds.isFinite,
+              requestAcknowledgementLatencySumMilliseconds >= 0,
+              requestAcknowledgementLatencyMeanMilliseconds.isFinite,
+              requestAcknowledgementLatencyMeanMilliseconds >= 0,
+              requestAcknowledgementLatencyP95Milliseconds.isFinite,
+              requestAcknowledgementLatencyP95Milliseconds >= 0,
+              requestAcknowledgementLatencyMaxMilliseconds.isFinite,
+              requestAcknowledgementLatencyMaxMilliseconds >= 0,
+              requestAcknowledgementLatencyP95Milliseconds
+                <= requestAcknowledgementLatencyMaxMilliseconds,
+              requestRetryCount >= 0,
+              telemetryWriteCount >= 0,
+              requestAcknowledgementLatencyAvailable
+                == (requestAcknowledgementSampleCount > 0),
+              (requestAcknowledgementSampleCount > 0
+                || (requestAcknowledgementLatencySumMilliseconds == 0
+                    && requestAcknowledgementLatencyMeanMilliseconds == 0
+                    && requestAcknowledgementLatencyP95Milliseconds == 0
+                    && requestAcknowledgementLatencyMaxMilliseconds == 0)),
+              recentRunSamples.allSatisfy({
+                  $0.durationSeconds.isFinite
+                      && $0.durationSeconds >= 0
+                      && $0.acknowledgedFramesPerSecond.isFinite
+                      && $0.acknowledgedFramesPerSecond >= 0
+                      && $0.attemptedFrames >= 0
+                      && $0.acknowledgedFrames >= 0
+              }),
+              recentRequestAcknowledgementSamples.allSatisfy({
+                  $0.latencyMilliseconds.isFinite
+                      && $0.latencyMilliseconds >= 0
+                      && $0.retryCount >= 0
+              }) else {
+            throw LiveAuthContractError.invalid(
+                "Physical-acceptance telemetry is invalid."
+            )
+        }
+        if let sessionID {
+            try LiveSenderValidation.sessionID(sessionID)
+        }
+        guard (finalSequenceID == nil) == (manifestSHA256 == nil) else {
+            throw LiveAuthContractError.invalid(
+                "Physical-acceptance finalization evidence is incomplete."
+            )
+        }
+        if let finalSequenceID, let manifestSHA256 {
+            guard finalSequenceID >= 0,
+                  LiveSenderValidation.isSHA256(manifestSHA256) else {
+                throw LiveAuthContractError.invalid(
+                    "Physical-acceptance finalization evidence is invalid."
+                )
+            }
+        }
+        if finalizationState == "receiver_finalized" {
+            guard queueCurrentFrames == 0,
+                  queueCurrentBytes == 0,
+                  receiverMissingRanges.isEmpty else {
+                throw LiveAuthContractError.invalid(
+                    "Receiver finalization requires an empty sender queue."
+                )
+            }
+        }
+        _ = try LiveAuthTime.parse(startedAt)
+        _ = try LiveAuthTime.parse(updatedAt)
+        for transition in recentTransitions {
+            _ = try LiveAuthTime.parse(transition.timestamp)
+        }
+        for sample in recentRunSamples {
+            _ = try LiveAuthTime.parse(sample.timestamp)
+        }
+        for sample in recentRequestAcknowledgementSamples {
+            _ = try LiveAuthTime.parse(sample.timestamp)
+        }
+    }
+}
+
+final class LivePhysicalAcceptanceTelemetryRecorder: @unchecked Sendable {
+    static let relativePath = "metadata/live/physical_acceptance_report.json"
+
+    private struct State {
+        let captureRoot: URL
+        var report: LivePhysicalAcceptanceTelemetryReport
+        var eventsSinceWrite: Int
+        var lastScheduledUptime: TimeInterval
+    }
+
+    private static let eventWriteCadence = 16
+    private static let minimumWriteIntervalSeconds: TimeInterval = 2
+
+    private let lock = NSLock()
+    private let writeQueue = DispatchQueue(
+        label: "capture-splat.live-physical-acceptance"
+    )
+    private var state: State?
+    private var lastWriteError: String?
+
+    func attach(
+        captureRoot: URL,
+        createdAt: Date,
+        sessionID: String?,
+        transferEnabled: Bool,
+        limits: LiveSenderQueueLimits
+    ) {
+        let root = captureRoot.standardizedFileURL
+        let existing = loadExisting(captureRoot: root)
+        lock.lock()
+        if state?.captureRoot != root {
+            let now = Date()
+            state = State(
+                captureRoot: root,
+                report: existing ?? LivePhysicalAcceptanceTelemetryReport(
+                    transferEnabled: transferEnabled,
+                    captureDirectoryName: root.lastPathComponent,
+                    sessionID: sessionID,
+                    startedAt: LiveAuthTime.string(createdAt),
+                    updatedAt: LiveAuthTime.string(now),
+                    ingressEventCounts: [
+                        "capture_started": 0,
+                        "frame_committed": 0,
+                        "capture_finalized": 0,
+                        "capture_aborted": 0,
+                    ],
+                    ingressDispositionCounts: [
+                        LiveCaptureIngressDisposition.accepted.rawValue: 0,
+                        LiveCaptureIngressDisposition.overflow.rawValue: 0,
+                        LiveCaptureIngressDisposition.disabled.rawValue: 0,
+                    ],
+                    queueMaximumFrames: limits.maximumFrames,
+                    queueMaximumBytes: limits.maximumBytes,
+                    queueCurrentFrames: 0,
+                    queueCurrentBytes: 0,
+                    queuePeakFrames: 0,
+                    queuePeakBytes: 0,
+                    queueOverflowCount: 0,
+                    queueEvidenceLossCount: 0,
+                    senderRunCount: 0,
+                    senderRunStatusCounts: [
+                        LiveSenderRunStatus.idle.rawValue: 0,
+                        LiveSenderRunStatus.paused.rawValue: 0,
+                        LiveSenderRunStatus.interrupted.rawValue: 0,
+                        LiveSenderRunStatus.awaitingFrames.rawValue: 0,
+                        LiveSenderRunStatus.finalized.rawValue: 0,
+                    ],
+                    attemptedFrameCount: 0,
+                    acknowledgedFrameCount: 0,
+                    interruptionCounts: [
+                        LiveSenderInterruptionDisposition.retryable.rawValue: 0,
+                        LiveSenderInterruptionDisposition.blocked.rawValue: 0,
+                        LiveSenderInterruptionDisposition.cancelled.rawValue: 0,
+                    ],
+                    pauseReasonCounts: [
+                        LiveSenderPauseReason.background.rawValue: 0,
+                        LiveSenderPauseReason.networkUnavailable.rawValue: 0,
+                        LiveSenderPauseReason.receiverUnavailable.rawValue: 0,
+                        LiveSenderPauseReason.lowStorage.rawValue: 0,
+                        LiveSenderPauseReason.thermalPressure.rawValue: 0,
+                    ],
+                    receiverMissingRanges: [],
+                    finalizationState: "not_observed",
+                    finalSequenceID: nil,
+                    manifestSHA256: nil,
+                    transitionCount: 0,
+                    recentTransitions: [],
+                    runSampleCount: 0,
+                    recentRunSamples: [],
+                    requestAcknowledgementLatencyAvailable: false,
+                    requestAcknowledgementLatencyNote:
+                        "No validated durable ACK sample has been recorded.",
+                    requestAcknowledgementSampleCount: 0,
+                    requestAcknowledgementLatencySumMilliseconds: 0,
+                    requestAcknowledgementLatencyMeanMilliseconds: 0,
+                    requestAcknowledgementLatencyP95Milliseconds: 0,
+                    requestAcknowledgementLatencyMaxMilliseconds: 0,
+                    requestRetryCount: 0,
+                    recentRequestAcknowledgementSamples: [],
+                    telemetryWriteCount: 0,
+                    lastSenderError: nil
+                ),
+                eventsSinceWrite: 0,
+                lastScheduledUptime: 0
+            )
+        }
+        state?.report.transferEnabled = transferEnabled
+        if let sessionID {
+            state?.report.sessionID = sessionID
+        }
+        state?.report.queueMaximumFrames = limits.maximumFrames
+        state?.report.queueMaximumBytes = limits.maximumBytes
+        let write = prepareWriteLocked(force: true)
+        lock.unlock()
+        enqueue(write)
+    }
+
+    func recordIngress(
+        captureRoot: URL,
+        event: String,
+        disposition: LiveCaptureIngressDisposition,
+        force: Bool = false
+    ) {
+        mutate(captureRoot: captureRoot, force: force) { report in
+            report.ingressEventCounts[event, default: 0] += 1
+            report.ingressDispositionCounts[disposition.rawValue, default: 0] += 1
+            if event == "frame_committed", disposition == .overflow {
+                report.queueOverflowCount += 1
+            }
+        }
+    }
+
+    func recordQueue(
+        captureRoot: URL,
+        snapshot: LiveSenderQueueSnapshot,
+        force: Bool = false
+    ) {
+        mutate(captureRoot: captureRoot, force: force) { report in
+            report.queueMaximumFrames = snapshot.maximumFrames
+            report.queueMaximumBytes = snapshot.maximumBytes
+            report.queueCurrentFrames = snapshot.queuedFrameCount
+            report.queueCurrentBytes = snapshot.queuedBytes
+            report.queuePeakFrames = max(
+                report.queuePeakFrames,
+                snapshot.queuedFrameCount
+            )
+            report.queuePeakBytes = max(
+                report.queuePeakBytes,
+                snapshot.queuedBytes
+            )
+            report.receiverMissingRanges = snapshot.receiverMissingRanges
+            if snapshot.finalized {
+                report.finalizationState = snapshot.queuedFrameCount == 0
+                        && snapshot.queuedBytes == 0
+                        && snapshot.receiverMissingRanges.isEmpty
+                    ? "receiver_finalized"
+                    : "receiver_finalization_conflict"
+            } else if snapshot.finalizationPending {
+                report.finalizationState = "local_finalization_pending"
+            }
+        }
+    }
+
+    func recordRun(
+        captureRoot: URL,
+        summary: LiveSenderRunSummary,
+        interruption: LiveSenderInterruptionDisposition,
+        durationSeconds: Double
+    ) {
+        let duration = durationSeconds.isFinite
+            ? max(durationSeconds, 0)
+            : 0
+        let throughput = duration > 0
+            ? Double(summary.acknowledgedFrameCount) / duration
+            : 0
+        mutate(
+            captureRoot: captureRoot,
+            force: true
+        ) { report in
+            report.senderRunCount += 1
+            report.senderRunStatusCounts[summary.status.rawValue, default: 0] += 1
+            report.attemptedFrameCount += summary.attemptedFrameCount
+            report.acknowledgedFrameCount += summary.acknowledgedFrameCount
+            if interruption != .none {
+                report.interruptionCounts[interruption.rawValue, default: 0] += 1
+            }
+            if let pauseReason = summary.pauseReason {
+                report.pauseReasonCounts[pauseReason.rawValue, default: 0] += 1
+            }
+            report.queueCurrentFrames = summary.queuedFrameCount
+            report.queueCurrentBytes = summary.queuedBytes
+            report.queuePeakFrames = max(
+                report.queuePeakFrames,
+                summary.queuedFrameCount
+            )
+            report.queuePeakBytes = max(
+                report.queuePeakBytes,
+                summary.queuedBytes
+            )
+            report.lastSenderError = summary.lastError
+            report.runSampleCount += 1
+            report.recentRunSamples.append(
+                LivePhysicalAcceptanceRunSample(
+                    timestamp: LiveAuthTime.string(Date()),
+                    durationSeconds: duration,
+                    attemptedFrames: summary.attemptedFrameCount,
+                    acknowledgedFrames: summary.acknowledgedFrameCount,
+                    acknowledgedFramesPerSecond: throughput.isFinite
+                        ? max(throughput, 0)
+                        : 0
+                )
+            )
+            report.recentRunSamples = Array(
+                report.recentRunSamples.suffix(
+                    LivePhysicalAcceptanceTelemetryReport.maximumRunSamples
+                )
+            )
+        }
+    }
+
+    func recordRequestObservation(
+        captureRoot: URL,
+        observation: LiveSenderRequestObservation
+    ) {
+        let latency = observation.durationMilliseconds.isFinite
+            ? max(observation.durationMilliseconds, 0)
+            : 0
+        mutate(captureRoot: captureRoot, force: false) { report in
+            report.requestAcknowledgementSampleCount += 1
+            report.requestAcknowledgementLatencySumMilliseconds += latency
+            report.requestAcknowledgementLatencyMeanMilliseconds =
+                report.requestAcknowledgementLatencySumMilliseconds
+                / Double(report.requestAcknowledgementSampleCount)
+            report.requestAcknowledgementLatencyMaxMilliseconds = max(
+                report.requestAcknowledgementLatencyMaxMilliseconds,
+                latency
+            )
+            report.requestRetryCount += max(observation.retryCount, 0)
+            report.recentRequestAcknowledgementSamples.append(
+                LivePhysicalAcceptanceRequestSample(
+                    timestamp: LiveAuthTime.string(Date()),
+                    operation: observation.operation.rawValue,
+                    latencyMilliseconds: latency,
+                    retryCount: max(observation.retryCount, 0)
+                )
+            )
+            report.recentRequestAcknowledgementSamples = Array(
+                report.recentRequestAcknowledgementSamples.suffix(
+                    LivePhysicalAcceptanceTelemetryReport.maximumRequestSamples
+                )
+            )
+            let sorted = report.recentRequestAcknowledgementSamples
+                .map(\.latencyMilliseconds)
+                .sorted()
+            let percentileIndex = max(
+                Int(ceil(Double(sorted.count) * 0.95)) - 1,
+                0
+            )
+            report.requestAcknowledgementLatencyP95Milliseconds =
+                sorted[percentileIndex]
+            report.requestAcknowledgementLatencyAvailable = true
+            report.requestAcknowledgementLatencyNote =
+                "Successful request duration includes response decoding and ACK contract validation; p95 uses the bounded recent sample window."
+        }
+    }
+
+    func recordPause(
+        captureRoot: URL,
+        reason: LiveSenderPauseReason
+    ) {
+        mutate(captureRoot: captureRoot, force: true) { report in
+            report.pauseReasonCounts[reason.rawValue, default: 0] += 1
+        }
+    }
+
+    func recordFinalization(
+        captureRoot: URL,
+        state: String
+    ) {
+        mutate(captureRoot: captureRoot, force: true) { report in
+            report.finalizationState = state
+        }
+    }
+
+    func recordFinalizationEvidence(_ event: LiveCaptureFinalizedEvent) {
+        mutate(captureRoot: event.captureRoot, force: true) { report in
+            report.finalSequenceID = event.finalSequenceID
+            report.manifestSHA256 = event.manifestSHA256
+            report.finalizationState = "local_capture_finalized"
+        }
+    }
+
+    func recordQueueOverflow(captureRoot: URL) {
+        mutate(captureRoot: captureRoot, force: true) { report in
+            report.queueOverflowCount += 1
+        }
+    }
+
+    func recordSenderError(
+        captureRoot: URL,
+        message: String
+    ) {
+        mutate(captureRoot: captureRoot, force: true) { report in
+            report.lastSenderError = message
+        }
+    }
+
+    func recordInterruption(
+        captureRoot: URL,
+        disposition: LiveSenderInterruptionDisposition,
+        message: String
+    ) {
+        mutate(captureRoot: captureRoot, force: disposition != .retryable) {
+            report in
+            if disposition != .none {
+                report.interruptionCounts[disposition.rawValue, default: 0] += 1
+            }
+            report.lastSenderError = message
+        }
+    }
+
+    func recordTransition(kind: String, value: String) {
+        lock.lock()
+        guard state != nil else {
+            lock.unlock()
+            return
+        }
+        state?.report.transitionCount += 1
+        state?.report.recentTransitions.append(
+            LivePhysicalAcceptanceTransition(
+                timestamp: LiveAuthTime.string(Date()),
+                kind: kind,
+                value: value
+            )
+        )
+        let recent = state!.report.recentTransitions
+        state!.report.recentTransitions = Array(
+            recent.suffix(
+                LivePhysicalAcceptanceTelemetryReport.maximumRecentTransitions
+            )
+        )
+        let write = prepareWriteLocked(force: false)
+        lock.unlock()
+        enqueue(write)
+    }
+
+    func setTransferEnabled(_ enabled: Bool) {
+        lock.lock()
+        guard state != nil else {
+            lock.unlock()
+            return
+        }
+        state?.report.transferEnabled = enabled
+        state?.report.transitionCount += 1
+        state?.report.recentTransitions.append(
+            LivePhysicalAcceptanceTransition(
+                timestamp: LiveAuthTime.string(Date()),
+                kind: "transfer_enabled",
+                value: enabled ? "true" : "false"
+            )
+        )
+        let recent = state!.report.recentTransitions
+        state!.report.recentTransitions = Array(
+            recent.suffix(
+                LivePhysicalAcceptanceTelemetryReport.maximumRecentTransitions
+            )
+        )
+        let write = prepareWriteLocked(force: true)
+        lock.unlock()
+        enqueue(write)
+    }
+
+    var writeError: String? {
+        lock.lock()
+        let value = lastWriteError
+        lock.unlock()
+        return value
+    }
+
+#if CAPTURE_SPLAT_LIVE_TESTING
+    func waitForWritesForTesting() {
+        writeQueue.sync {}
+    }
+#endif
+
+    private func mutate(
+        captureRoot: URL,
+        force: Bool,
+        _ update: (inout LivePhysicalAcceptanceTelemetryReport) -> Void
+    ) {
+        lock.lock()
+        guard state?.captureRoot == captureRoot.standardizedFileURL else {
+            lock.unlock()
+            return
+        }
+        if state != nil {
+            update(&state!.report)
+        }
+        let write = prepareWriteLocked(force: force)
+        lock.unlock()
+        enqueue(write)
+    }
+
+    private func prepareWriteLocked(
+        force: Bool
+    ) -> (URL, LivePhysicalAcceptanceTelemetryReport)? {
+        guard state != nil else { return nil }
+        state!.eventsSinceWrite += 1
+        let uptime = ProcessInfo.processInfo.systemUptime
+        let due = force
+            || state!.eventsSinceWrite >= Self.eventWriteCadence
+            || uptime - state!.lastScheduledUptime
+                >= Self.minimumWriteIntervalSeconds
+        guard due else { return nil }
+        state!.eventsSinceWrite = 0
+        state!.lastScheduledUptime = uptime
+        state!.report.updatedAt = LiveAuthTime.string(Date())
+        state!.report.telemetryWriteCount += 1
+        return (
+            state!.captureRoot.appendingPathComponent(Self.relativePath),
+            state!.report
+        )
+    }
+
+    private func enqueue(
+        _ write: (URL, LivePhysicalAcceptanceTelemetryReport)?
+    ) {
+        guard let (url, report) = write else { return }
+        writeQueue.async { [weak self] in
+            do {
+                try report.validate()
+                try LiveAtomicFile.write(
+                    LiveStrictJSON.canonicalData(report),
+                    to: url
+                )
+                self?.setWriteError(nil)
+            } catch {
+                self?.setWriteError(String(describing: error))
+            }
+        }
+    }
+
+    private func loadExisting(
+        captureRoot: URL
+    ) -> LivePhysicalAcceptanceTelemetryReport? {
+        let url = captureRoot.appendingPathComponent(Self.relativePath)
+        guard let data = try? LiveBoundedRegularFile.read(
+            url: url,
+            maximumBytes: 512 * 1024,
+            field: "physical-acceptance telemetry"
+        ),
+            let report = try? LiveStrictJSON.decodeCanonical(
+                LivePhysicalAcceptanceTelemetryReport.self,
+                from: data
+            ),
+            (try? report.validate()) != nil,
+            report.captureDirectoryName == captureRoot.lastPathComponent else {
+            return nil
+        }
+        return report
+    }
+
+    private func setWriteError(_ value: String?) {
+        lock.lock()
+        lastWriteError = value
+        lock.unlock()
+    }
+}
+
 struct LiveCaptureSenderConnectionContext: Equatable, Sendable {
     let authorization: LiveSenderAuthorizationBinding
     let discovery: LiveDiscoveryIdentity
@@ -1245,17 +1980,20 @@ final class LiveCaptureSenderEnvironmentState: @unchecked Sendable {
     private var networkAvailable: Bool
     private var thermalState: LiveSenderThermalState
     private var pairedDesktopID: String?
+    private var transferEnabled: Bool
 
     init(
         isForeground: Bool = false,
         networkAvailable: Bool,
         thermalState: LiveSenderThermalState? = nil,
-        pairedDesktopID: String? = nil
+        pairedDesktopID: String? = nil,
+        transferEnabled: Bool = true
     ) {
         self.isForeground = isForeground
         self.networkAvailable = networkAvailable
         self.thermalState = thermalState ?? Self.currentThermalState()
         self.pairedDesktopID = pairedDesktopID
+        self.transferEnabled = transferEnabled
     }
 
     func setForeground(_ value: Bool) {
@@ -1286,6 +2024,30 @@ final class LiveCaptureSenderEnvironmentState: @unchecked Sendable {
     func currentThermalState() -> LiveSenderThermalState {
         lock.lock()
         let value = thermalState
+        lock.unlock()
+        return value
+    }
+
+    func setTransferEnabled(_ value: Bool) {
+        lock.lock()
+        transferEnabled = value
+        lock.unlock()
+    }
+
+    func currentTransferEnabled() -> Bool {
+        lock.lock()
+        let value = transferEnabled
+        lock.unlock()
+        return value
+    }
+
+    func currentTransitionValues() -> (
+        foreground: Bool,
+        networkAvailable: Bool,
+        thermalState: LiveSenderThermalState
+    ) {
+        lock.lock()
+        let value = (isForeground, networkAvailable, thermalState)
         lock.unlock()
         return value
     }
@@ -1361,6 +2123,7 @@ private actor LiveCaptureSenderRuntime {
     private let retrySleeper: any LiveSenderSleeping
     private let bindingStore: LiveCaptureSessionBindingStore
     private let environmentState: LiveCaptureSenderEnvironmentState
+    private let telemetry: LivePhysicalAcceptanceTelemetryRecorder
 
     private var active: ActiveSession?
     private var lastError: String?
@@ -1374,7 +2137,8 @@ private actor LiveCaptureSenderRuntime {
         policy: LiveSenderPolicy,
         retryPolicy: LiveSenderRetryPolicy,
         retrySleeper: any LiveSenderSleeping,
-        environmentState: LiveCaptureSenderEnvironmentState
+        environmentState: LiveCaptureSenderEnvironmentState,
+        telemetry: LivePhysicalAcceptanceTelemetryRecorder
     ) {
         self.paths = paths
         self.documentsRoot = documentsRoot.standardizedFileURL
@@ -1384,6 +2148,7 @@ private actor LiveCaptureSenderRuntime {
         self.retryPolicy = retryPolicy
         self.retrySleeper = retrySleeper
         self.environmentState = environmentState
+        self.telemetry = telemetry
         bindingStore = LiveCaptureSessionBindingStore(paths: paths)
     }
 
@@ -1391,9 +2156,15 @@ private actor LiveCaptureSenderRuntime {
         do {
             switch event {
             case .restore:
+                guard environmentState.currentTransferEnabled() else {
+                    return false
+                }
                 try await restore()
                 return active != nil
             case .started(let event):
+                guard environmentState.currentTransferEnabled() else {
+                    return false
+                }
                 guard let pending = try bindingStore.loadPending(
                     documentsRoot: documentsRoot
                 ), pending.event.captureRoot.standardizedFileURL
@@ -1405,14 +2176,16 @@ private actor LiveCaptureSenderRuntime {
                 try await start(pending)
                 return active != nil
             case .frame(let event):
-                guard active != nil else { return false }
+                guard environmentState.currentTransferEnabled(),
+                      active != nil else { return false }
                 guard !livePreparationPausedForThermalPressure() else {
                     return false
                 }
                 _ = try await admit(event)
                 return true
             case .finalized:
-                guard let active else { return false }
+                guard environmentState.currentTransferEnabled(),
+                      let active else { return false }
                 _ = try await restoreCaptureJournal(active)
                 return true
             case .aborted(let event):
@@ -1421,6 +2194,12 @@ private actor LiveCaptureSenderRuntime {
             }
         } catch {
             lastError = Self.message(for: error)
+            if let active {
+                telemetry.recordSenderError(
+                    captureRoot: active.captureRoot,
+                    message: lastError ?? "Live sender failed."
+                )
+            }
             return false
         }
     }
@@ -1429,6 +2208,7 @@ private actor LiveCaptureSenderRuntime {
         var outerAttempt = 1
         while !Task.isCancelled {
             guard let current = active else { return }
+            guard environmentState.currentTransferEnabled() else { return }
             guard environmentState.currentPairedDesktopID()
                     == current.binding.session.authorization.desktopID else {
                 return
@@ -1436,7 +2216,13 @@ private actor LiveCaptureSenderRuntime {
             let environment = environmentState.environment(
                 captureRoot: current.captureRoot
             )
-            guard policy.pauseReason(for: environment) == nil else { return }
+            if let pauseReason = policy.pauseReason(for: environment) {
+                telemetry.recordPause(
+                    captureRoot: current.captureRoot,
+                    reason: pauseReason
+                )
+                return
+            }
             let before: LiveSenderQueueSnapshot
             do {
                 before = try await current.queue.snapshot()
@@ -1452,17 +2238,31 @@ private actor LiveCaptureSenderRuntime {
                     throw LiveSenderQueueError.authorizationMismatch
                 }
                 let requester = try await connector.requester(for: context)
+                let root = current.captureRoot
                 let sender = LiveSender(
                     queue: current.queue,
                     requester: requester,
                     policy: policy,
-                    retryPolicy: retryPolicy
+                    retryPolicy: retryPolicy,
+                    requestObserver: { [telemetry] observation in
+                        telemetry.recordRequestObservation(
+                            captureRoot: root,
+                            observation: observation
+                        )
+                    }
                 )
-                let root = current.captureRoot
+                let runStarted = ProcessInfo.processInfo.systemUptime
                 let execution = await sender.runOnceDetailed(
                     environment: { [environmentState] in
                         environmentState.environment(captureRoot: root)
                     }
+                )
+                telemetry.recordRun(
+                    captureRoot: root,
+                    summary: execution.summary,
+                    interruption: execution.interruptionDisposition,
+                    durationSeconds:
+                        ProcessInfo.processInfo.systemUptime - runStarted
                 )
                 lastSummary = execution.summary
                 lastError = execution.summary.lastError
@@ -1471,6 +2271,11 @@ private actor LiveCaptureSenderRuntime {
                     return
                 }
                 let sent = try await current.queue.snapshot()
+                telemetry.recordQueue(
+                    captureRoot: current.captureRoot,
+                    snapshot: sent,
+                    force: sent.finalized
+                )
                 if sent.finalized {
                     try bindingStore.clearCurrent(current.binding)
                     active = nil
@@ -1478,6 +2283,11 @@ private actor LiveCaptureSenderRuntime {
                 }
                 _ = try await restoreCaptureJournal(current)
                 let after = try await current.queue.snapshot()
+                telemetry.recordQueue(
+                    captureRoot: current.captureRoot,
+                    snapshot: after,
+                    force: after.finalized
+                )
                 if after.finalized {
                     try bindingStore.clearCurrent(current.binding)
                     active = nil
@@ -1505,7 +2315,13 @@ private actor LiveCaptureSenderRuntime {
                 }
             } catch {
                 lastError = Self.message(for: error)
-                switch Self.interruptionDisposition(for: error) {
+                let disposition = Self.interruptionDisposition(for: error)
+                telemetry.recordInterruption(
+                    captureRoot: current.captureRoot,
+                    disposition: disposition,
+                    message: lastError ?? "Live sender failed."
+                )
+                switch disposition {
                 case .none, .blocked, .cancelled:
                     return
                 case .retryable:
@@ -1528,6 +2344,12 @@ private actor LiveCaptureSenderRuntime {
     }
 
     func abandonPendingTransfer() throws {
+        if let active {
+            telemetry.recordFinalization(
+                captureRoot: active.captureRoot,
+                state: "publication_abandoned"
+            )
+        }
         try bindingStore.abandonTransferPointers()
         active = nil
         lastError = nil
@@ -1679,7 +2501,20 @@ private actor LiveCaptureSenderRuntime {
             limits: limits,
             session: binding.session
         )
-        if try await queue.snapshot().finalized {
+        telemetry.attach(
+            captureRoot: captureRoot,
+            createdAt: Date(),
+            sessionID: binding.session.sessionID,
+            transferEnabled: environmentState.currentTransferEnabled(),
+            limits: limits
+        )
+        let restoredSnapshot = try await queue.snapshot()
+        telemetry.recordQueue(
+            captureRoot: captureRoot,
+            snapshot: restoredSnapshot,
+            force: true
+        )
+        if restoredSnapshot.finalized {
             if let pending = try bindingStore.loadPending(
                 documentsRoot: documentsRoot
             ) {
@@ -1801,6 +2636,18 @@ private actor LiveCaptureSenderRuntime {
             ),
             limits: limits,
             session: session
+        )
+        telemetry.attach(
+            captureRoot: captureRoot,
+            createdAt: event.createdAt,
+            sessionID: session.sessionID,
+            transferEnabled: environmentState.currentTransferEnabled(),
+            limits: limits
+        )
+        telemetry.recordQueue(
+            captureRoot: captureRoot,
+            snapshot: try await queue.snapshot(),
+            force: true
         )
         try bindingStore.claimCurrent(
             binding,
@@ -1924,11 +2771,16 @@ private actor LiveCaptureSenderRuntime {
             assets: assets
         )
         let result = try await active.queue.enqueue(frame)
+        telemetry.recordQueue(
+            captureRoot: captureRoot,
+            snapshot: result.snapshot
+        )
         switch result.disposition {
         case .accepted, .duplicate:
             return true
         case .capacityExceeded:
             lastError = "Live sender queue capacity was reached; source evidence remains local."
+            telemetry.recordQueueOverflow(captureRoot: captureRoot)
             return false
         }
     }
@@ -1982,6 +2834,15 @@ private actor LiveCaptureSenderRuntime {
                 finalSequenceID: event.finalSequenceID,
                 sourceManifest: sourceManifest
             )
+        )
+        telemetry.recordQueue(
+            captureRoot: captureRoot,
+            snapshot: try await active.queue.snapshot(),
+            force: true
+        )
+        telemetry.recordFinalization(
+            captureRoot: captureRoot,
+            state: "local_finalization_pending"
         )
         return true
     }
@@ -2083,6 +2944,9 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
     private var documentsRoot: URL?
     private let runtime: LiveCaptureSenderRuntime?
     private let random: (any LiveRandomSource)?
+    private let transferPreference: LiveCaptureTransferPreference?
+    private let telemetry: LivePhysicalAcceptanceTelemetryRecorder?
+    private let limits: LiveSenderQueueLimits?
     private let pausesLivePreparationAtSeriousThermalState: Bool
     private let driveTaskSlot = DriveTaskSlot()
 
@@ -2123,11 +2987,17 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
         monitorNetwork: Bool,
         initialNetworkAvailable: Bool,
         initialThermalState: LiveSenderThermalState? = nil,
-        outerRetrySleeper: any LiveSenderSleeping = SystemLiveSenderSleeper()
+        outerRetrySleeper: any LiveSenderSleeping = SystemLiveSenderSleeper(),
+        transferDefaults: UserDefaults = .standard
     ) throws {
+        let transferPreference = LiveCaptureTransferPreference(
+            defaults: transferDefaults
+        )
+        let telemetry = LivePhysicalAcceptanceTelemetryRecorder()
         let environmentState = LiveCaptureSenderEnvironmentState(
             networkAvailable: initialNetworkAvailable,
-            thermalState: initialThermalState
+            thermalState: initialThermalState,
+            transferEnabled: transferPreference.isEnabled
         )
         let recoveryStore = LiveCaptureSessionBindingStore(paths: paths)
         let runtime = LiveCaptureSenderRuntime(
@@ -2138,13 +3008,17 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
             policy: policy,
             retryPolicy: retryPolicy,
             retrySleeper: outerRetrySleeper,
-            environmentState: environmentState
+            environmentState: environmentState,
+            telemetry: telemetry
         )
         self.environmentState = environmentState
         self.recoveryStore = recoveryStore
         self.documentsRoot = documentsRoot.standardizedFileURL
         self.runtime = runtime
         self.random = random
+        self.transferPreference = transferPreference
+        self.telemetry = telemetry
+        self.limits = limits
         pausesLivePreparationAtSeriousThermalState =
             policy.pausesAtSeriousThermalState
         var capturedEvents: AsyncStream<LiveCaptureBridgeEvent>.Continuation?
@@ -2196,6 +3070,10 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
             monitor.pathUpdateHandler = { [weak self] path in
                 let available = path.status == .satisfied
                 self?.environmentState?.setNetworkAvailable(available)
+                self?.telemetry?.recordTransition(
+                    kind: "network",
+                    value: available ? "available" : "unavailable"
+                )
                 if available {
                     self?.wakeSender()
                 } else {
@@ -2215,6 +3093,9 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
     private init() {
         runtime = nil
         random = nil
+        transferPreference = nil
+        telemetry = nil
+        limits = nil
         pausesLivePreparationAtSeriousThermalState = false
     }
 
@@ -2234,13 +3115,47 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
     func captureStarted(
         _ event: LiveCaptureSessionStartedEvent
     ) -> LiveCaptureIngressDisposition {
-        guard eventContinuation != nil,
+        guard let telemetry,
+              let limits else {
+            return .disabled
+        }
+        let enabled = isLiveTransferEnabled
+        telemetry.attach(
+            captureRoot: event.captureRoot,
+            createdAt: event.createdAt,
+            sessionID: nil,
+            transferEnabled: enabled,
+            limits: limits
+        )
+        if let values = environmentState?.currentTransitionValues() {
+            telemetry.recordTransition(
+                kind: "foreground",
+                value: values.foreground ? "foreground" : "background"
+            )
+            telemetry.recordTransition(
+                kind: "network",
+                value: values.networkAvailable ? "available" : "unavailable"
+            )
+            telemetry.recordTransition(
+                kind: "thermal",
+                value: values.thermalState.rawValue
+            )
+        }
+        guard enabled,
+              eventContinuation != nil,
               let desktopID = environmentState?.currentPairedDesktopID(),
               let recoveryStore,
               let documentsRoot,
               let random else {
+            telemetry.recordIngress(
+                captureRoot: event.captureRoot,
+                event: "capture_started",
+                disposition: .disabled,
+                force: true
+            )
             return .disabled
         }
+        let sessionID: String
         do {
             let metadataURL = event.captureRoot.appendingPathComponent(
                 "metadata/live/session.json"
@@ -2273,6 +3188,7 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
                 )
                 sessionMetadata = created.metadata
             }
+            sessionID = sessionMetadata.sessionID
             let metadata = try LiveCaptureFileEvidence.reference(
                 captureRoot: event.captureRoot,
                 relativePath: "metadata/live/session.json",
@@ -2289,36 +3205,113 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
                 documentsRoot: documentsRoot
             )
         } catch {
+            telemetry.recordSenderError(
+                captureRoot: event.captureRoot,
+                message: String(describing: error)
+            )
+            telemetry.recordIngress(
+                captureRoot: event.captureRoot,
+                event: "capture_started",
+                disposition: .overflow,
+                force: true
+            )
             return .overflow
         }
-        return yield(.started(event))
+        telemetry.attach(
+            captureRoot: event.captureRoot,
+            createdAt: event.createdAt,
+            sessionID: sessionID,
+            transferEnabled: true,
+            limits: limits
+        )
+        let disposition = yield(.started(event))
+        telemetry.recordIngress(
+            captureRoot: event.captureRoot,
+            event: "capture_started",
+            disposition: disposition,
+            force: true
+        )
+        return disposition
     }
 
     @discardableResult
     func frameCommitted(
         _ event: LiveCaptureFrameCommittedEvent
     ) -> LiveCaptureIngressDisposition {
+        guard isLiveTransferEnabled else {
+            telemetry?.recordIngress(
+                captureRoot: event.captureRoot,
+                event: "frame_committed",
+                disposition: .disabled
+            )
+            return .disabled
+        }
         if livePreparationPausedForThermalPressure {
+            telemetry?.recordIngress(
+                captureRoot: event.captureRoot,
+                event: "frame_committed",
+                disposition: .accepted
+            )
             return .accepted
         }
-        return yield(.frame(event))
+        let disposition = yield(.frame(event))
+        telemetry?.recordIngress(
+            captureRoot: event.captureRoot,
+            event: "frame_committed",
+            disposition: disposition
+        )
+        return disposition
     }
 
     @discardableResult
     func captureFinalized(
         _ event: LiveCaptureFinalizedEvent
     ) -> LiveCaptureIngressDisposition {
+        telemetry?.recordFinalizationEvidence(event)
+        guard isLiveTransferEnabled else {
+            telemetry?.recordIngress(
+                captureRoot: event.captureRoot,
+                event: "capture_finalized",
+                disposition: .disabled,
+                force: true
+            )
+            return .disabled
+        }
         if livePreparationPausedForThermalPressure {
+            telemetry?.recordIngress(
+                captureRoot: event.captureRoot,
+                event: "capture_finalized",
+                disposition: .accepted,
+                force: true
+            )
             return .accepted
         }
-        return yield(.finalized(event))
+        let disposition = yield(.finalized(event))
+        telemetry?.recordIngress(
+            captureRoot: event.captureRoot,
+            event: "capture_finalized",
+            disposition: disposition,
+            force: true
+        )
+        return disposition
     }
 
     @discardableResult
     func captureAborted(
         _ event: LiveCaptureAbortedEvent
     ) -> LiveCaptureIngressDisposition {
-        yield(.aborted(event))
+        telemetry?.recordFinalization(
+            captureRoot: event.captureRoot,
+            state: "capture_aborted"
+        )
+        let disposition = yield(.aborted(event))
+        telemetry?.recordIngress(
+            captureRoot: event.captureRoot,
+            event: "capture_aborted",
+            disposition: disposition,
+            force: true
+        )
+        return disposition
     }
 
     func hasPendingTransfer() async throws -> Bool {
@@ -2334,6 +3327,10 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
 
     func setForeground(_ value: Bool) {
         environmentState?.setForeground(value)
+        telemetry?.recordTransition(
+            kind: "foreground",
+            value: value ? "foreground" : "background"
+        )
         if value {
             guard let state = environmentState?.refreshThermalState() else {
                 return
@@ -2346,6 +3343,10 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
 
     func setPairedDesktopID(_ value: String?) {
         environmentState?.setPairedDesktopID(value)
+        telemetry?.recordTransition(
+            kind: "pairing",
+            value: value == nil ? "unpaired" : "paired"
+        )
         if value != nil {
             _ = eventContinuation?.yield(.restore)
             wakeSender()
@@ -2354,7 +3355,36 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
         }
     }
 
+    var isLiveTransferEnabled: Bool {
+        transferPreference?.isEnabled ?? false
+    }
+
+    var physicalAcceptanceTelemetryWriteError: String? {
+        telemetry?.writeError
+    }
+
+    func setLiveTransferEnabled(_ enabled: Bool) {
+        guard let transferPreference,
+              let environmentState else { return }
+        transferPreference.setEnabled(enabled)
+        environmentState.setTransferEnabled(enabled)
+        telemetry?.setTransferEnabled(enabled)
+        if enabled {
+            guard environmentState.currentPairedDesktopID() != nil else {
+                return
+            }
+            _ = eventContinuation?.yield(.restore)
+            wakeSender()
+        } else {
+            driveTaskSlot.cancel()
+        }
+    }
+
 #if CAPTURE_SPLAT_LIVE_TESTING
+    func waitForPhysicalAcceptanceTelemetryWritesForTesting() {
+        telemetry?.waitForWritesForTesting()
+    }
+
     func setThermalStateForTesting(_ value: LiveSenderThermalState) {
         environmentState?.setThermalStateForTesting(value)
         applyThermalTransition(value)
@@ -2362,10 +3392,15 @@ final class LiveCaptureSenderBridge: LiveCaptureSenderEventSink, @unchecked Send
 #endif
 
     private func wakeSender() {
+        guard environmentState?.currentTransferEnabled() == true,
+              environmentState?.currentPairedDesktopID() != nil else {
+            return
+        }
         _ = sendContinuation?.yield(())
     }
 
     private func applyThermalTransition(_ state: LiveSenderThermalState) {
+        telemetry?.recordTransition(kind: "thermal", value: state.rawValue)
         if state == .serious || state == .critical {
             driveTaskSlot.cancel()
         } else {

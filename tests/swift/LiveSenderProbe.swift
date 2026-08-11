@@ -1459,6 +1459,25 @@ private struct LiveSenderProbe {
             limits: limits,
             session: session
         )
+        var contradictoryOpenACKRejected = false
+        do {
+            try await reopened.validateAcknowledgementContract(
+                LiveSenderAcknowledgement(
+                    sessionID: sessionID,
+                    operation: .resume,
+                    status: .accepted,
+                    receivedCount: 2,
+                    contiguousCount: 2,
+                    pendingCount: 0,
+                    expectedFrameCount: nil,
+                    nextExpectedSequenceID: 3,
+                    missingRanges: [try LiveSenderMissingRange(start: 1, end: 1)],
+                    finalized: false
+                )
+            )
+        } catch LiveSenderQueueError.invalidAcknowledgement {
+            contradictoryOpenACKRejected = true
+        }
         let reopenedSession = try await reopened.sessionForSend()
         let reopenedSessionURL = try await reopened.verifiedFileURL(
             for: reopenedSession.metadata
@@ -1619,6 +1638,7 @@ private struct LiveSenderProbe {
             "corrupt_manifest_restart_rejected": corruptManifestRestartRejected,
             "manifest_schema_mismatch_rejected": manifestSchemaMismatchRejected,
             "restart_preserved_binding": restartPreservedBinding,
+            "contradictory_open_ack_rejected": contradictoryOpenACKRejected,
             "pre_manifest_session_sent": preManifestSessionSent,
             "expected_count_promoted": finalizationReadyAfterRestore,
             "stale_nil_ignored": staleNilResult.snapshot.finalizationPending

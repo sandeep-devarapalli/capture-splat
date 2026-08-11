@@ -15,6 +15,7 @@ struct LivePairingView: View {
     @State private var hasPendingTransfer = false
     @State private var confirmsAbandonTransfer = false
     @State private var transferRecoveryError: String?
+    @State private var sendsCapturesLive = true
 
     var body: some View {
         NavigationStack {
@@ -22,6 +23,7 @@ struct LivePairingView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     authorityCard
                     statusCard
+                    transferControlCard
                     pairingControls
                     if hasPendingTransfer {
                         transferRecoveryCard
@@ -52,7 +54,11 @@ struct LivePairingView: View {
             }
         }
         .task {
+            sendsCapturesLive = liveSender.isLiveTransferEnabled
             await refreshPendingTransfer()
+        }
+        .onChange(of: sendsCapturesLive) { _, enabled in
+            liveSender.setLiveTransferEnabled(enabled)
         }
     }
 
@@ -112,6 +118,29 @@ struct LivePairingView: View {
         .padding()
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
         .accessibilityIdentifier("live-pairing-status")
+    }
+
+    private var transferControlCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle("Send captures live", isOn: $sendsCapturesLive)
+                .font(.headline)
+                .accessibilityIdentifier("live-transfer-enabled")
+            Text(
+                sendsCapturesLive
+                    ? "Capture evidence is queued for the paired Mac when network, thermal, and foreground gates permit."
+                    : "Live transfer is paused. Capture Splat continues saving accepted frames and metadata locally."
+            )
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            if let error = liveSender.physicalAcceptanceTelemetryWriteError {
+                Text("Transfer telemetry could not be updated: \(error)")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding()
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityIdentifier("live-transfer-control")
     }
 
     @ViewBuilder

@@ -532,8 +532,11 @@ window, not the total durable journal: as ACKs drain queued records, the single
 worker incrementally refills that window from the journal. The whole capture
 does not have to fit in queue state at once, and this does not raise the
 separate 360-frame product cap.
-Two physical iPhone-to-Mac cycles, including receiver restart and Wi-Fi
-interruption, remain required before claiming LAN/device acceptance.
+The strict [live physical-acceptance gate](docs/live_physical_acceptance.md)
+compares matched sender-disabled and sender-enabled captures and binds the
+enabled run to the finalized World Studio session. Two physical iPhone-to-Mac
+cycles, including receiver restart, Wi-Fi interruption, and app-relaunch
+recovery, remain required before claiming LAN/device acceptance.
 
 ## Linux, Windows, And Cloud GPUs
 
