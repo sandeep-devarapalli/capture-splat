@@ -1418,6 +1418,17 @@ public actor LiveSenderQueue {
                     "ACK missing ranges do not match its received count"
                 )
             }
+        } else {
+            guard acknowledgement.missingRanges.allSatisfy({
+                $0.start >= acknowledgement.nextExpectedSequenceID
+            }), (acknowledgement.pendingCount == 0
+                ? acknowledgement.missingRanges.isEmpty
+                : acknowledgement.missingRanges.first?.start
+                    == acknowledgement.nextExpectedSequenceID) else {
+                throw LiveSenderQueueError.invalidAcknowledgement(
+                    "Progressive ACK missing ranges conflict with its contiguous progress"
+                )
+            }
         }
         if let sequence = acknowledgement.sequenceID, sequence < 1 {
             throw LiveSenderQueueError.invalidAcknowledgement("sequence_id must be positive")

@@ -219,6 +219,7 @@ def test_progressive_session_binding_is_durable_and_fail_closed(
 
     assert result == {
         "conflicting_binding_rejected": True,
+        "contradictory_open_ack_rejected": True,
         "corrupt_manifest_rejected": True,
         "corrupt_manifest_restart_rejected": True,
         "derived_session_id_matches": True,
