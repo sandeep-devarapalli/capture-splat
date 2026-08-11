@@ -589,7 +589,7 @@ struct ContentView: View {
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Label("Move like a slow video; haptics mark sharp RGB-D frames for the Mac 3DGS gate.", systemImage: "record.circle")
+            Label("Side-step 7-10 cm, keep textured edges visible, then hold briefly; each haptic marks a kept RGB-D frame.", systemImage: "record.circle")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
@@ -690,7 +690,7 @@ struct ContentView: View {
                     .font(.caption)
                     .fontWeight(.semibold)
                 Spacer()
-                Text("\(capture.acceptedKeyframes) kept | \(capture.skippedKeyframes) skipped")
+                Text("\(capture.acceptedKeyframes) kept | \(capture.skippedKeyframes) quality holds | \(capture.noveltyWaits) move waits")
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -1566,7 +1566,7 @@ struct ContentView: View {
         switch capture.captureBlockerStatus {
         case "Clear":
             return .green
-        case "Side-step now", "Needs translation":
+        case "Side-step now", "Needs translation", "Viewpoint change", "New viewpoint", "Stronger viewpoint":
             return .yellow
         case "Waiting":
             return .secondary

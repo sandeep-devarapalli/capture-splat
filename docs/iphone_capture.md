@@ -14,10 +14,11 @@ RealityKit scene-understanding wireframe plus a gravity-aligned map of the
 camera trail, observed surface cells, accepted-keyframe coverage, and heading.
 Switch to **Camera** to hide these inspection overlays without changing the
 capture gate. At serious thermal state the live mesh is hidden and the map
-remains available. At critical thermal state surface guidance is paused while
-blockers, recording, and export continue. The capture overlay states when
-thermal protection hides the mesh; this does not mean ARKit mesh accumulation
-or RGB-D recording stopped.
+remains available; the UI instructs the operator to stop, preserve, and cool
+to nominal. At critical thermal state surface guidance is paused and the UI
+instructs an immediate stop. Capture persistence remains available until the
+operator stops, but a serious/critical run is not valid thermal acceptance
+evidence.
 
 Without LiDAR, Guidance degrades to detected planes, feature points, and camera
 trajectory where ARKit provides them. This is not dense RGB-only surface
@@ -32,9 +33,18 @@ marks an accepted frame. Accepted frames are chosen from blur/detail,
 exposure stability, camera motion rate, ARKit tracking, LiDAR depth coverage,
 parallax, overlap, and feature-point support.
 
+For Video 3DGS, use a stop-and-step motion: side-step 7-10 cm while keeping
+textured edges visible, then hold briefly for the haptic before moving again.
+The app first checks camera baseline without sampling image quality. A new
+sector needs the existing 5 cm baseline; the same sector needs the existing
+7 cm baseline. Insufficient movement is reported separately as a lightweight
+move wait. It is not a rejected keyframe and does not increment quality holds.
+At serious and critical thermal state, full candidate checks slow from 5 Hz to
+2 Hz and 1 Hz respectively; no quality threshold is relaxed.
+
 Candidates captured while the camera rotates or translates too fast are held
-with the `fast_motion` skip reason. This is a motion-blur quality proxy from
-ARKit pose deltas, not an image-quality proof. Each saved frame includes
+with the `fast_motion` quality-hold reason. This is a motion-blur quality proxy
+from ARKit pose deltas, not an image-quality proof. Each saved frame includes
 `capture_quality` metadata in `capture.json`, including motion-rate telemetry
 (`angular_velocity_deg_s`, `translation_speed_m_s`) so host reports can
 separate low-texture holds from fast-motion holds. The host `ingest` and
@@ -65,7 +75,16 @@ view.
 Smart quality-gated keyframes are mandatory in Video 3DGS Max. The app does
 not expose a timed/fixed-interval fallback: more frames are useful only when
 they retain blur, exposure, tracking, overlap, parallax, and feature-support
-evidence. Rejected candidates remain telemetry and are not trainer input.
+evidence. Quality-held candidates remain telemetry and are not trainer input.
+The v0.1 report retains `skipped_keyframe_candidates` for compatibility and
+also labels that value as `quality_gate_hold_count`; novelty waits have
+separate counts, reasons, and bounded events.
+
+Begin a measured capture only after the phone returns to nominal thermal
+state. If it reaches serious, stop and preserve the local capture, let the
+phone cool, and restart the acceptance cycle from nominal. Serious/critical
+sender suspension protects capture persistence but does not make a warm run
+valid thermal-performance evidence.
 
 Desk / Cluster and Detail Repair are full-scene captures. They start without a
 single-point subject lock so a nearby bottle, keyboard, or other small item does
