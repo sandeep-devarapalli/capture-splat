@@ -9,6 +9,10 @@ Use **Video 3DGS Max** for training input. The app records quality-gated RGB-D
 keyframes plus a continuous HEVC video and timestamped ARKit pose/intrinsics
 index. It does not train 3DGS on-device.
 
+Capture and finalize locally, then open **Projects** and use **Manual Export**.
+That is the production iPhone-to-host path. World Studio live transfer is an
+optional experiment and is not required for reconstruction.
+
 The capture view defaults to **Guidance**. On supported LiDAR iPhones it shows
 RealityKit scene-understanding wireframe plus a gravity-aligned map of the
 camera trail, observed surface cells, accepted-keyframe coverage, and heading.

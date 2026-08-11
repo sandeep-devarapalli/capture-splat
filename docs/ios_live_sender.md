@@ -6,6 +6,13 @@ contract now supplies its pre-manifest identity and final-manifest binding. It
 does not start networking, change the capture loop, or claim physical-device
 acceptance.
 
+## Product boundary
+
+Local finalization followed by **Manual Export** is the production iPhone data
+path. This sender foundation is optional research for future hardware and must
+not block capture, reconstruction, or World Studio package review. Any future
+activation requires a separate device-class thermal and throughput gate.
+
 ## Implemented boundary
 
 The iOS target now contains four isolated components:
