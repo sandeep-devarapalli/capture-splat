@@ -807,6 +807,15 @@ private enum LiveCaptureSenderBridgeProbe {
         let restartHandled = await eventually {
             await restartConnector.calls() > 0
         }
+        _ = try await eventually {
+            let snapshot = try await queueSnapshot(
+                paths: paths,
+                documents: documents,
+                authorization: authorization,
+                sessionID: sessionID
+            )
+            return snapshot.finalizationPending && snapshot.queuedFrameCount == 2
+        }
         let restoredSnapshot = try await queueSnapshot(
             paths: paths,
             documents: documents,
