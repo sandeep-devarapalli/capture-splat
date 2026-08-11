@@ -436,7 +436,13 @@ evidence; trained splats are review proposals, not metric, collision, semantic,
 or navigation authority. Finite PLY and QA decisions are not high-quality
 claims.
 
-### Replay a capture live to World Studio
+### Optional replay and experimental live transfer
+
+The production iPhone workflow is local-first: record and finalize on device,
+then use **Manual Export** from Projects. Live transfer is disabled by default,
+is not required for reconstruction, and is not a Capture Splat release gate.
+It remains available as an opt-in experiment and as a transport path for future
+devices whose thermal budget can support it.
 
 Phase 1 can replay an existing capture into World Studio while it is listening
 on loopback:
@@ -532,8 +538,11 @@ window, not the total durable journal: as ACKs drain queued records, the single
 worker incrementally refills that window from the journal. The whole capture
 does not have to fit in queue state at once, and this does not raise the
 separate 360-frame product cap.
-Two physical iPhone-to-Mac cycles, including receiver restart and Wi-Fi
-interruption, remain required before claiming LAN/device acceptance.
+The strict [experimental live physical-acceptance gate](docs/live_physical_acceptance.md)
+compares matched sender-disabled and sender-enabled captures and binds the
+enabled run to the finalized World Studio session. It is retained for transport
+research, but it does not block local capture, manual export, reconstruction,
+or World Studio package review.
 
 ## Linux, Windows, And Cloud GPUs
 

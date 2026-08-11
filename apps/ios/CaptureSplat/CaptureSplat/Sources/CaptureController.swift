@@ -3,6 +3,7 @@ import AVFoundation
 import CoreImage
 import CoreLocation
 import CoreMotion
+import Darwin
 import Foundation
 import OSLog
 import RoomPlan
@@ -175,6 +176,17 @@ private struct MeshExportResult {
     let plyWritten: Bool
     let status: String
     let error: String?
+}
+
+private struct ProcessMemorySample {
+    let physicalFootprintBytes: UInt64
+    let residentBytes: UInt64
+}
+
+private struct ProcessMemoryProbeResult {
+    let sample: ProcessMemorySample?
+    let kernelReturnCode: kern_return_t
+    let requiredFieldsAvailable: Bool
 }
 
 private struct MeshAnchorExportPlan {
@@ -393,6 +405,24 @@ final class CaptureController: NSObject, ObservableObject {
     private let completionHaptic = UINotificationFeedbackGenerator()
     private let writeQueue = DispatchQueue(label: "capture-splat.writer")
     private let maskWriteQueue = DispatchQueue(label: "capture-splat.person-mask-writer")
+    private let processMemoryProbeQueue = DispatchQueue(
+        label: "capture-splat.process-memory-probe",
+        qos: .utility
+    )
+    private let processMemorySampleIntervalSeconds: TimeInterval = 2.0
+    private var processMemoryProbeGeneration = 0
+    private var processMemoryProbeInFlight = false
+    private var lastProcessMemoryProbeUptime: TimeInterval = -.infinity
+    private var processMemorySampleCount = 0
+    private var processMemoryProbeFailureCount = 0
+    private var processMemoryProbeStatus = "not_started"
+    private var processMemoryLastKernelReturnCode: kern_return_t?
+    private var currentPhysicalFootprintBytes: UInt64?
+    private var peakPhysicalFootprintBytes: UInt64?
+    private var currentResidentBytes: UInt64?
+    private var peakResidentBytes: UInt64?
+    private var captureStartUptime: TimeInterval?
+    private var captureEndUptime: TimeInterval?
     private var csvHandles: [String: FileHandle] = [:]
     private var frames: [CapturedFrame] = []
     private var session: ARSession?
@@ -970,8 +1000,10 @@ final class CaptureController: NSObject, ObservableObject {
             currentSpatialGuidanceThermalState = nil
             currentSpatialGuidanceRenderState = nil
             lastSpatialGuidanceMeshPauseReason = "not_started"
-            spatialGuidanceCaptureStartUptime = ProcessInfo.processInfo.systemUptime
+            let captureStartedAt = ProcessInfo.processInfo.systemUptime
+            spatialGuidanceCaptureStartUptime = captureStartedAt
             spatialGuidanceCaptureEndUptime = nil
+            resetProcessMemoryEvidence(at: captureStartedAt)
             publishSpatialGuidanceCells()
             rgbRateSamples.removeAll()
             depthRateSamples.removeAll()
@@ -984,6 +1016,10 @@ final class CaptureController: NSObject, ObservableObject {
             liveSenderCaptureActive =
                 liveSenderEventSink?.captureStarted(liveStart) == .accepted
             isRecording = true
+            scheduleProcessMemorySampleIfNeeded(
+                at: captureStartedAt,
+                force: true
+            )
             lastSpatialGuidancePolicy = ""
             applySpatialGuidanceThermalPolicy(ProcessInfo.processInfo.thermalState)
             capturePackageState = .recording
@@ -1028,6 +1064,8 @@ final class CaptureController: NSObject, ObservableObject {
     func stopRecording() {
         guard isRecording, !isFinalizing else { return }
         let stoppedAt = ProcessInfo.processInfo.systemUptime
+        captureEndUptime = stoppedAt
+        scheduleProcessMemorySampleIfNeeded(at: stoppedAt, force: true)
         finishSpatialGuidanceSegments(at: stoppedAt)
         spatialGuidanceCaptureEndUptime = stoppedAt
         isRecording = false
@@ -1292,7 +1330,15 @@ final class CaptureController: NSObject, ObservableObject {
     private func writeMetadata() {
         guard let directory = currentSessionDirectory else { return }
         let metadata = directory.appendingPathComponent("metadata", isDirectory: true)
+        let captureDuration: Any
+        if let captureStartUptime {
+            let duration = max(0, (captureEndUptime ?? ProcessInfo.processInfo.systemUptime) - captureStartUptime)
+            captureDuration = duration.isFinite ? duration : NSNull()
+        } else {
+            captureDuration = NSNull()
+        }
         writeJSON([
+            "capture_duration_seconds": captureDuration,
             "rgb_frames": rgbFrames,
             "depth_frames": depthFrames,
             "imu_rows": imuRows,
@@ -1305,6 +1351,7 @@ final class CaptureController: NSObject, ObservableObject {
             "depth_rate_hz": depthRate,
             "imu_rate_hz": imuRate,
             "gps_rate_hz": gpsRate,
+            "memory": processMemoryReport(),
         ], to: metadata.appendingPathComponent("session_report.json"))
         writeJSON(["capture_clock": "ARFrame.timestamp and CoreMotion/CoreLocation timestamps"], to: metadata.appendingPathComponent("sync_report.json"))
         writeJSON([
@@ -1365,6 +1412,132 @@ final class CaptureController: NSObject, ObservableObject {
            let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: url, options: .atomic)
         }
+    }
+
+    private func resetProcessMemoryEvidence(at uptime: TimeInterval) {
+        processMemoryProbeGeneration &+= 1
+        processMemoryProbeInFlight = false
+        lastProcessMemoryProbeUptime = -.infinity
+        processMemorySampleCount = 0
+        processMemoryProbeFailureCount = 0
+        processMemoryProbeStatus = "pending"
+        processMemoryLastKernelReturnCode = nil
+        currentPhysicalFootprintBytes = nil
+        peakPhysicalFootprintBytes = nil
+        currentResidentBytes = nil
+        peakResidentBytes = nil
+        captureStartUptime = uptime
+        captureEndUptime = nil
+    }
+
+    private func scheduleProcessMemorySampleIfNeeded(at uptime: TimeInterval, force: Bool = false) {
+        guard currentSessionDirectory != nil,
+              !processMemoryProbeInFlight,
+              force || uptime - lastProcessMemoryProbeUptime >= processMemorySampleIntervalSeconds else {
+            return
+        }
+        lastProcessMemoryProbeUptime = uptime
+        processMemoryProbeInFlight = true
+        let generation = processMemoryProbeGeneration
+        processMemoryProbeQueue.async { [weak self] in
+            let result = Self.readProcessMemory()
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.processMemoryProbeGeneration == generation else { return }
+                self.processMemoryProbeInFlight = false
+                self.processMemoryLastKernelReturnCode = result.kernelReturnCode
+                guard let sample = result.sample else {
+                    self.processMemoryProbeFailureCount += 1
+                    self.processMemoryProbeStatus = self.processMemorySampleCount == 0
+                        ? (result.requiredFieldsAvailable ? "task_info_unavailable" : "required_fields_unavailable")
+                        : "available_with_failures"
+                    return
+                }
+                self.processMemorySampleCount += 1
+                self.currentPhysicalFootprintBytes = sample.physicalFootprintBytes
+                self.peakPhysicalFootprintBytes = max(
+                    self.peakPhysicalFootprintBytes ?? 0,
+                    sample.physicalFootprintBytes
+                )
+                self.currentResidentBytes = sample.residentBytes
+                self.peakResidentBytes = max(self.peakResidentBytes ?? 0, sample.residentBytes)
+                self.processMemoryProbeStatus = self.processMemoryProbeFailureCount == 0
+                    ? "available"
+                    : "available_with_failures"
+            }
+        }
+    }
+
+    private static func readProcessMemory() -> ProcessMemoryProbeResult {
+        var information = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size
+        )
+        let result = withUnsafeMutablePointer(to: &information) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { rebound in
+                task_info(
+                    mach_task_self_,
+                    task_flavor_t(TASK_VM_INFO),
+                    rebound,
+                    &count
+                )
+            }
+        }
+        guard result == KERN_SUCCESS else {
+            return ProcessMemoryProbeResult(
+                sample: nil,
+                kernelReturnCode: result,
+                requiredFieldsAvailable: true
+            )
+        }
+        let physicalFootprintEnd = (
+            MemoryLayout<task_vm_info_data_t>.offset(of: \.phys_footprint)
+                ?? MemoryLayout<task_vm_info_data_t>.size
+        ) + MemoryLayout<UInt64>.size
+        let residentEnd = (
+            MemoryLayout<task_vm_info_data_t>.offset(of: \.resident_size)
+                ?? MemoryLayout<task_vm_info_data_t>.size
+        ) + MemoryLayout<UInt64>.size
+        let requiredCount = mach_msg_type_number_t(
+            (max(physicalFootprintEnd, residentEnd) + MemoryLayout<natural_t>.size - 1)
+                / MemoryLayout<natural_t>.size
+        )
+        guard count >= requiredCount else {
+            return ProcessMemoryProbeResult(
+                sample: nil,
+                kernelReturnCode: result,
+                requiredFieldsAvailable: false
+            )
+        }
+        return ProcessMemoryProbeResult(
+            sample: ProcessMemorySample(
+                physicalFootprintBytes: information.phys_footprint,
+                residentBytes: information.resident_size
+            ),
+            kernelReturnCode: result,
+            requiredFieldsAvailable: true
+        )
+    }
+
+    private func processMemoryReport() -> [String: Any] {
+        [
+            "probe": "mach_task_info_TASK_VM_INFO",
+            "status": processMemoryProbeStatus,
+            "sample_interval_seconds": processMemorySampleIntervalSeconds,
+            "sample_count": processMemorySampleCount,
+            "failure_count": processMemoryProbeFailureCount,
+            "current_bytes": processMemoryJSONValue(currentPhysicalFootprintBytes),
+            "peak_bytes": processMemoryJSONValue(peakPhysicalFootprintBytes),
+            "current_physical_footprint_bytes": processMemoryJSONValue(currentPhysicalFootprintBytes),
+            "peak_physical_footprint_bytes": processMemoryJSONValue(peakPhysicalFootprintBytes),
+            "current_resident_bytes": processMemoryJSONValue(currentResidentBytes),
+            "peak_resident_bytes": processMemoryJSONValue(peakResidentBytes),
+            "last_kernel_return_code": processMemoryLastKernelReturnCode.map { Int($0) as Any } ?? NSNull(),
+        ]
+    }
+
+    private func processMemoryJSONValue(_ value: UInt64?) -> Any {
+        guard let value else { return NSNull() }
+        return Int64(min(value, UInt64(Int64.max)))
     }
 
     private func writeJSONLines(_ records: [[String: Any]], to url: URL) {
@@ -5202,6 +5375,7 @@ extension CaptureController: ARSessionDelegate {
         latestFeaturePointCount = frame.rawFeaturePoints?.points.count ?? 0
         updateMotionRate(from: frame)
         if isRecording, currentSessionDirectory != nil {
+            scheduleProcessMemorySampleIfNeeded(at: ProcessInfo.processInfo.systemUptime)
             videoRecorder.append(frame: frame, captureDevice: Self.primaryCaptureDevice)
             schedulePersonMask(from: frame)
         }

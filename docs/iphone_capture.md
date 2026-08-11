@@ -216,6 +216,11 @@ after only one height band.
 
 ## Live sender boundary
 
+For iPhone, record and finalize locally, then use **Manual Export** from
+Projects. This is the production workflow. Live transfer is disabled by
+default and retained only as an opt-in experiment; it is not required for
+preparation, SfM, training, QA, or World Studio review.
+
 The Phase 1 replay path remains compatible. M1B now binds the [Swift sender
 foundation](ios_live_sender.md) downstream of local capture persistence:
 persistent device identity and grants, pinned authenticated transport, a
@@ -293,7 +298,8 @@ separate 360-frame product cap remains unchanged.
 
 The exact [ACK-index benchmark](ios_live_ack_index_benchmark.md) in issue #35
 retains the 360-frame product cap and exact duplicate/conflict ledger. Physical
-LAN behavior is still unaccepted until two iPhone-to-Mac cycles cover receiver
-restart and Wi-Fi interruption. All live frames, cameras, depth, masks, meshes,
-and later reconstruction output remain `proposal_only`, not measurement,
+LAN behavior remains an optional held experiment until controlled device
+evidence covers thermal behavior, receiver restart, and Wi-Fi interruption
+without degrading capture. All live frames, cameras, depth, masks, meshes, and
+later reconstruction output remain `proposal_only`, not measurement,
 collision, navigation, semantic, or physics authority.

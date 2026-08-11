@@ -2,6 +2,7 @@ import Foundation
 import RoomPlan
 import SceneKit
 import SwiftUI
+import UIKit
 
 private enum WorkspaceTab: String, CaseIterable, Identifiable {
     case capture = "Capture"
@@ -64,6 +65,7 @@ struct ContentView: View {
     @State private var captureLibrary: [CaptureLibraryItem] = []
     @State private var selectedCaptureID: String?
     @State private var reviewCaptureID: String?
+    @State private var isLiveTransferPreflightRunning = false
     private let liveSender: LiveCaptureSenderBridge
 
     init(liveSender: LiveCaptureSenderBridge) {
@@ -140,7 +142,9 @@ struct ContentView: View {
                 active ? livePairing.snapshot.desktopID : nil
             )
         }
-        .sheet(item: $activeSheet) { sheet in
+        .sheet(item: $activeSheet, onDismiss: {
+            liveSender.setForeground(UIApplication.shared.applicationState == .active)
+        }) { sheet in
             switch sheet {
             case .export:
                 exportPresetSheet
@@ -509,13 +513,14 @@ struct ContentView: View {
 
     private var compactRecordButton: some View {
         Button {
-            capture.isRecording ? capture.stopRecording() : capture.startRecording()
+            toggleRecording()
         } label: {
             Label(recordButtonTitle, systemImage: recordButtonIcon)
         }
         .buttonStyle(.borderedProminent)
         .disabled(
-            capture.isStarting || capture.isFinalizing || !capture.isRGBEnabled || !capture.isDepthEnabled
+            isLiveTransferPreflightRunning || capture.isStarting || capture.isFinalizing
+                || !capture.isRGBEnabled || !capture.isDepthEnabled
                 || (!capture.isRecording && !canRecordCurrentMode)
         )
         .accessibilityHint(capture.requiresSubjectTarget && !capture.isObjectTargetLocked
@@ -526,12 +531,12 @@ struct ContentView: View {
     private var recordExportControls: some View {
         HStack(spacing: 10) {
             Button {
-                capture.isRecording ? capture.stopRecording() : capture.startRecording()
+                toggleRecording()
             } label: {
                 Label(recordButtonTitle, systemImage: recordButtonIcon)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(capture.isStarting || capture.isFinalizing || !capture.isRGBEnabled || !capture.isDepthEnabled || (!capture.isRecording && !canRecordCurrentMode))
+            .disabled(isLiveTransferPreflightRunning || capture.isStarting || capture.isFinalizing || !capture.isRGBEnabled || !capture.isDepthEnabled || (!capture.isRecording && !canRecordCurrentMode))
 
             Button {
                 activeSheet = .export
@@ -1604,6 +1609,7 @@ struct ContentView: View {
     }
 
     private var recordButtonTitle: String {
+        if isLiveTransferPreflightRunning { return "Checking Live" }
         if capture.isStarting { return "Starting" }
         if capture.isFinalizing { return "Finalizing" }
         if capture.isRecording { return "Stop" }
@@ -1612,10 +1618,38 @@ struct ContentView: View {
     }
 
     private var recordButtonIcon: String {
+        if isLiveTransferPreflightRunning { return "hourglass" }
         if capture.isStarting { return "hourglass" }
         if capture.isFinalizing { return "hourglass" }
         if capture.isRecording { return "stop.fill" }
         return capture.requiresSubjectTarget && !capture.isObjectTargetLocked ? "viewfinder.circle" : "record.circle"
+    }
+
+    @MainActor
+    private func toggleRecording() {
+        if capture.isRecording {
+            capture.stopRecording()
+            return
+        }
+        guard !isLiveTransferPreflightRunning else { return }
+        isLiveTransferPreflightRunning = true
+        liveSender.setForeground(UIApplication.shared.applicationState == .active)
+        Task { @MainActor in
+            defer { isLiveTransferPreflightRunning = false }
+            if livePairing.snapshot.hasCurrentPairing,
+               liveSender.isLiveTransferEnabled {
+                do {
+                    if try await liveSender.hasPendingTransfer() {
+                        activeSheet = .livePairing
+                        return
+                    }
+                } catch {
+                    activeSheet = .livePairing
+                    return
+                }
+            }
+            capture.startRecording()
+        }
     }
 
     private var readinessColor: Color {

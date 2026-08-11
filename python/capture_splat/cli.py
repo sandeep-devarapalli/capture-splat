@@ -21,6 +21,7 @@ from .colmap_support_delta import compare_colmap_support_delta
 from .colmap_support_repair import build_colmap_support_repair
 from .ingest import ingest_capture
 from .live_replay import DEFAULT_LIVE_RECEIVER, replay_live_session
+from .live_physical_acceptance import run_live_physical_acceptance
 from .ply_stats import prune_ply_by_alpha, sanitize_ply_drop_non_finite
 from .prepare_capture import prepare_capture
 from .reconstruct import STAGES, reconstruct_capture
@@ -228,6 +229,20 @@ def main() -> None:
     p_live_replay.add_argument("--disconnect-after", type=int)
     p_live_replay.add_argument("--disconnect-seconds", type=float, default=0.0)
     p_live_replay.add_argument("--resume", action="store_true")
+    p_live_acceptance = sub.add_parser(
+        "live-physical-acceptance",
+        help="Evaluate sender-disabled and sender-enabled physical iPhone evidence",
+    )
+    p_live_acceptance.add_argument("--baseline-capture", type=Path, required=True)
+    p_live_acceptance.add_argument("--enabled-capture", type=Path, required=True)
+    p_live_acceptance.add_argument("--sender-report", type=Path, required=True)
+    p_live_acceptance.add_argument("--receiver-report", type=Path, required=True)
+    p_live_acceptance.add_argument("--receiver-restart-report", type=Path)
+    p_live_acceptance.add_argument("--wifi-interruption-report", type=Path)
+    p_live_acceptance.add_argument("--app-relaunch-report", type=Path)
+    p_live_acceptance.add_argument("--second-capture-cycle-report", type=Path)
+    p_live_acceptance.add_argument("--min-enabled-throughput-ratio", type=float, default=0.90)
+    p_live_acceptance.add_argument("--out", type=Path, required=True)
     p_train = sub.add_parser("train-vksplat", help="Run VkSplat on a COLMAP package")
     p_train.add_argument("--package", type=Path, required=True)
     p_train.add_argument("--out", type=Path, required=True)
@@ -635,6 +650,26 @@ def main() -> None:
             disconnect_after=args.disconnect_after,
             disconnect_seconds=args.disconnect_seconds,
             resume=args.resume,
+        )
+    elif args.command == "live-physical-acceptance":
+        scenario_evidence = {
+            name: path
+            for name, path in {
+                "receiver_restart": args.receiver_restart_report,
+                "wifi_interruption": args.wifi_interruption_report,
+                "app_relaunch": args.app_relaunch_report,
+                "second_capture_cycle": args.second_capture_cycle_report,
+            }.items()
+            if path is not None
+        }
+        payload = run_live_physical_acceptance(
+            args.baseline_capture,
+            args.enabled_capture,
+            args.sender_report,
+            args.receiver_report,
+            args.out,
+            scenario_evidence=scenario_evidence,
+            min_enabled_throughput_ratio=args.min_enabled_throughput_ratio,
         )
     elif args.command == "train-vksplat":
         payload = run_vksplat(args.package, args.out, args.vksplat_root, steps=args.steps, dry_run=args.dry_run, save_train_renders=args.save_train_renders, stop_reset_at=args.stop_reset_at, masks=args.masks, normalization=args.normalization, depth_supervision=args.depth_supervision, normal_supervision=args.normal_supervision)

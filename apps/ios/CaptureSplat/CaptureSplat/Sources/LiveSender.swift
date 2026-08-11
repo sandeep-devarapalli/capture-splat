@@ -1,3 +1,4 @@
+import Dispatch
 import Foundation
 
 protocol LiveAuthenticatedRequesting: Sendable {
@@ -157,28 +158,38 @@ struct LiveSenderDetailedRunResult: Sendable {
     let interruptionDisposition: LiveSenderInterruptionDisposition
 }
 
+struct LiveSenderRequestObservation: Equatable, Sendable {
+    let operation: LiveSenderAcknowledgement.Operation
+    let durationMilliseconds: Double
+    let retryCount: Int
+}
+
 actor LiveSender {
     typealias EnvironmentProvider = @Sendable () async -> LiveSenderEnvironment
     typealias Clock = @Sendable () -> Date
+    typealias RequestObserver = @Sendable (LiveSenderRequestObservation) -> Void
 
     private let queue: LiveSenderQueue
     private let requester: any LiveAuthenticatedRequesting
     private let policy: LiveSenderPolicy
     private let retryPolicy: LiveSenderRetryPolicy
     private let sleeper: any LiveSenderSleeping
+    private let requestObserver: RequestObserver?
 
     init(
         queue: LiveSenderQueue,
         requester: any LiveAuthenticatedRequesting,
         policy: LiveSenderPolicy,
         retryPolicy: LiveSenderRetryPolicy,
-        sleeper: any LiveSenderSleeping = SystemLiveSenderSleeper()
+        sleeper: any LiveSenderSleeping = SystemLiveSenderSleeper(),
+        requestObserver: RequestObserver? = nil
     ) {
         self.queue = queue
         self.requester = requester
         self.policy = policy
         self.retryPolicy = retryPolicy
         self.sleeper = sleeper
+        self.requestObserver = requestObserver
     }
 
     func runOnce(
@@ -536,6 +547,7 @@ actor LiveSender {
         clock: @escaping Clock
     ) async throws -> LiveSenderAcknowledgement {
         var lastError: Error?
+        let requestStarted = DispatchTime.now().uptimeNanoseconds
         for attempt in 1...retryPolicy.maximumAttempts {
             do {
                 if let pause = policy.pauseReason(for: await environment()) {
@@ -556,6 +568,18 @@ actor LiveSender {
                         "ACK identity does not match the requested live resource."
                     )
                 }
+                let requestFinished = DispatchTime.now().uptimeNanoseconds
+                let elapsedNanoseconds = requestFinished >= requestStarted
+                    ? requestFinished - requestStarted
+                    : 0
+                requestObserver?(
+                    LiveSenderRequestObservation(
+                        operation: acknowledgement.operation,
+                        durationMilliseconds:
+                            Double(elapsedNanoseconds) / 1_000_000,
+                        retryCount: attempt - 1
+                    )
+                )
                 return acknowledgement
             } catch {
                 lastError = error

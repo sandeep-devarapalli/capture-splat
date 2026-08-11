@@ -424,8 +424,20 @@ private enum LiveCaptureSenderBridgeProbe {
         guard CommandLine.arguments.count == 3 else {
             throw LiveAuthContractError.invalid("usage: probe SCENARIO WORKING_ROOT")
         }
+        let scenario = CommandLine.arguments[1]
+        if scenario != "physical-acceptance" {
+            UserDefaults.standard.set(
+                true,
+                forKey: LiveCaptureTransferPreference.defaultsKey
+            )
+        }
+        defer {
+            UserDefaults.standard.removeObject(
+                forKey: LiveCaptureTransferPreference.defaultsKey
+            )
+        }
         let root = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true)
-        switch CommandLine.arguments[1] {
+        switch scenario {
         case "metadata":
             try metadata(root: root)
         case "file-evidence":
@@ -454,6 +466,8 @@ private enum LiveCaptureSenderBridgeProbe {
             try await thermalDeferral(root: root, thermalState: .serious)
         case "critical-thermal-deferral":
             try await thermalDeferral(root: root, thermalState: .critical)
+        case "physical-acceptance":
+            try await physicalAcceptance(root: root)
         default:
             throw LiveAuthContractError.invalid("unknown probe scenario")
         }
@@ -822,6 +836,15 @@ private enum LiveCaptureSenderBridgeProbe {
         restartBridge.setPairedDesktopID(authorization.desktopID)
         let restartHandled = await eventually {
             await restartConnector.calls() > 0
+        }
+        _ = try await eventually {
+            let snapshot = try await queueSnapshot(
+                paths: paths,
+                documents: documents,
+                authorization: authorization,
+                sessionID: sessionID
+            )
+            return snapshot.finalizationPending && snapshot.queuedFrameCount == 2
         }
         let restoredSnapshot = try await queueSnapshot(
             paths: paths,
@@ -2354,6 +2377,357 @@ private enum LiveCaptureSenderBridgeProbe {
                 && requesterCalls == 0,
         ])
         _ = restartBridge
+    }
+
+    private static func physicalAcceptance(root: URL) async throws {
+        let suiteName = "capture-splat-physical-acceptance-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            throw LiveAuthContractError.invalid("could not create probe defaults")
+        }
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preference = LiveCaptureTransferPreference(defaults: defaults)
+        let defaultEnabled = preference.isEnabled
+        preference.setEnabled(false)
+        let disabledPersisted =
+            !LiveCaptureTransferPreference(defaults: defaults).isEnabled
+
+        let documents = root.appendingPathComponent("Documents", isDirectory: true)
+        let capture = documents.appendingPathComponent(
+            "capture-physical-acceptance",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: capture,
+            withIntermediateDirectories: true
+        )
+        _ = try writeJPEG(
+            root: capture,
+            path: "rgb/frame_000001.jpg",
+            width: 4,
+            height: 3
+        )
+        _ = try write(
+            capture,
+            path: "depth/depth_000001.npy",
+            data: Data("depth-evidence".utf8)
+        )
+        _ = try write(
+            capture,
+            path: "confidence/confidence_000001.npy",
+            data: Data("confidence-evidence".utf8)
+        )
+
+        let paths = try LiveApplicationSupportPaths(
+            root: root.appendingPathComponent("Application Support/v0.1")
+        )
+        let authorization = try fixtureAuthorization()
+        let transport = BlockingRequester(authorization: authorization)
+        let bridge = try LiveCaptureSenderBridge(
+            paths: paths,
+            documentsRoot: documents,
+            connector: ProbeConnector(
+                context: connectionContext(authorization: authorization),
+                transport: transport
+            ),
+            random: FixedRandom(Data(0..<32)),
+            limits: try queueLimits(),
+            policy: try LiveSenderPolicy(
+                minimumAvailableStorageBytes: 0,
+                requiresForeground: false,
+                pausesAtSeriousThermalState: false
+            ),
+            retryPolicy: try LiveSenderRetryPolicy(
+                maximumAttempts: 1,
+                initialDelayMilliseconds: 0,
+                maximumDelayMilliseconds: 0
+            ),
+            monitorNetwork: false,
+            initialNetworkAvailable: true,
+            transferDefaults: defaults
+        )
+        bridge.setPairedDesktopID(authorization.desktopID)
+        let started = LiveCaptureSessionStartedEvent(
+            captureRoot: capture,
+            createdAt: try LiveAuthTime.parse("2026-07-30T10:00:00.000Z")
+        )
+        let disabledStart = bridge.captureStarted(started)
+        bridge.waitForPhysicalAcceptanceTelemetryWritesForTesting()
+        let sessionMetadataAbsent = !FileManager.default.fileExists(
+            atPath: capture.appendingPathComponent(
+                "metadata/live/session.json"
+            ).path
+        )
+
+        bridge.setLiveTransferEnabled(true)
+        let enabledStart = bridge.captureStarted(started)
+        let requestStarted = await eventually {
+            await transport.calls() > 0
+        }
+        let frame = frameEvent(captureRoot: capture)
+        try LiveCaptureJournal.commitAcceptedFrame(frame)
+        bridge.setLiveTransferEnabled(false)
+        let disabledFrame = bridge.frameCommitted(frame)
+        let manifestSHA256 = "sha256:" + String(repeating: "a", count: 64)
+        let disabledFinalize = bridge.captureFinalized(
+            LiveCaptureFinalizedEvent(
+                captureRoot: capture,
+                finalSequenceID: 1,
+                manifestRelativePath: "capture.json",
+                manifestSizeBytes: 128,
+                manifestSHA256: manifestSHA256
+            )
+        )
+        let callsAfterDisable = await transport.calls()
+        bridge.setForeground(true)
+        bridge.setPairedDesktopID(authorization.desktopID)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let disabledWakesCancelled =
+            await transport.calls() == callsAfterDisable
+        bridge.setLiveTransferEnabled(true)
+        let reenabledWake = await eventually {
+            await transport.calls() > callsAfterDisable
+        }
+        let pendingPreserved = try await bridge.hasPendingTransfer()
+        bridge.waitForPhysicalAcceptanceTelemetryWritesForTesting()
+
+        let reportURL = capture.appendingPathComponent(
+            LivePhysicalAcceptanceTelemetryRecorder.relativePath
+        )
+        let reportBytes = try Data(contentsOf: reportURL)
+        let report = try LiveStrictJSON.decodeCanonical(
+            LivePhysicalAcceptanceTelemetryReport.self,
+            from: reportBytes
+        )
+        try report.validate()
+
+        let observedCapture = documents.appendingPathComponent(
+            "capture-physical-acceptance-observed",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: observedCapture,
+            withIntermediateDirectories: true
+        )
+        let observedPaths = try LiveApplicationSupportPaths(
+            root: root.appendingPathComponent(
+                "Observed Application Support/v0.1"
+            )
+        )
+        let observedSessionID = try LiveSenderProgressiveSessionIdentity.sessionID(
+            sourceSessionSeedBase64URL:
+                "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        )
+        let recoveringRequester = RecoveringRequester(
+            authorization: authorization,
+            sessionID: observedSessionID,
+            failureCount: 1
+        )
+        let observedBridge = try LiveCaptureSenderBridge(
+            paths: observedPaths,
+            documentsRoot: documents,
+            connector: RecoveringConnector(
+                context: connectionContext(authorization: authorization),
+                requester: recoveringRequester
+            ),
+            random: FixedRandom(Data(0..<32)),
+            limits: try queueLimits(),
+            policy: try LiveSenderPolicy(
+                minimumAvailableStorageBytes: 0,
+                requiresForeground: false,
+                pausesAtSeriousThermalState: false
+            ),
+            retryPolicy: try LiveSenderRetryPolicy(
+                maximumAttempts: 2,
+                initialDelayMilliseconds: 0,
+                maximumDelayMilliseconds: 0
+            ),
+            monitorNetwork: false,
+            initialNetworkAvailable: true,
+            transferDefaults: defaults
+        )
+        observedBridge.setPairedDesktopID(authorization.desktopID)
+        let observedStart = observedBridge.captureStarted(
+            LiveCaptureSessionStartedEvent(
+                captureRoot: observedCapture,
+                createdAt: started.createdAt
+            )
+        )
+        let observedReportURL = observedCapture.appendingPathComponent(
+            LivePhysicalAcceptanceTelemetryRecorder.relativePath
+        )
+        let observationsReady = await eventually {
+            guard let bytes = try? Data(contentsOf: observedReportURL),
+                  let value = try? LiveStrictJSON.decodeCanonical(
+                      LivePhysicalAcceptanceTelemetryReport.self,
+                      from: bytes
+                  ) else {
+                return false
+            }
+            return value.requestAcknowledgementSampleCount >= 2
+                && value.requestRetryCount >= 1
+        }
+        observedBridge.waitForPhysicalAcceptanceTelemetryWritesForTesting()
+        let observedBytes = try Data(contentsOf: observedReportURL)
+        let observed = try LiveStrictJSON.decodeCanonical(
+            LivePhysicalAcceptanceTelemetryReport.self,
+            from: observedBytes
+        )
+        try observed.validate()
+
+        let boundedCapture = documents.appendingPathComponent(
+            "capture-physical-acceptance-bounds",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: boundedCapture,
+            withIntermediateDirectories: true
+        )
+        let recorder = LivePhysicalAcceptanceTelemetryRecorder()
+        recorder.attach(
+            captureRoot: boundedCapture,
+            createdAt: started.createdAt,
+            sessionID: nil,
+            transferEnabled: true,
+            limits: try queueLimits()
+        )
+        for index in 0..<80 {
+            recorder.recordTransition(kind: "network", value: "\(index)")
+            recorder.recordRun(
+                captureRoot: boundedCapture,
+                summary: LiveSenderRunSummary(
+                    schema: "capture_splat.live_sender_run.v0.1",
+                    status: .awaitingFrames,
+                    sessionID: nil,
+                    pauseReason: nil,
+                    attemptedFrameCount: 0,
+                    acknowledgedFrameCount: 0,
+                    queuedFrameCount: 0,
+                    queuedBytes: 0,
+                    finalized: false,
+                    lastError: nil
+                ),
+                interruption: .none,
+                durationSeconds: index == 0 ? .nan : 0.01
+            )
+        }
+        for index in 0..<160 {
+            recorder.recordRequestObservation(
+                captureRoot: boundedCapture,
+                observation: LiveSenderRequestObservation(
+                    operation: index.isMultiple(of: 2) ? .session : .resume,
+                    durationMilliseconds: index == 0 ? .nan : Double(index),
+                    retryCount: index % 3
+                )
+            )
+        }
+        recorder.recordIngress(
+            captureRoot: boundedCapture,
+            event: "frame_committed",
+            disposition: .overflow
+        )
+        recorder.recordQueueOverflow(captureRoot: boundedCapture)
+        recorder.recordFinalizationEvidence(
+            LiveCaptureFinalizedEvent(
+                captureRoot: boundedCapture,
+                finalSequenceID: 7,
+                manifestRelativePath: "capture.json",
+                manifestSizeBytes: 256,
+                manifestSHA256: manifestSHA256
+            )
+        )
+        recorder.recordQueue(
+            captureRoot: boundedCapture,
+            snapshot: LiveSenderQueueSnapshot(
+                sessionID: nil,
+                queuedFrameCount: 0,
+                queuedBytes: 0,
+                maximumFrames: 8,
+                maximumBytes: 16 * 1024 * 1024,
+                pendingSequenceIDs: [],
+                omittedPendingCount: 0,
+                receiverMissingRanges: [],
+                finalizationPending: false,
+                finalized: true
+            ),
+            force: true
+        )
+        recorder.waitForWritesForTesting()
+        let boundedBytes = try Data(
+            contentsOf: boundedCapture.appendingPathComponent(
+                LivePhysicalAcceptanceTelemetryRecorder.relativePath
+            )
+        )
+        let bounded = try LiveStrictJSON.decodeCanonical(
+            LivePhysicalAcceptanceTelemetryReport.self,
+            from: boundedBytes
+        )
+        try bounded.validate()
+
+        emit([
+            "ack_latency_observed_after_validation":
+                observationsReady
+                    && observed.requestAcknowledgementLatencyAvailable
+                    && observed.requestAcknowledgementSampleCount >= 2
+                    && observed.requestAcknowledgementLatencyMeanMilliseconds
+                        .isFinite
+                    && observed.requestAcknowledgementLatencyP95Milliseconds
+                        .isFinite
+                    && observed.requestAcknowledgementLatencyMaxMilliseconds
+                        .isFinite,
+            "ack_retry_count_observed": observed.requestRetryCount >= 1,
+            "blocked_request_has_no_false_ack_sample":
+                !report.requestAcknowledgementLatencyAvailable
+                    && report.requestAcknowledgementSampleCount == 0,
+            "bounded_recent_ack_samples":
+                bounded.recentRequestAcknowledgementSamples.count
+                    == LivePhysicalAcceptanceTelemetryReport.maximumRequestSamples,
+            "bounded_recent_samples":
+                bounded.recentRunSamples.count
+                    == LivePhysicalAcceptanceTelemetryReport.maximumRunSamples,
+            "bounded_recent_transitions":
+                bounded.recentTransitions.count
+                    == LivePhysicalAcceptanceTelemetryReport.maximumRecentTransitions,
+            "default_enabled": defaultEnabled,
+            "disabled_frame_disposition": disabledFrame.rawValue,
+            "disabled_finalize_disposition": disabledFinalize.rawValue,
+            "disabled_start_disposition": disabledStart.rawValue,
+            "disabled_wakes_cancelled": disabledWakesCancelled,
+            "enabled_start_disposition": enabledStart.rawValue,
+            "local_journal_preserved":
+                try LiveCaptureJournal.loadAcceptedFrames(
+                    captureRoot: capture
+                ).count == 1,
+            "finalization_evidence_recorded":
+                report.finalSequenceID == 1
+                    && report.manifestSHA256 == manifestSHA256,
+            "finalized_queue_is_empty":
+                bounded.finalizationState == "receiver_finalized"
+                    && bounded.queueCurrentFrames == 0
+                    && bounded.queueCurrentBytes == 0,
+            "pending_transfer_preserved": pendingPreserved,
+            "preference_disabled_persisted": disabledPersisted,
+            "preference_enabled_persisted":
+                LiveCaptureTransferPreference(defaults: defaults).isEnabled,
+            "reenabled_woke_sender": reenabledWake,
+            "report_is_canonical_and_strict":
+                (try LiveStrictJSON.canonicalData(report)) == reportBytes,
+            "request_started": requestStarted,
+            "observed_start_disposition": observedStart.rawValue,
+            "queue_evidence_loss_is_zero":
+                bounded.queueEvidenceLossCount == 0,
+            "queue_overflow_counted": bounded.queueOverflowCount == 2,
+            "session_metadata_absent_while_disabled": sessionMetadataAbsent,
+            "telemetry_is_bounded":
+                bounded.recentRunSamples.count <= 64
+                    && bounded.recentTransitions.count <= 64
+                    && bounded.recentRequestAcknowledgementSamples.count <= 128,
+            "telemetry_write_error_absent":
+                bridge.physicalAcceptanceTelemetryWriteError == nil
+                    && recorder.writeError == nil,
+        ])
+        await transport.unblock()
     }
 
     private static func queueSnapshot(
