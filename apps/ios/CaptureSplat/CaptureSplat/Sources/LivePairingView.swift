@@ -15,7 +15,7 @@ struct LivePairingView: View {
     @State private var hasPendingTransfer = false
     @State private var confirmsAbandonTransfer = false
     @State private var transferRecoveryError: String?
-    @State private var sendsCapturesLive = true
+    @State private var sendsCapturesLive = false
 
     var body: some View {
         NavigationStack {
@@ -122,13 +122,13 @@ struct LivePairingView: View {
 
     private var transferControlCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Toggle("Send captures live", isOn: $sendsCapturesLive)
+            Toggle("Experimental live transfer", isOn: $sendsCapturesLive)
                 .font(.headline)
                 .accessibilityIdentifier("live-transfer-enabled")
             Text(
                 sendsCapturesLive
-                    ? "Capture evidence is queued for the paired Mac when network, thermal, and foreground gates permit."
-                    : "Live transfer is paused. Capture Splat continues saving accepted frames and metadata locally."
+                    ? "Capture evidence is queued for the paired Mac when network, thermal, and foreground gates permit. This may increase heat on iPhone and is never required for capture or reconstruction."
+                    : "Recommended on iPhone: capture and finalize locally, then use Manual Export from Projects."
             )
             .font(.subheadline)
             .foregroundStyle(.secondary)
@@ -325,12 +325,22 @@ struct LivePairingView: View {
                 .foregroundStyle(.orange)
             Text(
                 "Capture Splat will resume this transfer only with its paired Mac. "
+                    + "New live captures wait until this transfer finishes or is abandoned. "
                     + "You can manually export the local capture from Projects without "
                     + "clearing the durable live transfer. If the capture cannot be finalized, "
                     + "you can abandon publication without deleting source evidence."
             )
             .font(.subheadline)
             .foregroundStyle(.secondary)
+            Button {
+                Task {
+                    await refreshPendingTransfer()
+                }
+            } label: {
+                Label("Check Transfer Again", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("live-sender-refresh-pending")
             Button {
                 onOpenProjects()
                 dismiss()

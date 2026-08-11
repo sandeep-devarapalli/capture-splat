@@ -66,14 +66,16 @@ Calibration outcomes are owned by World Studio.
 | Milestone | Outcome | Status |
 |---|---|---|
 | Live Session Foundation | Strict replay-first source-frame, camera, quality, sidecar, ACK, resume, and finalization contract | completed |
-| Authenticated Sender And Device Acceptance | Explicit pairing, TLS, bounded store-and-forward sender, thermal safety, and two-cycle physical-device acceptance | in progress: pairing UI, auth, durable accepted-frame journal, Application Support pending/current recovery, exact-ledger gate, and capture sender binding implemented; physical LAN and two-cycle evidence open |
+| Authenticated Sender And Device Acceptance | Optional paired TLS transport with bounded store-and-forward, thermal safety, and device evidence | experimental and evidence-blocked on iPhone: software boundary implemented; production capture uses manual export after a live-enabled trial reached serious thermal state before any upload attempt started |
 | Calibration Capture Evidence | Guided and synchronized experimental imagery with apparatus/scale provenance, without inferred physics authority | planned and evidence-blocked |
 
-The completed foundation is permanent `proposal_only` evidence transport. The authenticated
-sender cannot close until physical-device tests cover capture throughput, finalization,
-disconnect/recovery, thermal downgrade, and receiver identity. Calibration recording cannot
-close from code alone; it requires measured apparatus, synchronized trials, checksums, and
-declared downstream validation.
+The completed foundation is permanent `proposal_only` evidence transport. Manual export is
+the production iPhone boundary and does not depend on the authenticated sender. The sender
+may be revisited for other devices or after measured thermal optimization, but it cannot be
+promoted on iPhone until physical tests cover capture throughput, finalization,
+disconnect/recovery, thermal downgrade, and receiver identity without harming capture.
+Calibration recording cannot close from code alone; it requires measured apparatus,
+synchronized trials, checksums, and declared downstream validation.
 
 ## R2S2R Capture Program
 
@@ -86,7 +88,7 @@ checkpoints with the existing milestone structure:
 | CS-R2S2 Asset Capture And Calibration Trials | Record apparatus-backed object and interaction evidence without inferring physics | planned and evidence-blocked |
 | CS-R2S3 Matched Open-Loop And Task Demonstration Capture | Record initial state, command timeline, observations, and outcomes for real/sim comparison | planned |
 | CS-R2S4 Deployment Recapture And Change Evidence | Relocalize to a site revision and emit immutable changed/unchanged/unknown evidence | planned |
-| CS-R2S5 Physical Device Acceptance | Thermal, storage, clocks, networking, finalization, privacy, and apparatus acceptance | tracked by Authenticated Sender And Device Acceptance |
+| CS-R2S5 Physical Device Acceptance | Thermal, storage, clocks, local finalization, manual export, privacy, and apparatus acceptance; networking is an optional sub-gate | tracked independently from experimental live transport |
 
 Capture Splat stays simulator-independent. The
 [Newton Simulation Handoff](docs/newton_simulation_handoff.md) describes evidence World
@@ -94,6 +96,8 @@ Studio may compile into its target Newton runtime after separate validation.
 
 ## Acceptance Gates
 
+- Treat local finalization plus Manual Export as the required iPhone data path;
+  live transfer is an optional experiment and cannot block reconstruction work.
 - Finish physical acceptance of live spatial guidance and shared-session
   RoomPlan using a controlled 90-120 second capture.
 - Verify mesh/map update p95, keyframe throughput, thermal downgrade duration,

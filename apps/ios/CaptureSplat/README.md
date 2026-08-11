@@ -81,6 +81,10 @@ policy.
 
 ## World Studio pairing and bounded sender
 
+Manual Export from Projects is the production iPhone workflow. The live sender
+is disabled by default and remains an opt-in experiment; capture,
+reconstruction, and World Studio package review never depend on it.
+
 M1B compiles the bounded sender into the app target. It
 implements QR invitation parsing, P-256 device identity, Keychain-backed grants,
 TLS 1.3 leaf-certificate pinning, signed requests with durable counters, a
@@ -144,10 +148,11 @@ records beyond current capacity stay local; after ACKs drain queued records,
 the one sender worker incrementally refills the window and eventually enqueues
 the finalization marker. A capture need not fit in the queue at once. The exact
 ledger still retains its separate 360-frame product cap.
-Two physical iPhone-to-Mac cycles with receiver restart and Wi-Fi interruption
-remain required before any physical LAN/device acceptance claim. Live and
-progressive evidence remains `proposal_only`, never measurement, collision,
-navigation, semantic, or physics authority. See
+Physical iPhone-to-Mac promotion remains held after a live-enabled trial reached
+serious thermal state before any upload attempt started. Future device experiments
+must cover receiver restart and Wi-Fi interruption without degrading local
+capture. Live and progressive evidence remains `proposal_only`, never
+measurement, collision, navigation, semantic, or physics authority. See
 [iOS Live Sender M1B](../../../docs/ios_live_sender.md).
 
 Saved frames include `capture_quality` metadata. The host pipeline uses accepted

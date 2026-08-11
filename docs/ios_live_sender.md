@@ -5,6 +5,21 @@ evidence transfer. The capture binding now connects it through one long-lived
 bounded serial bridge while preserving local-first capture. This is an
 implemented code path, not physical-device LAN acceptance.
 
+## Product status
+
+Manual Export is the production iPhone path. Live transfer is disabled by
+default, remains opt-in and experimental, and is not required by capture,
+reconstruction, or World Studio package review.
+
+In a physical iPhone trial on 2026-08-11, the capture began at fair thermal
+state and reached serious state after 15.4 seconds with live transfer enabled.
+The sender recorded zero upload attempts and zero completed sender runs, so the
+trial does not isolate network upload as the cause; camera, LiDAR, mesh
+guidance, video encoding, and pre-send work were also active. The result holds
+iPhone live-transfer promotion and removes it as a product dependency. The
+strict acceptance harness remains useful for future devices and controlled
+thermal experiments.
+
 ## Implemented boundary
 
 The iOS target now contains six isolated components:

@@ -129,6 +129,11 @@ def test_pairing_wiring_stays_outside_the_capture_loop() -> None:
     assert "if activeSheet != .livePairing" in content
     assert ".disabled(capture.isRecording || capture.isStarting || capture.isFinalizing)" in content
     assert "liveSender: liveSender" in content
+    assert "private func toggleRecording()" in content
+    assert "try await liveSender.hasPendingTransfer()" in content
+    assert "isLiveTransferPreflightRunning" in content
+    assert "UIApplication.shared.applicationState == .active" in content
+    assert ".sheet(item: $activeSheet, onDismiss:" in content
 
     pairing_view = (source_root / "LivePairingView.swift").read_text(encoding="utf-8")
     assert "Abandon Pending Live Transfer" in pairing_view
@@ -137,10 +142,12 @@ def test_pairing_wiring_stays_outside_the_capture_loop() -> None:
     assert "Open Projects for Manual Export" in pairing_view
     assert '"clearing the durable live transfer.' in pairing_view
     assert "onOpenProjects()" in pairing_view
-    assert 'Toggle("Send captures live"' in pairing_view
+    assert 'Toggle("Experimental live transfer"' in pairing_view
     assert 'accessibilityIdentifier("live-transfer-enabled")' in pairing_view
+    assert 'accessibilityIdentifier("live-sender-refresh-pending")' in pairing_view
+    assert "New live captures wait until this transfer finishes or is abandoned." in pairing_view
     assert "liveSender.setLiveTransferEnabled(enabled)" in pairing_view
-    assert "continues saving accepted frames and metadata locally" in pairing_view
+    assert "Recommended on iPhone: capture and finalize locally" in pairing_view
 
     manual_export = pairing_view.index("Open Projects for Manual Export")
     abandon = pairing_view.index("Abandon Pending Live Transfer")

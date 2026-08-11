@@ -1,10 +1,20 @@
-# Live Physical Acceptance
+# Experimental Live Physical Acceptance
+
+This is an optional transport-research gate. It is not required for production
+iPhone capture, manual export, reconstruction, or World Studio package review.
+Capture Splat defaults live transfer off on iPhone and treats local
+finalization plus Manual Export as the production data path.
 
 `capture_splat.live_physical_acceptance.v0.1` is a host-side evidence gate for
 the bounded iPhone sender. It compares a sender-disabled capture with a matched
 sender-enabled capture and binds the enabled run to strict sender and receiver
 reports. It does not establish reconstruction quality or grant measurement,
 collision, semantic, navigation, or physics authority.
+
+The 2026-08-11 physical trial is a `hold`: the device moved from fair to
+serious thermal state in 15.4 seconds while transfer was enabled, with zero
+upload attempts and zero completed sender runs. That evidence blocks promotion
+without proving that Wi-Fi upload alone caused the transition.
 
 ## Evidence inputs
 

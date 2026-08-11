@@ -86,7 +86,7 @@ enum LiveCaptureIngressDisposition: String, Sendable {
 }
 
 final class LiveCaptureTransferPreference: @unchecked Sendable {
-    static let defaultsKey = "capture_splat.live_transfer_enabled.v0.1"
+    static let defaultsKey = "capture_splat.live_transfer_enabled.v0.2"
 
     private let defaults: UserDefaults
 
@@ -96,7 +96,7 @@ final class LiveCaptureTransferPreference: @unchecked Sendable {
 
     var isEnabled: Bool {
         guard defaults.object(forKey: Self.defaultsKey) != nil else {
-            return true
+            return false
         }
         return defaults.bool(forKey: Self.defaultsKey)
     }

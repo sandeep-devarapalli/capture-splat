@@ -424,8 +424,20 @@ private enum LiveCaptureSenderBridgeProbe {
         guard CommandLine.arguments.count == 3 else {
             throw LiveAuthContractError.invalid("usage: probe SCENARIO WORKING_ROOT")
         }
+        let scenario = CommandLine.arguments[1]
+        if scenario != "physical-acceptance" {
+            UserDefaults.standard.set(
+                true,
+                forKey: LiveCaptureTransferPreference.defaultsKey
+            )
+        }
+        defer {
+            UserDefaults.standard.removeObject(
+                forKey: LiveCaptureTransferPreference.defaultsKey
+            )
+        }
         let root = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true)
-        switch CommandLine.arguments[1] {
+        switch scenario {
         case "metadata":
             try metadata(root: root)
         case "file-evidence":

@@ -315,7 +315,7 @@ def test_physical_acceptance_toggle_is_persisted_local_first_and_bounded(
         "bounded_recent_ack_samples": True,
         "bounded_recent_samples": True,
         "bounded_recent_transitions": True,
-        "default_enabled": True,
+        "default_enabled": False,
         "disabled_finalize_disposition": "disabled",
         "disabled_frame_disposition": "disabled",
         "disabled_start_disposition": "disabled",
