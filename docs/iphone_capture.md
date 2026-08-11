@@ -197,19 +197,31 @@ after only one height band.
 
 ## Live sender boundary
 
-The Phase 1 live path remains replay-first and does not modify the iPhone
-capture loop. M1B-1 adds the dormant [Swift sender
-foundation](ios_live_sender.md): persistent device identity and grants, pinned
-authenticated transport, a durable frame/byte-bounded queue, limited in-flight
-uploads, retry/resume, and capture-first pressure policy. It accepts only
-immutable local file references and never retains `ARFrame` or capture pixel
-buffers.
+The Phase 1 replay path remains compatible. M1B now binds the [Swift sender
+foundation](ios_live_sender.md) downstream of local capture persistence:
+persistent device identity and grants, pinned authenticated transport, a
+durable frame/byte-bounded queue, limited in-flight uploads, retry/resume, and
+capture-first pressure policy. It accepts only immutable local file references
+and value metadata and never retains `ARFrame` or capture pixel buffers.
+
+For each accepted frame, Capture Splat first atomically writes RGB, depth, and
+enabled confidence evidence. It then commits one bounded canonical journal
+record under `metadata/live/accepted-frames/` before notifying the single
+serial bridge. This is an O(1)-per-frame write. Hashing, networking, ACKs,
+masks, optional previews, and other sidecars never block the capture queues; a
+journal failure stops live publication without rejecting the locally accepted
+frame.
 
 The additive v0.2 contract removes the finalized-manifest timing dependency:
-the phone persists one random 32-byte source-session seed before the first
-request, derives the stable live session ID from it, and binds the final
-`capture.json` reference only after local finalization. Existing replay remains
-v0.1-compatible.
+before capture start returns accepted, the phone synchronously persists
+canonical session metadata containing a random 32-byte seed, derives the stable
+live session ID, inspects the exact metadata path/size/SHA-256, and records that
+reference in the pending pointer. A crash before the first frame cannot replace
+the session identity. The final `capture.json` reference is bound only after
+local finalization. Existing replay remains v0.1-compatible. Only a strict
+finalization marker committed after atomic `capture.json` publication,
+containing its exact path, byte size, and SHA-256, can trigger the live final
+binding. A bare manifest is never inferred as a finalization event.
 
 Leaving loopback is a separate security phase defined by the strict [live
 pairing and authentication contract](live_auth.md). It requires explicit LAN
@@ -225,9 +237,37 @@ pending signed requests, and the authoritative one-Mac recovery pointer remain
 in Keychain; only a rebuildable non-secret desktop cache and counters are
 stored under Application Support.
 
-Pairing still does not authorize networking from the capture callback or open a
-frame queue. Complete the exact
-[ACK-index benchmark](ios_live_ack_index_benchmark.md) in issue #35 first. The
-later integration stays downstream of completed atomic writes. Thermal,
-storage, background, or network pressure must pause transport before it can
-affect keyframe acceptance or source evidence.
+Networking never runs on the capture callback. Checksummed
+`pending-capture.json` and `current-session.json` pointers under Application
+Support identify the only recoverable transfer; restart follows that exact
+previously user-authorized capture, validates its pinned grant/binding/queue,
+and replays the journal. It never scans capture folders and performs no
+unsolicited Bonjour discovery. Backgrounding, network loss, loss of pairing
+authorization, and serious/critical thermal transitions cancel transport work;
+storage policy prevents new work below its floor. None of those conditions may
+change keyframe acceptance or source evidence. The durable transfer stays
+inert unless the currently paired desktop exactly matches its pointer/binding,
+the app is foreground, the network is available, and thermal policy permits;
+allowed transitions wake only the single sender worker.
+
+If `capture.json` publication fails with zero accepted frames, the bridge
+automatically clears its pending/current recovery pointers only after verifying
+that the accepted-frame journal is empty and no finalization marker exists. A
+nonempty journal or manifest/finalization failure remains protected. The
+pairing sheet's confirmed **Abandon Pending Live Transfer** recovery removes
+only the fixed Application Support `pending-capture.json` and
+`current-session.json` pointers. It never deletes the capture folder, source
+files, accepted-frame journal, queue, session binding, or metadata.
+
+Frame/byte queue limits are a sliding send window, not a requirement that the
+whole capture fit at once. Journal records beyond current capacity remain
+durable in the capture; as ACKs drain queued records, the one worker
+incrementally refills the window and eventually admits finalization. The
+separate 360-frame product cap remains unchanged.
+
+The exact [ACK-index benchmark](ios_live_ack_index_benchmark.md) in issue #35
+retains the 360-frame product cap and exact duplicate/conflict ledger. Physical
+LAN behavior is still unaccepted until two iPhone-to-Mac cycles cover receiver
+restart and Wi-Fi interruption. All live frames, cameras, depth, masks, meshes,
+and later reconstruction output remain `proposal_only`, not measurement,
+collision, navigation, semantic, or physics authority.

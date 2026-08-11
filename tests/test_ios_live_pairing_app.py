@@ -76,9 +76,12 @@ def test_pairing_app_persists_and_resumes_without_implicit_network(
         "paired_after_retry": True,
         "paired_restored_without_network": True,
         "pending_restored_without_network": True,
+        "pending_transfer_blocks_credential_reset": True,
+        "pending_transfer_blocks_forget": True,
+        "pending_symlink_blocks_pairing_clear": True,
         "queue_path_confined": True,
         "second_pairing_blocked": True,
-        "startup_failure_keychain_manageable": True,
+        "startup_failure_reset_failed_closed": True,
         "traversal_rejected": True,
     }
 
@@ -125,6 +128,17 @@ def test_pairing_wiring_stays_outside_the_capture_loop() -> None:
     content = (source_root / "ContentView.swift").read_text(encoding="utf-8")
     assert "if activeSheet != .livePairing" in content
     assert ".disabled(capture.isRecording || capture.isStarting || capture.isFinalizing)" in content
+    assert "liveSender: liveSender" in content
+
+    pairing_view = (source_root / "LivePairingView.swift").read_text(encoding="utf-8")
+    assert "Abandon Pending Live Transfer" in pairing_view
+    assert "try await liveSender.abandonPendingTransfer()" in pairing_view
+    assert "never deleted by live transfer recovery" in pairing_view
+
+    app = (source_root / "CaptureSplatApp.swift").read_text(encoding="utf-8")
+    assert "hasPendingLiveTransfer: LivePairingCoordinator" in app
+    assert "currentSessionURL: paths.currentSessionURL" in app
+    assert "pendingCaptureURL: paths.pendingCaptureURL" in app
 
 
 def test_pairing_sources_are_registered_once() -> None:

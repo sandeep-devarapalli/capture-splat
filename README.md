@@ -461,39 +461,79 @@ The receiver is intentionally restricted to HTTP loopback in Phase 1. The live
 surface is source-frame and camera evidence with permanent proposal-only
 authority; it is not live 3DGS reconstruction and does not replace a world
 already loaded in World Studio. See [Live Session Phase 1](docs/live_session.md)
-for the contract, transport, recovery behavior, and the bounded future iOS
-sender design.
+for the contract and receiver recovery behavior, and
+[iOS Live Sender M1B](docs/ios_live_sender.md) for the bounded iPhone sender.
 
 M1A adds the strict [live pairing and authentication contract](docs/live_auth.md)
 for QR-bound World Studio identity, Bonjour discovery, certificate pinning,
 P-256 request authentication, scoped grants, expiry, revocation epochs, and
-anti-replay counters. M1B-1 now provides the dormant
-[bounded Swift sender foundation](docs/ios_live_sender.md): persistent device
-identity and grants, signed TLS transport, a checksummed frame/byte-bounded
-queue bound to the paired desktop/device, resume reconciliation, limited
-in-flight uploads, retry, and capture-first pressure policy.
+anti-replay counters. M1B now binds that contract to capture through one
+long-lived bounded serial bridge. After the required RGB, depth, and enabled
+confidence files are atomically written, the capture path commits one bounded,
+immutable accepted-frame journal record and only then notifies the bridge. This
+is an O(1)-per-frame write rather than a growing manifest rewrite. Capture
+queues never wait for hashing, networking, ACKs, masks, optional previews, or
+other sidecars.
 
-The additive progressive-session contract now lets that sender create an
-immutable session before `capture.json` exists. A canonical 32-byte random seed
-derives the stable `csl_...` session ID; strict v0.2 finalization later binds the
-completed `capture.json` path, schema, size, and checksum to the same session.
-The replay CLI remains byte-compatible with live session/finalization v0.1.
+The bridge writes canonical live session/frame metadata and checksummed queue
+state before upload. Checksummed pending-capture and current-session pointers,
+session bindings, and queues persist under Application Support; the immutable
+accepted-frame journal remains with the source capture evidence under
+`metadata/live/`. Before `captureStarted` can return accepted, the app
+synchronously persists the canonical session metadata containing its random
+32-byte seed, derives the stable `csl_...` session ID, inspects the exact
+metadata path/size/SHA-256, and stores that reference in the pending pointer.
+A crash before the first frame therefore cannot replace the live session
+identity. Only an explicit journal marker written after atomic `capture.json`
+publication may trigger strict v0.2 finalization; it binds the manifest path,
+exact byte size, SHA-256, and schema to that same session. A bare manifest is
+never inferred as permission to finalize. The replay CLI remains
+byte-compatible with live session/finalization v0.1.
+
+If local manifest publication fails, automatic live-transfer abort is allowed
+only for a zero-frame capture after the accepted-frame journal is verified
+empty and no finalization marker exists. A nonempty journal or manifest-marker
+failure keeps the recovery pointer protected for later recovery or explicit
+abandonment. The pairing sheet's confirmed **Abandon Pending Live Transfer**
+action removes only the fixed Application Support `pending-capture.json` and
+`current-session.json` pointers. It never deletes the capture directory,
+accepted-frame journal, queue, session binding, or source evidence.
 
 The app now exposes explicit World Studio pairing. Its QR-only scanner resolves
 the exact advertised Bonjour identity, then reuses the existing pinned-TLS,
 P-256 request, approval, grant, and replay-protection boundary. Device
 credentials, pending signed requests, and an authoritative one-Mac recovery
 pointer remain in Keychain; a rebuildable non-secret desktop cache and request
-counters live under Application Support. App launch performs no discovery or
-connection.
+counters live under Application Support. App launch performs no unsolicited
+Bonjour discovery. It may automatically resume only a previously
+user-authorized pending transfer represented by its exact pending-capture or
+current-session pointer, after restoring the grant, binding, and queue and while
+foreground/network/thermal/storage policy permits. Backgrounding, loss of
+network or pairing authorization, and serious or critical thermal transitions
+cancel active transport work without changing capture acceptance or source
+evidence. Durable recovery is inert until the currently paired desktop exactly
+matches the pointer/binding and the app is foreground, the network is
+available, and thermal policy permits transfer. Those state transitions update
+the gate directly: allowed transitions wake the one sender worker, while
+disallowed transitions cancel its current drive.
 
-The sender is still not wired into `CaptureController`, and pairing does not
-open a frame queue or upload capture evidence. The checksum-bound
+The sender retains only immutable paths and evidence metadata, never `ARFrame`
+or pixel buffers. Its exact acknowledged-frame ledger remains capped at 360
+frames after the checksum-bound
 [Release benchmark](docs/ios_live_ack_index_benchmark.md) passed on the
 designated iPhone 16 Pro Max (`iPhone17,2`), closing
 [issue #35](https://github.com/sandeep-devarapalli/capture-splat/issues/35)
-without an ACK-index redesign. The next integration is one nonblocking callback
-after atomic frame writes, followed by two-cycle physical-device acceptance.
+without an ACK-index redesign. CaptureController's accepted-frame array remains
+in-memory working state; the immutable per-frame live journal is the restart
+record. Recovery can rebuild transfer state from the exact pending/current
+pointer and journal, but it never synthesizes `capture.json` or finalizes an
+interrupted local capture. Frame/byte queue limits bound the current send
+window, not the total durable journal: as ACKs drain queued records, the single
+worker incrementally refills that window from the journal. The whole capture
+does not have to fit in queue state at once, and this does not raise the
+separate 360-frame product cap.
+Two physical iPhone-to-Mac cycles, including receiver restart and Wi-Fi
+interruption, remain required before claiming LAN/device acceptance.
 
 ## Linux, Windows, And Cloud GPUs
 

@@ -1459,6 +1459,25 @@ private struct LiveSenderProbe {
             limits: limits,
             session: session
         )
+        var contradictoryOpenACKRejected = false
+        do {
+            try await reopened.validateAcknowledgementContract(
+                LiveSenderAcknowledgement(
+                    sessionID: sessionID,
+                    operation: .resume,
+                    status: .accepted,
+                    receivedCount: 2,
+                    contiguousCount: 2,
+                    pendingCount: 0,
+                    expectedFrameCount: nil,
+                    nextExpectedSequenceID: 3,
+                    missingRanges: [try LiveSenderMissingRange(start: 1, end: 1)],
+                    finalized: false
+                )
+            )
+        } catch LiveSenderQueueError.invalidAcknowledgement {
+            contradictoryOpenACKRejected = true
+        }
         let reopenedSession = try await reopened.sessionForSend()
         let reopenedSessionURL = try await reopened.verifiedFileURL(
             for: reopenedSession.metadata
@@ -1619,6 +1638,7 @@ private struct LiveSenderProbe {
             "corrupt_manifest_restart_rejected": corruptManifestRestartRejected,
             "manifest_schema_mismatch_rejected": manifestSchemaMismatchRejected,
             "restart_preserved_binding": restartPreservedBinding,
+            "contradictory_open_ack_rejected": contradictoryOpenACKRejected,
             "pre_manifest_session_sent": preManifestSessionSent,
             "expected_count_promoted": finalizationReadyAfterRestore,
             "stale_nil_ignored": staleNilResult.snapshot.finalizationPending
@@ -1759,15 +1779,16 @@ private struct LiveSenderProbe {
             availableStorageBytes: 1_000,
             thermalState: .nominal
         )
-        async let firstRun = sender.runOnce(
+        async let firstRun = sender.runOnceDetailed(
             environment: { environment },
             clock: { try! LiveAuthTime.parse("2026-07-30T10:00:00.000Z") }
         )
-        async let competingRun = competingSender.runOnce(
+        async let competingRun = competingSender.runOnceDetailed(
             environment: { environment },
             clock: { try! LiveAuthTime.parse("2026-07-30T10:00:00.000Z") }
         )
-        let initialSummaries = await (firstRun, competingRun)
+        let initialResults = await (firstRun, competingRun)
+        let initialSummaries = (initialResults.0.summary, initialResults.1.summary)
         await receiver.allowFinalizationResponses()
         let recovery = await sender.runOnce(
             environment: { environment },
@@ -1797,6 +1818,9 @@ private struct LiveSenderProbe {
         let active = [initialSummaries.0, initialSummaries.1].first {
             $0.status != .idle
         }!
+        let activeResult = [initialResults.0, initialResults.1].first {
+            $0.summary.status != .idle
+        }!
         return [
             "initial_statuses": [initialSummaries.0.status.rawValue, initialSummaries.1.status.rawValue]
                 .sorted(),
@@ -1820,6 +1844,7 @@ private struct LiveSenderProbe {
                 && wrongDeviceSummary.status == .interrupted
                 && wrongDesktopEvidence.calls.isEmpty
                 && wrongDeviceEvidence.calls.isEmpty,
+            "interruption_disposition": activeResult.interruptionDisposition.rawValue,
         ]
     }
 
@@ -1848,6 +1873,34 @@ private struct LiveSenderProbe {
             "storage": reason(storage: 99),
             "serious": reason(thermal: .serious),
             "critical": reason(thermal: .critical),
+            "retryable_error": LiveSender.testInterruptionDisposition(
+                for: LiveAuthenticatedRequestError.auth(
+                    code: "receiver_busy",
+                    retryable: true
+                )
+            ).rawValue,
+            "blocked_error": LiveSender.testInterruptionDisposition(
+                for: LiveAuthenticatedRequestError.auth(
+                    code: "grant_revoked",
+                    retryable: false
+                )
+            ).rawValue,
+            "queue_error": LiveSender.testInterruptionDisposition(
+                for: LiveSenderQueueError.sourceChecksumMismatch("rgb/frame.jpg")
+            ).rawValue,
+            "contract_error": LiveSender.testInterruptionDisposition(
+                for: LiveAuthContractError.invalid("invalid contract")
+            ).rawValue,
+            "cancelled_error": LiveSender.testInterruptionDisposition(
+                for: CancellationError()
+            ).rawValue,
+            "unknown_error": LiveSender.testInterruptionDisposition(
+                for: NSError(domain: "probe", code: 1)
+            ).rawValue,
+            "failure_priority": LiveSender.testPreferredFailureDisposition([
+                .retryable,
+                .blocked,
+            ])?.rawValue ?? "missing",
         ]
     }
 

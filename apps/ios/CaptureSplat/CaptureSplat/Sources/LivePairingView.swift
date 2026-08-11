@@ -5,11 +5,15 @@ import VisionKit
 struct LivePairingView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var coordinator: LivePairingCoordinator
+    let liveSender: LiveCaptureSenderBridge
     @State private var isScanning = false
     @State private var pastedInvitation = ""
     @State private var scannerError: String?
     @State private var confirmsForget = false
     @State private var confirmsResetAll = false
+    @State private var hasPendingTransfer = false
+    @State private var confirmsAbandonTransfer = false
+    @State private var transferRecoveryError: String?
 
     var body: some View {
         NavigationStack {
@@ -18,6 +22,9 @@ struct LivePairingView: View {
                     authorityCard
                     statusCard
                     pairingControls
+                    if hasPendingTransfer {
+                        transferRecoveryCard
+                    }
                     persistenceCard
                 }
                 .padding()
@@ -42,6 +49,9 @@ struct LivePairingView: View {
             if phase != .scanning {
                 isScanning = false
             }
+        }
+        .task {
+            await refreshPendingTransfer()
         }
     }
 
@@ -268,14 +278,76 @@ struct LivePairingView: View {
             Text(
                 "Device keys, grants, pending requests, and a one-Mac recovery pointer "
                     + "stay in Keychain. A rebuildable non-secret desktop cache and "
-                    + "request counters live in Application Support. "
-                    + "No capture files are queued or uploaded in this milestone."
+                    + "bounded sender state live in Application Support. Source captures "
+                    + "remain in Documents and are never deleted by live transfer recovery."
             )
             .font(.subheadline)
             .foregroundStyle(.secondary)
         }
         .padding()
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var transferRecoveryCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Pending live transfer", systemImage: "arrow.triangle.2.circlepath")
+                .font(.headline)
+                .foregroundStyle(.orange)
+            Text(
+                "Capture Splat will resume this transfer only with its paired Mac. "
+                    + "If the capture cannot be finalized, you can abandon publication "
+                    + "without deleting any source capture evidence."
+            )
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            if let transferRecoveryError {
+                Text(transferRecoveryError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            if confirmsAbandonTransfer {
+                Text(
+                    "This clears only the live sender recovery pointers. The capture "
+                        + "directory, accepted-frame journal, metadata, and queued evidence remain local."
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+                HStack {
+                    Button("Keep Transfer") {
+                        confirmsAbandonTransfer = false
+                    }
+                    Button("Abandon Publication", role: .destructive) {
+                        confirmsAbandonTransfer = false
+                        Task {
+                            do {
+                                try await liveSender.abandonPendingTransfer()
+                                await refreshPendingTransfer()
+                            } catch {
+                                transferRecoveryError = error.localizedDescription
+                            }
+                        }
+                    }
+                }
+            } else {
+                Button("Abandon Pending Live Transfer", role: .destructive) {
+                    confirmsAbandonTransfer = true
+                }
+                .accessibilityIdentifier("live-sender-abandon-pending")
+            }
+        }
+        .padding()
+        .background(.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @MainActor
+    private func refreshPendingTransfer() async {
+        do {
+            hasPendingTransfer = try await liveSender.hasPendingTransfer()
+            transferRecoveryError = nil
+        } catch {
+            hasPendingTransfer = true
+            transferRecoveryError = error.localizedDescription
+        }
     }
 
     private var isPairingBusy: Bool {

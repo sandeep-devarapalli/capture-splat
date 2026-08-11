@@ -15,6 +15,18 @@ struct LiveApplicationSupportPaths: Sendable {
         root.appendingPathComponent("queues", isDirectory: true)
     }
 
+    var sessionBindingsRoot: URL {
+        root.appendingPathComponent("session-bindings", isDirectory: true)
+    }
+
+    var currentSessionURL: URL {
+        root.appendingPathComponent("current-session.json", isDirectory: false)
+    }
+
+    var pendingCaptureURL: URL {
+        root.appendingPathComponent("pending-capture.json", isDirectory: false)
+    }
+
     static func application(
         fileManager: FileManager = .default
     ) throws -> LiveApplicationSupportPaths {
@@ -50,6 +62,14 @@ struct LiveApplicationSupportPaths: Sendable {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
+        try fileManager.createDirectory(
+            at: standardized.appendingPathComponent(
+                "session-bindings",
+                isDirectory: true
+            ),
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
         self.root = standardized
     }
 
@@ -64,6 +84,14 @@ struct LiveApplicationSupportPaths: Sendable {
             throw LiveAuthContractError.invalid("Live queue session ID is invalid.")
         }
         return queuesRoot
+            .appendingPathComponent(desktopID, isDirectory: true)
+            .appendingPathComponent("\(sessionID).json", isDirectory: false)
+    }
+
+    func sessionBindingURL(desktopID: String, sessionID: String) throws -> URL {
+        try LiveAuthValidation.identity(desktopID, prefix: "wsd")
+        try LiveSenderValidation.sessionID(sessionID)
+        return sessionBindingsRoot
             .appendingPathComponent(desktopID, isDirectory: true)
             .appendingPathComponent("\(sessionID).json", isDirectory: false)
     }

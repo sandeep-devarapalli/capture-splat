@@ -80,6 +80,7 @@ private enum LivePairingRecoveryState {
 final class LivePairingCoordinator: ObservableObject {
     typealias ResolverFactory = @MainActor () -> any LiveBonjourResolving
     typealias Clock = @Sendable () -> Date
+    typealias PendingLiveTransferCheck = @Sendable () throws -> Bool
 
     @Published private(set) var snapshot: LivePairingSnapshot
 
@@ -92,6 +93,7 @@ final class LivePairingCoordinator: ObservableObject {
     private let deviceName: @Sendable () -> String
     private let appVersion: @Sendable () -> String
     private let clock: Clock
+    private let hasPendingLiveTransfer: PendingLiveTransferCheck
     private let startupError: String?
 
     private var currentProfile: LivePairingProfile?
@@ -133,7 +135,11 @@ final class LivePairingCoordinator: ObservableObject {
                 pairingService: client,
                 resolverFactory: { LiveBonjourResolver() },
                 deviceName: deviceName,
-                appVersion: appVersion
+                appVersion: appVersion,
+                hasPendingLiveTransfer: pendingLiveTransferCheck(
+                    currentSessionURL: paths.currentSessionURL,
+                    pendingCaptureURL: paths.pendingCaptureURL
+                )
             )
         } catch {
             return LivePairingCoordinator(
@@ -142,7 +148,12 @@ final class LivePairingCoordinator: ObservableObject {
                 grantStore: grantStore,
                 pendingStore: pendingStore,
                 deviceName: deviceName,
-                appVersion: appVersion
+                appVersion: appVersion,
+                hasPendingLiveTransfer: {
+                    throw LiveAuthContractError.invalid(
+                        "Pending live transfer state is unavailable."
+                    )
+                }
             )
         }
     }
@@ -152,7 +163,12 @@ final class LivePairingCoordinator: ObservableObject {
         message: String,
         recoveryStore: LivePairingRecoveryStore,
         grantStore: LiveGrantStore,
-        pendingStore: LivePendingPairingStore
+        pendingStore: LivePendingPairingStore,
+        hasPendingLiveTransfer: @escaping PendingLiveTransferCheck = {
+            throw LiveAuthContractError.invalid(
+                "Pending live transfer state is unavailable."
+            )
+        }
     ) -> LivePairingCoordinator {
         LivePairingCoordinator(
             startupError: message,
@@ -160,7 +176,8 @@ final class LivePairingCoordinator: ObservableObject {
             grantStore: grantStore,
             pendingStore: pendingStore,
             deviceName: { "Capture Splat Test" },
-            appVersion: { "0.1.0" }
+            appVersion: { "0.1.0" },
+            hasPendingLiveTransfer: hasPendingLiveTransfer
         )
     }
     #endif
@@ -174,7 +191,8 @@ final class LivePairingCoordinator: ObservableObject {
         resolverFactory: @escaping ResolverFactory,
         deviceName: @escaping @Sendable () -> String,
         appVersion: @escaping @Sendable () -> String,
-        clock: @escaping Clock = { Date() }
+        clock: @escaping Clock = { Date() },
+        hasPendingLiveTransfer: @escaping PendingLiveTransferCheck = { false }
     ) {
         self.profileStore = profileStore
         self.recoveryStore = recoveryStore
@@ -185,6 +203,7 @@ final class LivePairingCoordinator: ObservableObject {
         self.deviceName = deviceName
         self.appVersion = appVersion
         self.clock = clock
+        self.hasPendingLiveTransfer = hasPendingLiveTransfer
         startupError = nil
         snapshot = .off
     }
@@ -195,7 +214,8 @@ final class LivePairingCoordinator: ObservableObject {
         grantStore: LiveGrantStore,
         pendingStore: LivePendingPairingStore,
         deviceName: @escaping @Sendable () -> String,
-        appVersion: @escaping @Sendable () -> String
+        appVersion: @escaping @Sendable () -> String,
+        hasPendingLiveTransfer: @escaping PendingLiveTransferCheck
     ) {
         profileStore = nil
         self.recoveryStore = recoveryStore
@@ -206,6 +226,7 @@ final class LivePairingCoordinator: ObservableObject {
         self.deviceName = deviceName
         self.appVersion = appVersion
         clock = { Date() }
+        self.hasPendingLiveTransfer = hasPendingLiveTransfer
         self.startupError = startupError
         snapshot = LivePairingSnapshot(
             phase: .failed,
@@ -583,6 +604,17 @@ final class LivePairingCoordinator: ObservableObject {
             return
         }
         do {
+            try requireNoPendingLiveTransfer()
+        } catch {
+            setSnapshot(
+                phase: .failed,
+                profile: currentProfile ?? pendingProfile ?? visibleProfile,
+                message: "Local pairing clear is blocked: \(Self.message(for: error))",
+                canRetry: false
+            )
+            return
+        }
+        do {
             guard let profile = try await recoveryStore.load() ?? visibleProfile else {
                 throw LiveAuthContractError.invalid(
                     "No recoverable pairing identity is available."
@@ -631,6 +663,7 @@ final class LivePairingCoordinator: ObservableObject {
             return
         }
         do {
+            try requireNoPendingLiveTransfer()
             try await recoveryStore.removeAllCredentials()
             currentProfile = nil
             currentGrant = nil
@@ -653,6 +686,41 @@ final class LivePairingCoordinator: ObservableObject {
                 profile: nil,
                 message: "Local credential reset is blocked: \(Self.message(for: error))",
                 canRetry: false
+            )
+        }
+    }
+
+    static func pendingLiveTransferCheck(
+        currentSessionURL: URL,
+        pendingCaptureURL: URL? = nil
+    ) -> PendingLiveTransferCheck {
+        {
+            let fileManager = FileManager.default
+            let entries = try fileManager.contentsOfDirectory(
+                at: currentSessionURL.deletingLastPathComponent(),
+                includingPropertiesForKeys: nil
+            )
+            let protectedNames = Set(
+                [currentSessionURL, pendingCaptureURL]
+                    .compactMap { $0?.lastPathComponent }
+            )
+            return entries.contains { protectedNames.contains($0.lastPathComponent) }
+        }
+    }
+
+    private func requireNoPendingLiveTransfer() throws {
+        let isPending: Bool
+        do {
+            isPending = try hasPendingLiveTransfer()
+        } catch {
+            throw LiveAuthContractError.invalid(
+                "Pending live transfer state could not be verified. Finish or "
+                    + "recover the pending live transfer before forgetting this Mac."
+            )
+        }
+        guard !isPending else {
+            throw LiveAuthContractError.invalid(
+                "Finish the pending live transfer before forgetting this Mac."
             )
         }
     }

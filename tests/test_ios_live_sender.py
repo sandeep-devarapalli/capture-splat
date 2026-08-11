@@ -219,6 +219,7 @@ def test_progressive_session_binding_is_durable_and_fail_closed(
 
     assert result == {
         "conflicting_binding_rejected": True,
+        "contradictory_open_ack_rejected": True,
         "corrupt_manifest_rejected": True,
         "corrupt_manifest_restart_rejected": True,
         "derived_session_id_matches": True,
@@ -252,6 +253,7 @@ def test_sender_engine_retries_with_bounded_concurrency_and_resumes_first(
         "authorization_owner_enforced": True,
         "finalized": True,
         "initial_statuses": ["idle", "interrupted"],
+        "interruption_disposition": "retryable",
         "lost_ack_retried": True,
         "lost_finalization_ack_resumed": True,
         "maximum_concurrency": 2,
@@ -271,12 +273,19 @@ def test_sender_policy_yields_to_capture_safety(
 
     assert result == {
         "background": "background",
+        "blocked_error": "blocked",
+        "cancelled_error": "cancelled",
+        "contract_error": "blocked",
         "critical": "thermal_pressure",
+        "failure_priority": "blocked",
         "network": "network_unavailable",
+        "queue_error": "blocked",
         "ready": "ready",
         "receiver": "receiver_unavailable",
+        "retryable_error": "retryable",
         "serious": "thermal_pressure",
         "storage": "low_storage",
+        "unknown_error": "blocked",
     }
 
 

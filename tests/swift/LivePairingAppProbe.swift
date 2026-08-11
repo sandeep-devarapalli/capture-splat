@@ -459,7 +459,12 @@ private enum LivePairingAppProbe {
                 resolverFactory: { healedResolver },
                 deviceName: { "Capture Splat Probe" },
                 appVersion: { "0.1.0" },
-                clock: { now.addingTimeInterval(61) }
+                clock: { now.addingTimeInterval(61) },
+                hasPendingLiveTransfer: LivePairingCoordinator
+                    .pendingLiveTransferCheck(
+                        currentSessionURL: paths.currentSessionURL,
+                        pendingCaptureURL: paths.pendingCaptureURL
+                    )
             )
         }
         await healedCoordinator.restore()
@@ -469,6 +474,23 @@ private enum LivePairingAppProbe {
         let corruptProfileRecoveredFromKeychain = healedSnapshot.phase == .paired
             && healedProfiles.current?.desktopID == invitation.desktopID
             && healedResolveCount == 0
+
+        try Data("{}".utf8).write(
+            to: paths.currentSessionURL,
+            options: .atomic
+        )
+        await healedCoordinator.clearLocalPairing()
+        let pendingForgetSnapshot = await healedCoordinator.snapshot
+        let pendingForgetGrant = try await healedStores.grantStore.load(
+            desktopID: invitation.desktopID,
+            currentAt: now.addingTimeInterval(61)
+        )
+        let pendingTransferBlocksForget = pendingForgetSnapshot.phase == .failed
+            && pendingForgetSnapshot.message.contains(
+                "Finish the pending live transfer before forgetting this Mac."
+            )
+            && pendingForgetGrant != nil
+        try FileManager.default.removeItem(at: paths.currentSessionURL)
 
         await healedCoordinator.clearLocalPairing()
         let forgottenSnapshot = await healedCoordinator.snapshot
@@ -656,6 +678,63 @@ private enum LivePairingAppProbe {
         let pendingRemoveFailureReconciled = pendingRemovePaired
             && pendingRemoveProfiles.current?.desktopID == invitation.desktopID
 
+        try Data("{}".utf8).write(
+            to: pendingRemovePaths.pendingCaptureURL,
+            options: .atomic
+        )
+        let pendingResetCoordinator = await MainActor.run {
+            LivePairingCoordinator.startupFailureForTesting(
+                message: "Simulated Application Support failure.",
+                recoveryStore: pendingRemoveStores.recoveryStore,
+                grantStore: pendingRemoveStores.grantStore,
+                pendingStore: pendingRemoveStores.pendingStore,
+                hasPendingLiveTransfer: LivePairingCoordinator
+                    .pendingLiveTransferCheck(
+                        currentSessionURL: pendingRemovePaths.currentSessionURL,
+                        pendingCaptureURL: pendingRemovePaths.pendingCaptureURL
+                    )
+            )
+        }
+        await pendingResetCoordinator.restore()
+        let pendingResetAvailable = await pendingResetCoordinator
+            .canResetAllCredentials
+        await pendingResetCoordinator.resetAllLocalCredentials()
+        let pendingResetSnapshot = await pendingResetCoordinator.snapshot
+        let pendingResetGrant = try await pendingRemoveStores.grantStore.load(
+            desktopID: invitation.desktopID
+        )
+        let pendingResetPointer = try await pendingRemoveStores.recoveryStore.load()
+        let pendingTransferBlocksCredentialReset = pendingResetAvailable
+            && pendingResetSnapshot.message.contains(
+                "Finish the pending live transfer before forgetting this Mac."
+            )
+            && pendingResetGrant != nil
+            && pendingResetPointer?.desktopID == invitation.desktopID
+        try FileManager.default.removeItem(
+            at: pendingRemovePaths.pendingCaptureURL
+        )
+        let pendingSymlinkTarget = root.appendingPathComponent(
+            "pending-pointer-target.json"
+        )
+        try Data("{}".utf8).write(
+            to: pendingSymlinkTarget,
+            options: .atomic
+        )
+        try FileManager.default.createSymbolicLink(
+            at: pendingRemovePaths.pendingCaptureURL,
+            withDestinationURL: pendingSymlinkTarget
+        )
+        let pendingSymlinkCheck = await MainActor.run {
+            LivePairingCoordinator.pendingLiveTransferCheck(
+                currentSessionURL: pendingRemovePaths.currentSessionURL,
+                pendingCaptureURL: pendingRemovePaths.pendingCaptureURL
+            )
+        }
+        let pendingSymlinkBlocksPairingClear = try pendingSymlinkCheck()
+        try FileManager.default.removeItem(
+            at: pendingRemovePaths.pendingCaptureURL
+        )
+
         let startupFailureCoordinator = await MainActor.run {
             LivePairingCoordinator.startupFailureForTesting(
                 message: "Simulated Application Support failure.",
@@ -665,19 +744,18 @@ private enum LivePairingAppProbe {
             )
         }
         await startupFailureCoordinator.restore()
-        let startupFailureSnapshot = await startupFailureCoordinator.snapshot
-        let startupFailureResetAvailable = await startupFailureCoordinator
-            .canResetAllCredentials
         await startupFailureCoordinator.resetAllLocalCredentials()
+        let startupFailureResetSnapshot = await startupFailureCoordinator.snapshot
         let startupFailureGrant = try await pendingRemoveStores.grantStore.load(
             desktopID: invitation.desktopID
         )
         let startupFailurePointer = try await pendingRemoveStores.recoveryStore.load()
-        let startupFailureStateManageable = startupFailureSnapshot.phase == .failed
-            && startupFailureSnapshot.desktopID == invitation.desktopID
-            && startupFailureResetAvailable
-            && startupFailureGrant == nil
-            && startupFailurePointer == nil
+        let startupFailureResetFailedClosed =
+            startupFailureResetSnapshot.message.contains(
+                "Pending live transfer state could not be verified."
+            )
+            && startupFailureGrant != nil
+            && startupFailurePointer?.desktopID == invitation.desktopID
 
         let promotionFailurePaths = try LiveApplicationSupportPaths(
             root: root.appendingPathComponent("promotion-failure/v0.1", isDirectory: true)
@@ -938,7 +1016,8 @@ private enum LivePairingAppProbe {
               expiredGrantNotPaired,
               pendingRemoveFailureReconciled,
               promotionFailureRecovered,
-              startupFailureStateManageable else {
+              pendingTransferBlocksCredentialReset,
+              startupFailureResetFailedClosed else {
             throw LiveAuthContractError.invalid(
                 "Durable grant reconciliation did not preserve a manageable pairing state."
             )
@@ -971,9 +1050,15 @@ private enum LivePairingAppProbe {
             "paired_restored_without_network": pairedRestoredWithoutNetwork,
             "pending_restored_without_network": restoredPending
                 && noDiscoveryOnPendingRestore,
+            "pending_transfer_blocks_credential_reset":
+                pendingTransferBlocksCredentialReset,
+            "pending_transfer_blocks_forget": pendingTransferBlocksForget,
+            "pending_symlink_blocks_pairing_clear":
+                pendingSymlinkBlocksPairingClear,
             "queue_path_confined": queueURL.path.hasPrefix(paths.queuesRoot.path),
             "second_pairing_blocked": stillSinglePairing,
-            "startup_failure_keychain_manageable": startupFailureStateManageable,
+            "startup_failure_reset_failed_closed":
+                startupFailureResetFailedClosed,
             "traversal_rejected": traversalRejected,
         ]
     }

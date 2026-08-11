@@ -1042,6 +1042,7 @@ actor LiveAuthenticatedHTTPClient {
         if let contentType = evidence.contentType {
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
+        try Task.checkCancellation()
         let response: LiveHTTPResponse
         do {
             response = try await transport.perform(request, upload: evidence.upload)
@@ -1193,14 +1194,47 @@ actor LiveAuthenticatedHTTPClient {
 
 enum LiveFileDigest {
     static func sha256(url: URL) throws -> String {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
+        let descriptor = Darwin.open(
+            url.path,
+            O_RDONLY | O_NOFOLLOW | O_CLOEXEC
+        )
+        guard descriptor >= 0 else {
+            throw LiveAuthenticatedRequestError.corruptBody(
+                "Upload file cannot be opened without following symbolic links."
+            )
+        }
+        let handle = FileHandle(
+            fileDescriptor: descriptor,
+            closeOnDealloc: true
+        )
+        var before = stat()
+        guard Darwin.fstat(descriptor, &before) == 0,
+              before.st_mode & S_IFMT == S_IFREG else {
+            try? handle.close()
+            throw LiveAuthenticatedRequestError.corruptBody(
+                "Upload body is not a regular file."
+            )
+        }
         var digest = SHA256()
         while true {
+            try Task.checkCancellation()
             let chunk = try handle.read(upToCount: 1_048_576) ?? Data()
             if chunk.isEmpty { break }
             digest.update(data: chunk)
         }
+        var after = stat()
+        guard Darwin.fstat(descriptor, &after) == 0,
+              before.st_dev == after.st_dev,
+              before.st_ino == after.st_ino,
+              before.st_size == after.st_size,
+              before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
+              before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec else {
+            try? handle.close()
+            throw LiveAuthenticatedRequestError.corruptBody(
+                "Upload file changed while being hashed."
+            )
+        }
+        try handle.close()
         return "sha256:" + digest.finalize().map { String(format: "%02x", $0) }.joined()
     }
 }

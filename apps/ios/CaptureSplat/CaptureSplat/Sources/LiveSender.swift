@@ -145,6 +145,18 @@ struct LiveSenderRunSummary: Codable, Equatable, Sendable {
     }
 }
 
+enum LiveSenderInterruptionDisposition: String, Sendable {
+    case none
+    case retryable
+    case blocked
+    case cancelled
+}
+
+struct LiveSenderDetailedRunResult: Sendable {
+    let summary: LiveSenderRunSummary
+    let interruptionDisposition: LiveSenderInterruptionDisposition
+}
+
 actor LiveSender {
     typealias EnvironmentProvider = @Sendable () async -> LiveSenderEnvironment
     typealias Clock = @Sendable () -> Date
@@ -173,9 +185,16 @@ actor LiveSender {
         environment: @escaping EnvironmentProvider,
         clock: @escaping Clock = { Date() }
     ) async -> LiveSenderRunSummary {
+        await runOnceDetailed(environment: environment, clock: clock).summary
+    }
+
+    func runOnceDetailed(
+        environment: @escaping EnvironmentProvider,
+        clock: @escaping Clock = { Date() }
+    ) async -> LiveSenderDetailedRunResult {
         let lease = UUID()
         guard await queue.acquireSenderLease(lease) else {
-            return (try? await summary(
+            let summary = (try? await summary(
                 status: .idle,
                 pauseReason: nil,
                 attemptedFrames: 0,
@@ -193,6 +212,10 @@ actor LiveSender {
                 finalized: false,
                 lastError: "A live sender run is already active."
             )
+            return LiveSenderDetailedRunResult(
+                summary: summary,
+                interruptionDisposition: .none
+            )
         }
         let result = await runLeased(environment: environment, clock: clock)
         await queue.releaseSenderLease(lease)
@@ -202,12 +225,12 @@ actor LiveSender {
     private func runLeased(
         environment: @escaping EnvironmentProvider,
         clock: @escaping Clock
-    ) async -> LiveSenderRunSummary {
+    ) async -> LiveSenderDetailedRunResult {
         var attemptedFrames = 0
         var acknowledgedFrames = 0
         do {
             if try await queue.snapshot().finalized {
-                return try await summary(
+                return try await result(
                     status: .finalized,
                     pauseReason: nil,
                     attemptedFrames: 0,
@@ -215,7 +238,7 @@ actor LiveSender {
                 )
             }
             if let pause = policy.pauseReason(for: await environment()) {
-                return try await summary(
+                return try await result(
                     status: .paused,
                     pauseReason: pause,
                     attemptedFrames: 0,
@@ -246,7 +269,7 @@ actor LiveSender {
             )
             _ = try await queue.reconcile(sessionACK)
             if sessionACK.finalized {
-                return try await summary(
+                return try await result(
                     status: .finalized,
                     pauseReason: nil,
                     attemptedFrames: 0,
@@ -266,7 +289,7 @@ actor LiveSender {
             )
             _ = try await queue.reconcile(resumeACK)
             if resumeACK.finalized {
-                return try await summary(
+                return try await result(
                     status: .finalized,
                     pauseReason: nil,
                     attemptedFrames: 0,
@@ -276,7 +299,7 @@ actor LiveSender {
 
             while true {
                 if let pause = policy.pauseReason(for: await environment()) {
-                    return try await summary(
+                    return try await result(
                         status: .paused,
                         pauseReason: pause,
                         attemptedFrames: attemptedFrames,
@@ -299,7 +322,10 @@ actor LiveSender {
                             } catch let paused as LiveSenderPausedError {
                                 return .paused(paused.reason)
                             } catch {
-                                return .failed(error.localizedDescription)
+                                return .failed(
+                                    error.localizedDescription,
+                                    Self.interruptionDisposition(for: error)
+                                )
                             }
                         }
                     }
@@ -309,34 +335,35 @@ actor LiveSender {
                     }
                     return collected
                 }
-                var failures: [String] = []
+                var failures: [(String, LiveSenderInterruptionDisposition)] = []
                 var pauses: [LiveSenderPauseReason] = []
                 for outcome in outcomes {
                     switch outcome {
                     case .acknowledged(let ack):
                         let result = try await queue.reconcile(ack)
                         acknowledgedFrames += result.acknowledgedSequenceIDs.count
-                    case .failed(let message):
-                        failures.append(message)
+                    case .failed(let message, let disposition):
+                        failures.append((message, disposition))
                     case .paused(let reason):
                         pauses.append(reason)
                     }
                 }
                 if let pause = pauses.sorted(by: { $0.rawValue < $1.rawValue }).first {
-                    return try await summary(
+                    return try await result(
                         status: .paused,
                         pauseReason: pause,
                         attemptedFrames: attemptedFrames,
                         acknowledgedFrames: acknowledgedFrames
                     )
                 }
-                if let failure = failures.sorted().first {
-                    return try await summary(
+                if let failure = Self.preferredFailure(failures) {
+                    return try await result(
                         status: .interrupted,
                         pauseReason: nil,
                         attemptedFrames: attemptedFrames,
                         acknowledgedFrames: acknowledgedFrames,
-                        error: failure
+                        error: failure.message,
+                        interruptionDisposition: failure.disposition
                     )
                 }
             }
@@ -381,23 +408,24 @@ actor LiveSender {
                     clock: clock
                 )
                 _ = try await queue.reconcile(ack)
-                return try await summary(
+                return try await result(
                     status: ack.finalized ? .finalized : .interrupted,
                     pauseReason: nil,
                     attemptedFrames: attemptedFrames,
                     acknowledgedFrames: acknowledgedFrames,
-                    error: ack.finalized ? nil : "Receiver did not finalize the complete session."
+                    error: ack.finalized ? nil : "Receiver did not finalize the complete session.",
+                    interruptionDisposition: ack.finalized ? .none : .retryable
                 )
             }
 
-            return try await summary(
+            return try await result(
                 status: .awaitingFrames,
                 pauseReason: nil,
                 attemptedFrames: attemptedFrames,
                 acknowledgedFrames: acknowledgedFrames
             )
         } catch let paused as LiveSenderPausedError {
-            return (try? await summary(
+            let summary = (try? await summary(
                 status: .paused,
                 pauseReason: paused.reason,
                 attemptedFrames: attemptedFrames,
@@ -414,8 +442,12 @@ actor LiveSender {
                 finalized: false,
                 lastError: nil
             )
+            return LiveSenderDetailedRunResult(
+                summary: summary,
+                interruptionDisposition: .none
+            )
         } catch {
-            return (try? await summary(
+            let summary = (try? await summary(
                 status: .interrupted,
                 pauseReason: nil,
                 attemptedFrames: attemptedFrames,
@@ -432,6 +464,10 @@ actor LiveSender {
                 queuedBytes: 0,
                 finalized: false,
                 lastError: error.localizedDescription
+            )
+            return LiveSenderDetailedRunResult(
+                summary: summary,
+                interruptionDisposition: Self.interruptionDisposition(for: error)
             )
         }
     }
@@ -555,6 +591,74 @@ actor LiveSender {
         )
     }
 
+    private func result(
+        status: LiveSenderRunStatus,
+        pauseReason: LiveSenderPauseReason?,
+        attemptedFrames: Int,
+        acknowledgedFrames: Int,
+        error: String? = nil,
+        interruptionDisposition: LiveSenderInterruptionDisposition = .none
+    ) async throws -> LiveSenderDetailedRunResult {
+        LiveSenderDetailedRunResult(
+            summary: try await summary(
+                status: status,
+                pauseReason: pauseReason,
+                attemptedFrames: attemptedFrames,
+                acknowledgedFrames: acknowledgedFrames,
+                error: error
+            ),
+            interruptionDisposition: interruptionDisposition
+        )
+    }
+
+    private static func interruptionDisposition(
+        for error: Error
+    ) -> LiveSenderInterruptionDisposition {
+        if error is CancellationError {
+            return .cancelled
+        }
+        if let requestError = error as? LiveAuthenticatedRequestError {
+            return requestError.retryable ? .retryable : .blocked
+        }
+        return .blocked
+    }
+
+    private static func preferredFailure(
+        _ failures: [(String, LiveSenderInterruptionDisposition)]
+    ) -> (message: String, disposition: LiveSenderInterruptionDisposition)? {
+        let priority: [LiveSenderInterruptionDisposition] = [
+            .blocked,
+            .cancelled,
+            .retryable,
+        ]
+        guard let disposition = priority.first(where: { candidate in
+            failures.contains(where: { $0.1 == candidate })
+        }), let message = failures
+            .filter({ $0.1 == disposition })
+            .map(\.0)
+            .sorted()
+            .first else {
+            return nil
+        }
+        return (message, disposition)
+    }
+
+    #if CAPTURE_SPLAT_LIVE_TESTING
+    static func testInterruptionDisposition(
+        for error: Error
+    ) -> LiveSenderInterruptionDisposition {
+        interruptionDisposition(for: error)
+    }
+
+    static func testPreferredFailureDisposition(
+        _ dispositions: [LiveSenderInterruptionDisposition]
+    ) -> LiveSenderInterruptionDisposition? {
+        preferredFailure(dispositions.enumerated().map {
+            ("failure-\($0.offset)", $0.element)
+        })?.disposition
+    }
+    #endif
+
     private static func decodeACK(_ data: Data) throws -> LiveSenderAcknowledgement {
         let acknowledgement = try LiveStrictJSON.decode(
             LiveSenderAcknowledgement.self,
@@ -595,7 +699,7 @@ actor LiveSender {
 
     private enum FrameOutcome: Sendable {
         case acknowledged(LiveSenderAcknowledgement)
-        case failed(String)
+        case failed(String, LiveSenderInterruptionDisposition)
         case paused(LiveSenderPauseReason)
     }
 }

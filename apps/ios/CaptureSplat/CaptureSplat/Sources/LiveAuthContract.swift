@@ -347,10 +347,14 @@ struct LiveResolvedEndpoint: Codable, Equatable, Sendable {
     let discovery: LiveDiscoveryIdentity
 
     func validate(against invitation: LivePairingInvitation) throws {
+        try validate(discovery: invitation.discovery)
+    }
+
+    func validate(discovery expectedDiscovery: LiveDiscoveryIdentity) throws {
         guard !host.isEmpty,
               host.utf8.count <= 253,
               (1...65_535).contains(port),
-              discovery == invitation.discovery else {
+              discovery == expectedDiscovery else {
             throw LiveAuthContractError.invalid("Resolved service does not match the QR invitation.")
         }
         if host.contains("/") || host.contains("\\") || host.contains("%") || host.contains("@") {
