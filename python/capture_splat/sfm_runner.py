@@ -601,7 +601,7 @@ def run_sfm(
         "colmap_cuda": colmap_cuda,
         "cpu_matching_override": bool(allow_cpu_matching and colmap_cuda is not True),
         "dry_run": dry_run,
-        "authority": {"registration_evidence": True, "quality_claim": False},
+        "authority": {"registration_evidence": False, "quality_claim": False},
     }
     write_json_strict(out_dir / "metadata" / "camera_evidence.json", camera_report)
     if blockers or dry_run:
@@ -674,6 +674,7 @@ def run_sfm(
     model_to_text(sparse_zero)
     stats = read_model_stats(sparse_zero)
     summary["model"] = stats
+    summary["authority"]["registration_evidence"] = True
     decision, ratio = decide(stats["registered_images"], total_images, min_reject_ratio, min_hold_ratio)
     summary["registered_ratio"] = ratio
     summary["decision"] = decision
@@ -766,7 +767,7 @@ def run_triangulate(
         "colmap_cuda": colmap_cuda,
         "cpu_matching_override": bool(allow_cpu_matching and colmap_cuda is not True),
         "dry_run": dry_run,
-        "authority": {"registration_evidence": True, "pose_prior": "device_poses", "quality_claim": False},
+        "authority": {"registration_evidence": False, "pose_prior": "device_poses", "quality_claim": False},
     }
     out_dir.mkdir(parents=True, exist_ok=True)
     if summary["blockers"] or dry_run:
@@ -802,6 +803,7 @@ def run_triangulate(
     model_to_text(sparse_zero)
     stats = read_model_stats(sparse_zero)
     summary["model"] = stats
+    summary["authority"]["registration_evidence"] = True
     decision, ratio = decide(stats["registered_images"], total_images, min_reject_ratio, min_hold_ratio)
     summary["registered_ratio"] = ratio
     summary["decision"] = decision

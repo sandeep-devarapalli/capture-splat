@@ -39,6 +39,10 @@ and the `3000 -> 7000 -> 15000 -> 30000` training ladder.
 Longer training alone does not fix weak capture, weak COLMAP support, bad
 intrinsics, bad frame matching, blur, or weak supervision.
 
+An SfM or triangulation dry-run is command-plan evidence only. Keep
+`authority.registration_evidence` false for dry-run and blocked summaries, and
+set it true only after reading statistics from a produced model.
+
 ## Public Commands
 
 Important commands and modules:

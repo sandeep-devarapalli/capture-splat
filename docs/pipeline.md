@@ -80,7 +80,9 @@ capture-splat reconstruct \
 
 The command writes one strict top-level summary while retaining every stage
 summary under numbered directories. `--dry-run` plans without invoking SfM or
-training, `--stop-after sfm` (or another named stage) bounds a probe, and
+training and must keep `authority.registration_evidence` false; that authority
+becomes true only after a produced model is read and summarized. `--stop-after sfm`
+(or another named stage) bounds a probe, and
 `--resume` reuses completed summaries. A held RGB-D fit continues with the
 unaugmented COLMAP package. Missing fixed-camera raw renders skip QA and keep
 the final decision at `hold`; they are not inferred from full viewer screens.

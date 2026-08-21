@@ -146,7 +146,41 @@ def test_run_sfm_dry_run_writes_summary(tmp_path: Path, monkeypatch: pytest.Monk
     assert saved["colmap_cuda"] is True
     assert saved["cpu_matching_override"] is False
     assert (tmp_path / "out" / "images" / "000001.jpg").exists()
+    assert saved["authority"]["registration_evidence"] is False
     assert saved["authority"]["quality_claim"] is False
+
+
+def test_run_sfm_sets_registration_authority_after_model_stats(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("capture_splat.sfm_runner.find_binary", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("capture_splat.sfm_runner.colmap_has_cuda", lambda: True)
+    images = tmp_path / "frames"
+    write_image(images / "000001.jpg")
+
+    class Completed:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def run_command(command: list[str], **_kwargs: object) -> Completed:
+        if command[1] == "global_mapper":
+            model = Path(command[command.index("--output_path") + 1]) / "0"
+            model.mkdir(parents=True)
+            (model / "images.txt").write_text(
+                "1 1 0 0 0 0 0 0 1 000001.jpg\n\n", encoding="utf-8"
+            )
+            (model / "points3D.txt").write_text("# Empty sparse cloud.\n", encoding="utf-8")
+        return Completed()
+
+    monkeypatch.setattr("capture_splat.sfm_runner.subprocess.run", run_command)
+
+    summary = run_sfm(images, tmp_path / "out", view_graph_calibration="off")
+    saved = load_json_strict(tmp_path / "out" / "capture_splat_sfm_summary.json")
+
+    assert summary["decision"] == "promote"
+    assert summary["model"]["registered_images"] == 1
+    assert saved["authority"]["registration_evidence"] is True
 
 
 def test_run_sfm_auto_uses_per_frame_cameras_only_for_prepared_capture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -247,6 +281,7 @@ def test_run_sfm_blocked_without_cuda(tmp_path: Path, monkeypatch: pytest.Monkey
     saved = load_json_strict(tmp_path / "out" / "capture_splat_sfm_summary.json")
     assert saved["decision"] == "blocked"
     assert saved["colmap_cuda"] is False
+    assert saved["authority"]["registration_evidence"] is False
 
 
 def test_run_sfm_cpu_matching_override_recorded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -266,9 +301,13 @@ def test_run_sfm_cpu_matching_override_recorded(tmp_path: Path, monkeypatch: pyt
     assert summary["commands"][-1][summary["commands"][-1].index("--GlobalMapper.ba_ceres_use_gpu") + 1] == "0"
 
 
-def test_run_sfm_retrieval_requires_hloc(tmp_path: Path) -> None:
+def test_run_sfm_retrieval_requires_hloc(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from capture_splat.json_utils import load_json_strict
 
+    monkeypatch.setattr(
+        "capture_splat.sfm_runner.hloc_status",
+        lambda: {"ready": False, "hloc_importable": False, "pycolmap_importable": False},
+    )
     images = tmp_path / "frames"
     write_image(images / "000001.jpg")
 
