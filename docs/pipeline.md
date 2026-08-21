@@ -422,12 +422,46 @@ capture-splat export-world-studio \
 ```
 
 The command writes `capture-splat.world-studio.json` with schema
-`capture_splat.world_studio_handoff.v0.2` and relative paths only. It can include
+`capture_splat.world_studio_handoff.v0.3` and relative paths only. Existing v0.2
+handoffs remain resumable. It can include
 source frames, ordinary `points.ply`, Gaussian `.ply`, `capture.json`,
 `transforms.json`, COLMAP sparse text files, and optional `.splat`/`.spz`
 references when present. The handoff keeps source frames as visual evidence and
 trained splats as review proposals, not metric, collision, semantic, or
 navigation authority.
+
+The additive `training_dataset` block is a sanitized evidence inventory, not a
+trainer request or run receipt. It records:
+
+- a canonical source-frame count and SHA-256 digest over each relative path,
+  size, and content checksum;
+- observed COLMAP camera models and sparse-model availability;
+- capture profile and whether a 360 source is perspective, projected pinhole
+  from equirectangular evidence, native equirectangular, or unresolved;
+- available capture-manifest, depth, confidence, mask, and mesh evidence; and
+- permanent capture-evidence-only authority with no trainer-consumption claim.
+
+It contains no raw trainer summary, command, executable path, or local absolute
+path. World Studio must verify this receipt before constructing any future
+training job. A separate job contract must bind the provider, executable or
+container revision, input digest, recipe, hardware, output checksums, runtime
+measurements, and final `promote|hold|reject` decision.
+
+### External Trainer And Benchmark Boundary
+
+Spirula-derived capability work stays behind a pinned, user-installed external
+process boundary. Capture Splat may implement original adapters and compatible
+data contracts, but it does not vendor or copy GPL trainer implementation. A
+successful external process exit does not establish that every advertised
+strategy, photometric mode, quantization path, or sensor input was applied.
+
+Reference benchmark hydration is limited to NeRF Synthetic Lego and the
+original-3DGS Deep Blending Playroom scene. Validate source, license, expected
+files, and completeness before measuring either. Keep local iPhone captures as
+a separate physical-capture lane. Begin efficiency measurements on Apple
+Silicon; cross-vendor, 8 GB, and multi-million-Gaussian claims remain `hold`
+until the named hardware, commands, repetitions, raw results, noise, and fixed
+quality rails are recorded.
 
 For a Gaussian PLY, the exporter always writes
 `quality/ply_stats.json` from the exact packaged PLY. With
