@@ -155,8 +155,17 @@ def test_run_sfm_sets_registration_authority_after_model_stats(
 ) -> None:
     monkeypatch.setattr("capture_splat.sfm_runner.find_binary", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr("capture_splat.sfm_runner.colmap_has_cuda", lambda: True)
-    images = tmp_path / "frames"
+    capture = tmp_path / "capture"
+    images = capture / "images"
     write_image(images / "000001.jpg")
+    (capture / "metadata").mkdir()
+    (capture / "metadata/planes.json").write_text("{}\n", encoding="utf-8")
+    write_json_strict(capture / "capture.json", {
+        "schema": "capture_splat.v0.3",
+        "source": "transforms_import",
+        "planes_file": "metadata/planes.json",
+        "frames": [{"rgb": "images/000001.jpg"}],
+    })
 
     class Completed:
         returncode = 0
@@ -180,6 +189,8 @@ def test_run_sfm_sets_registration_authority_after_model_stats(
 
     assert summary["decision"] == "promote"
     assert summary["model"]["registered_images"] == 1
+    assert summary["capture_asset_copy"]["complete"] is True
+    assert (tmp_path / "out/metadata/planes.json").is_file()
     assert saved["authority"]["registration_evidence"] is True
 
 
@@ -216,15 +227,39 @@ def test_run_sfm_copies_capture_depth_and_confidence_sidecars(tmp_path: Path, mo
     write_image(images / "000001.jpg")
     (capture / "depth").mkdir()
     (capture / "confidence").mkdir()
+    (capture / "geometry").mkdir()
+    (capture / "metadata").mkdir()
+    (capture / "masks/person").mkdir(parents=True)
+    (capture / "masks/valid").mkdir(parents=True)
     np.save(capture / "depth/000001.npy", np.ones((3, 4), dtype=np.float32), allow_pickle=False)
     np.save(capture / "confidence/000001.npy", np.full((3, 4), 2, dtype=np.uint8), allow_pickle=False)
+    Image.new("L", (8, 6), 0).save(capture / "masks/person/000001.png")
+    Image.new("L", (8, 6), 255).save(capture / "masks/valid/000001.jpg.png")
+    Image.new("L", (8, 6), 255).save(capture / "masks/valid/extra.png")
+    for relative in (
+        "geometry/arkit_mesh.ply",
+        "geometry/arkit_mesh_report.json",
+        "metadata/frame_index.jsonl",
+        "metadata/planes.json",
+        "metadata/source_capture.json",
+        "metadata/spatial_guidance_report.json",
+    ):
+        (capture / relative).write_text(f"asset:{relative}\n", encoding="utf-8")
     write_json_strict(capture / "capture.json", {
         "schema": "capture_splat.v0.3",
         "source": "capture_splat.prepare_capture",
+        "arkit_mesh_file": "geometry/arkit_mesh.ply",
+        "arkit_mesh_report_file": "geometry/arkit_mesh_report.json",
+        "frame_index_file": "metadata/frame_index.jsonl",
+        "planes_file": "metadata/planes.json",
+        "source_capture_manifest_file": "metadata/source_capture.json",
+        "spatial_guidance_report_file": "metadata/spatial_guidance_report.json",
         "frames": [{
             "rgb": "images/000001.jpg",
             "depth": "depth/000001.npy",
             "confidence": "confidence/000001.npy",
+            "person_mask": "masks/person/000001.png",
+            "valid_mask": "masks/valid/000001.jpg.png",
             "transform_matrix": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
             "intrinsics": {"fl_x": 8, "fl_y": 8, "cx": 4, "cy": 3, "w": 8, "h": 6},
         }],
@@ -236,6 +271,67 @@ def test_run_sfm_copies_capture_depth_and_confidence_sidecars(tmp_path: Path, mo
     assert summary["supervision_copy"]["copied"] == 2
     assert (tmp_path / "out/depth/000001.npy").is_file()
     assert (tmp_path / "out/confidence/000001.npy").is_file()
+    assert summary["capture_asset_copy"]["complete"] is True
+    assert summary["capture_asset_copy"]["reference_count"] == 11
+    assert summary["capture_asset_copy"]["unique_asset_count"] == 11
+    assert summary["capture_asset_copy"]["copied"] == 7
+    assert summary["capture_asset_copy"]["verified_asset_count"] == 11
+
+    conflicted = tmp_path / "out_conflict"
+    stale = (
+        "capture.json",
+        "depth/000001.npy",
+        "confidence/000001.npy",
+        "masks/valid/000001.jpg.png",
+        "masks/valid/extra.png",
+    )
+    for relative in stale:
+        path = conflicted / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"stale")
+    with pytest.raises(RuntimeError, match="conflict"):
+        run_sfm(images, conflicted, dry_run=True)
+    blocked = load_json_strict(conflicted / "capture_splat_sfm_summary.json")
+    assert blocked["capture_manifest_copy"] == "conflict"
+    assert blocked["capture_asset_copy"]["decision"] == "hold"
+    assert set(blocked["capture_asset_copy"]["conflicts"]) == {
+        "depth/000001.npy", "confidence/000001.npy", "masks/valid/000001.jpg.png"}
+    assert set(blocked["supervision_copy"]["conflicts"]) == {"depth/000001.npy", "confidence/000001.npy"}
+    assert set(blocked["masks"]["copy"]["conflicts"]) == {"000001.jpg.png", "extra.png"}
+    assert all((conflicted / relative).read_bytes() == b"stale" for relative in stale)
+
+
+@pytest.mark.parametrize("escaped", [
+    "capture.json", "images", "images/000001.jpg", "masks/valid", "masks/valid/000001.jpg.png",
+])
+def test_run_sfm_rejects_fixed_output_symlink_escapes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, escaped: str
+) -> None:
+    monkeypatch.setattr("capture_splat.sfm_runner.find_binary", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("capture_splat.sfm_runner.colmap_has_cuda", lambda: True)
+    capture = tmp_path / "capture"
+    write_image(capture / "images/000001.jpg")
+    (capture / "masks/valid").mkdir(parents=True)
+    Image.new("L", (8, 6), 255).save(capture / "masks/valid/000001.jpg.png")
+    write_json_strict(capture / "capture.json", {
+        "schema": "capture_splat.v0.3", "source": "capture_splat.prepare_capture",
+        "frames": [{"rgb": "images/000001.jpg"}],
+    })
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "sentinel"
+    sentinel.write_bytes((capture / "capture.json").read_bytes())
+    output = tmp_path / "out"
+    link = output / escaped
+    link.parent.mkdir(parents=True, exist_ok=True)
+    is_directory = escaped in {"images", "masks/valid"}
+    destination = outside if is_directory else sentinel if escaped == "capture.json" else outside / "new-file"
+    link.symlink_to(destination, target_is_directory=is_directory)
+
+    with pytest.raises(ValueError, match="escapes package"):
+        run_sfm(capture / "images", output, dry_run=True)
+    assert sentinel.read_bytes() == (capture / "capture.json").read_bytes()
+    assert {path.name for path in outside.iterdir()} == {"sentinel"}
 
 
 def test_run_sfm_generic_external_camera_preserves_distortion_options(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -13,6 +13,10 @@ from .json_utils import load_json_strict, write_json_strict
 
 SCHEMA = "capture_splat.training_supervision.v0.1"
 REPORT_RELATIVE = Path("metadata/training_supervision.json")
+FRAME_ASSET_KEYS = {
+    "rgb", "image", "image_path", "file_path", "depth", "confidence",
+    "person_mask", "valid_mask", "object_mask",
+}
 
 
 def _sha256(path: Path) -> str:
@@ -23,13 +27,107 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _confined(root: Path, relative: str) -> Path:
-    path = (root / relative).resolve()
+def stage_file_if_absent(source: Path, destination: Path) -> str:
+    if destination.is_symlink():
+        return "conflict"
+    if not source.is_file():
+        return "missing"
+    if destination.exists():
+        same_size = destination.is_file() and source.stat().st_size == destination.stat().st_size
+        return "existing" if same_size and _sha256(source) == _sha256(destination) else "conflict"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+    same_size = source.stat().st_size == destination.stat().st_size
+    return "copied" if same_size and _sha256(source) == _sha256(destination) else "conflict"
+
+
+def _canonical_relative(relative: str) -> str:
+    declared = Path(relative)
+    if not relative or declared.is_absolute() or ".." in declared.parts or declared.as_posix() == ".":
+        raise ValueError(f"capture asset path escapes package: {relative}")
+    return declared.as_posix()
+
+
+def confined_capture_path(root: Path, relative: str) -> Path:
+    path = root / _canonical_relative(relative)
     try:
-        path.relative_to(root.resolve())
+        path.resolve().relative_to(root.resolve())
     except ValueError as error:
-        raise ValueError(f"supervision path escapes package: {relative}") from error
+        raise ValueError(f"capture asset path escapes package: {relative}") from error
     return path
+
+
+def _capture_asset_references(capture: dict[str, Any]) -> list[str]:
+    references: list[str] = []
+    for key, value in capture.items():
+        if key.endswith("_file") and value is not None:
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"capture asset {key} must be a non-empty relative path")
+            references.append(_canonical_relative(value))
+    for frame in capture.get("frames", []):
+        if not isinstance(frame, dict):
+            continue
+        for key in FRAME_ASSET_KEYS:
+            value = frame.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"capture frame asset {key} must be a non-empty relative path")
+            references.append(_canonical_relative(value))
+    return references
+
+
+def copy_capture_manifest_assets(
+    source_root: Path,
+    target_root: Path,
+    capture: dict[str, Any],
+    *,
+    protected: set[str] | None = None,
+) -> dict[str, Any]:
+    source_root = source_root.resolve()
+    target_root = target_root.resolve()
+    protected = {
+        confined_capture_path(target_root, path).resolve().relative_to(target_root).as_posix().casefold()
+        for path in protected or set()
+    }
+    references = _capture_asset_references(capture)
+    resolved = {
+        relative: (confined_capture_path(source_root, relative), confined_capture_path(target_root, relative))
+        for relative in references
+    }
+
+    copied: list[str] = []
+    existing = 0
+    missing: list[str] = []
+    conflicts: list[str] = []
+    for relative, (source, destination) in sorted(resolved.items()):
+        protected_relative = destination.resolve().relative_to(target_root).as_posix().casefold()
+        if any(protected_relative == path or protected_relative.startswith(f"{path}/") for path in protected):
+            conflicts.append(relative)
+            continue
+        status = stage_file_if_absent(source, destination)
+        if status == "copied":
+            copied.append(relative)
+        elif status == "existing":
+            existing += 1
+        elif status == "missing":
+            missing.append(relative)
+        else:
+            conflicts.append(relative)
+    complete = not missing and not conflicts
+    return {
+        "reference_count": len(references),
+        "unique_asset_count": len(resolved),
+        "copied": len(copied),
+        "copied_paths": copied,
+        "existing": existing,
+        "verified_asset_count": len(copied) + existing,
+        "missing": missing,
+        "conflicts": conflicts,
+        "duplicate_reference_count": len(references) - len(resolved),
+        "complete": complete,
+        "decision": "ready" if complete else "hold",
+    }
 
 
 def copy_capture_supervision_assets(
@@ -40,8 +138,11 @@ def copy_capture_supervision_assets(
     source_root = source_root.resolve()
     target_root = target_root.resolve()
     copied: list[str] = []
+    existing: list[str] = []
     missing: list[str] = []
+    conflicts: list[str] = []
     seen: set[str] = set()
+    statuses = {"copied": copied, "existing": existing, "missing": missing, "conflict": conflicts}
     for frame in capture.get("frames", []):
         if not isinstance(frame, dict):
             continue
@@ -49,21 +150,21 @@ def copy_capture_supervision_assets(
             relative = frame.get(key)
             if not isinstance(relative, str) or relative in seen:
                 continue
-            seen.add(relative)
-            source = _confined(source_root, relative)
-            if not source.is_file():
-                missing.append(relative)
+            relative = _canonical_relative(relative)
+            if relative in seen:
                 continue
-            destination = _confined(target_root, relative)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            if source != destination:
-                shutil.copy2(source, destination)
-            copied.append(relative)
+            seen.add(relative)
+            source = confined_capture_path(source_root, relative)
+            destination = confined_capture_path(target_root, relative)
+            status = stage_file_if_absent(source, destination)
+            statuses[status].append(relative)
     return {
         "copied": len(copied),
         "paths": sorted(copied),
+        "existing": sorted(existing),
         "missing": sorted(missing),
-        "complete": not missing,
+        "conflicts": sorted(conflicts),
+        "complete": not missing and not conflicts,
     }
 
 
@@ -157,7 +258,7 @@ def prepare_training_supervision(
         if not isinstance(depth_relative, str):
             records.append(record)
             continue
-        depth_path = _confined(package_dir, depth_relative)
+        depth_path = confined_capture_path(package_dir, depth_relative)
         record["depth"] = depth_relative
         if not depth_path.is_file():
             record["status"] = "depth_file_missing"
@@ -184,7 +285,7 @@ def prepare_training_supervision(
         confidence_relative = frame.get("confidence")
         confidence_applied = False
         if isinstance(confidence_relative, str):
-            confidence_path = _confined(package_dir, confidence_relative)
+            confidence_path = confined_capture_path(package_dir, confidence_relative)
             record["confidence"] = confidence_relative
             if confidence_path.is_file() and confidence_path.suffix.lower() == ".npy":
                 confidence = np.load(confidence_path, allow_pickle=False)
@@ -281,7 +382,7 @@ def supervision_evidence(package_dir: Path) -> dict[str, Any]:
     report = load_json_strict(report_path)
     if report.get("schema") != SCHEMA:
         raise ValueError("training supervision report has an unsupported schema")
-    capture_path = _confined(
+    capture_path = confined_capture_path(
         package_dir,
         str(report.get("capture_manifest", "capture.json")),
     )
@@ -301,7 +402,7 @@ def supervision_evidence(package_dir: Path) -> dict[str, Any]:
                 continue
             if not isinstance(relative, str):
                 raise ValueError(f"training supervision {path_key} path missing")
-            path = _confined(package_dir, relative)
+            path = confined_capture_path(package_dir, relative)
             if not path.is_file() or _sha256(path) != checksum:
                 raise ValueError(f"training supervision checksum mismatch: {relative}")
     return {
