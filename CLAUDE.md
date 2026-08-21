@@ -44,7 +44,7 @@ intrinsics, bad frame matching, blur, or weak supervision.
 Important commands and modules:
 
 - `capture-splat ingest`
-- `capture-splat capture-quality`
+- `capture-splat capture-quality-report`
 - `capture-splat colmap-export`
 - `capture-splat qa-render-source`
 - `capture-splat train-vksplat`
