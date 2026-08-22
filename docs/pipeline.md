@@ -432,6 +432,10 @@ references when present. The handoff keeps source frames as visual evidence and
 trained splats as review proposals, not metric, collision, semantic, or
 navigation authority.
 
+The output directory must be fresh. Export builds in an owned sibling stage and publishes it
+with an exclusive atomic rename, so failures leave no partial handoff and an existing file,
+directory, or symlink is never replaced.
+
 The additive `training_dataset` block is a sanitized evidence inventory, not a
 trainer request or run receipt. It records:
 

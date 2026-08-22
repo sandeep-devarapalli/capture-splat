@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import ctypes
+import errno
+import functools
 import hashlib
 import json
 import math
+import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +25,57 @@ SCHEMA = "capture_splat.world_studio_handoff.v0.3"
 SUPPORTED_SCHEMAS = ("capture_splat.world_studio_handoff.v0.2", SCHEMA)
 TRAINING_DATASET_SCHEMA = "capture_splat.training_dataset.v0.1"
 CAPTURE_PROFILES = ("object", "room_interior", "walkthrough", "outdoor", "video_360")
+
+
+def _publish_exclusive(source: Path, destination: Path) -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if hasattr(libc, "renamex_np"):
+        result = libc.renamex_np(
+            os.fsencode(source), os.fsencode(destination), ctypes.c_uint(0x00000004)
+        )
+    elif hasattr(libc, "renameat2"):
+        result = libc.renameat2(
+            ctypes.c_int(-100),
+            os.fsencode(source),
+            ctypes.c_int(-100),
+            os.fsencode(destination),
+            ctypes.c_uint(1),
+        )
+    elif os.name == "nt":
+        os.rename(source, destination)
+        return
+    else:
+        raise OSError(errno.ENOTSUP, "exclusive directory rename is unavailable", destination)
+    if result != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), destination)
+
+
+def _fresh_atomic_directory(function):
+    @functools.wraps(function)
+    def wrapped(package: Path, out_dir: Path, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        requested = Path(out_dir)
+        requested.parent.mkdir(parents=True, exist_ok=True)
+        destination = requested.parent.resolve() / requested.name
+        if destination.exists() or destination.is_symlink():
+            raise FileExistsError(f"refusing to replace World Studio handoff: {destination}")
+        stage = Path(
+            tempfile.mkdtemp(
+                prefix=f".{destination.name}.",
+                suffix=".partial",
+                dir=destination.parent,
+            )
+        )
+        try:
+            result = function(package, stage, *args, **kwargs)
+            _publish_exclusive(stage, destination)
+            return result
+        except BaseException:
+            if stage.exists() and not stage.is_symlink():
+                shutil.rmtree(stage)
+            raise
+
+    return wrapped
 
 
 def _ply_positions(path: Path, sample_cap: int = 200_000) -> np.ndarray | None:
@@ -716,6 +772,7 @@ def _dataparser_transform(gaussian: Path | None) -> list[list[float]] | None:
     return rows
 
 
+@_fresh_atomic_directory
 def export_world_studio_handoff(
     package: Path,
     out_dir: Path,
