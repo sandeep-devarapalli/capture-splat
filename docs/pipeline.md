@@ -528,6 +528,34 @@ and physical validation remain explicit pending rails. Valid masks and any
 checksum-bound person masks are separate filters; sparse person-mask coverage
 does not imply complete dynamic cleanup.
 
+Compile a held hybrid structural proposal without changing either source:
+
+```bash
+capture-splat build-hybrid-surface \
+  --handoff runs/scan/world_studio_package \
+  --tsdf-report runs/scan/rgbd_tsdf/capture_splat_rgbd_tsdf_report.json \
+  --out runs/scan/hybrid_surface
+```
+
+The output copies every TSDF vertex record and triangle index in source order.
+Each face stores `semantic_classification`, `semantic_support`, and its identity
+`source_face_index`. The default four samples are the centroid and vertices;
+all must be within 6 cm of classified ARKit evidence, have absolute normal dot
+at least 0.8, agree on a known class, and have no competing class within the
+default 10-micrometre distance-equivalence band. `none`, unsupported,
+ambiguous, and disagreeing evidence remains unknown. Per-class and unknown
+counts, surface areas, bounds, and shared-edge connected components are
+reported as deterministic coverage evidence. The preserved truncated ARKit mesh is
+local semantic evidence only. Door-labelled surfaces are not doorway clearance,
+and this surface-only compiler does not infer free space.
+
+The separate collider candidate intentionally preserves the same topology in
+this slice. Its strict report records whether the 60,000-triangle Walk budget
+is exceeded and keeps doorway clearance, wall/opening continuity, unknown
+coverage, and physical probes held. Opening-aware simplification and effective
+collider comparison are downstream work; no fallback floor or synthetic fill
+is permitted.
+
 Use `--measurement-points` with
 `--measurement-points-frame metric_colmap_world` only for a seed whose accepted
 metric-scale report is bound to the same sparse model and exact PLY checksum.

@@ -37,6 +37,7 @@ from .gsplat_ladder import run_gsplat_ladder
 from .gsplat_runner import doctor as gsplat_doctor
 from .gsplat_runner import run_gsplat
 from .hloc_runner import hloc_status
+from .hybrid_surface import build_hybrid_surface
 from .vksplat_ladder import parse_steps, run_vksplat_ladder
 from .weak_frames_report import run_weak_frames_report
 from .vksplat_runner import doctor as vksplat_doctor
@@ -147,6 +148,17 @@ def main() -> None:
     )
     p_tsdf.add_argument("--handoff", type=Path, required=True)
     p_tsdf.add_argument("--out", type=Path, required=True)
+    p_hybrid = sub.add_parser(
+        "build-hybrid-surface",
+        help="Transfer locally supported ARKit classes onto an immutable TSDF surface candidate",
+    )
+    p_hybrid.add_argument("--handoff", type=Path, required=True)
+    p_hybrid.add_argument("--tsdf-report", type=Path, required=True)
+    p_hybrid.add_argument("--out", type=Path, required=True)
+    p_hybrid.add_argument("--maximum-distance", type=float, default=0.06)
+    p_hybrid.add_argument("--minimum-normal-dot", type=float, default=0.8)
+    p_hybrid.add_argument("--ambiguity-epsilon", type=float, default=0.00001)
+    p_hybrid.add_argument("--collider-triangle-budget", type=int, default=60_000)
     p_reconstruct = sub.add_parser("reconstruct", help="Run the resumable capture-to-3DGS evidence pipeline")
     p_reconstruct.add_argument("--capture", type=Path, required=True)
     p_reconstruct.add_argument("--out", type=Path, required=True)
@@ -557,6 +569,16 @@ def main() -> None:
         )
     elif args.command == "build-rgbd-tsdf":
         payload = build_rgbd_tsdf(args.handoff, args.out)
+    elif args.command == "build-hybrid-surface":
+        payload = build_hybrid_surface(
+            args.handoff,
+            args.tsdf_report,
+            args.out,
+            maximum_distance=args.maximum_distance,
+            minimum_normal_dot=args.minimum_normal_dot,
+            ambiguity_epsilon=args.ambiguity_epsilon,
+            collider_triangle_budget=args.collider_triangle_budget,
+        )
     elif args.command == "reconstruct":
         payload = reconstruct_capture(
             args.capture,
