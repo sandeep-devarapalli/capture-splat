@@ -175,13 +175,13 @@ def test_export_world_studio_records_sanitized_training_dataset(tmp_path: Path) 
         package,
         tmp_path / "world_studio_a",
         capture_manifest=capture / "capture.json",
-        copy_files=True,
+        copy_files=False,
     )
     export_world_studio_handoff(
         package,
         tmp_path / "world_studio_b",
         capture_manifest=capture / "capture.json",
-        copy_files=True,
+        copy_files=False,
     )
     manifest = load_json_strict(tmp_path / "world_studio_a" / MANIFEST_NAME)
     second = load_json_strict(tmp_path / "world_studio_b" / MANIFEST_NAME)
@@ -540,6 +540,7 @@ def test_export_world_studio_registers_capture_metric_sidecars(tmp_path: Path) -
     capture = tmp_path / "capture"
     (capture / "depth").mkdir(parents=True)
     for index in range(1, len(capture_frames) + 1):
+        write_image(capture / f"rgb/{index:06d}.jpg")
         np.save(capture / f"depth/{index:06d}.npy", np.ones((3, 4), dtype=np.float32))
     write_json_strict(capture / "capture.json", {
         "schema": "capture_splat.v0.3",
@@ -695,6 +696,7 @@ def test_export_world_studio_holds_walk_when_metric_registration_is_insufficient
         }],
     })
     write_ascii_ply(capture / "geometry" / "arkit_mesh.ply")
+    write_image(capture / "rgb/000001.jpg")
 
     export_world_studio_handoff(
         package,
@@ -711,3 +713,69 @@ def test_export_world_studio_holds_walk_when_metric_registration_is_insufficient
         "reason": "metric_registration_not_accepted",
         "authority": "fly_only",
     }
+
+
+def test_export_world_studio_copies_every_capture_manifest_asset(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    write_image(package / "images/000001.jpg")
+    (package / "depth").mkdir()
+    np.save(package / "depth/000001.npy", np.ones((2, 2), dtype=np.float32))
+    write_image(package / "masks/valid.png")
+    write_json_strict(package / "metadata/planes.json", {"planes": []})
+    write_json_strict(package / "pointcloud_preview/preview.json", {"point_count": 0, "points": []})
+    write_json_strict(package / "capture.json", {
+        "schema": "capture_splat.v0.3",
+        "planes_file": "metadata/planes.json",
+        "pointcloud_preview_file": "pointcloud_preview/preview.json",
+        "frames": [{
+            "rgb": "images/000001.jpg",
+            "depth": "depth/000001.npy",
+            "valid_mask": "masks/valid.png",
+        }],
+    })
+
+    export_world_studio_handoff(package, tmp_path / "handoff", copy_files=True)
+    manifest = load_json_strict(tmp_path / "handoff" / MANIFEST_NAME)
+    evidence = manifest["capture_manifest_assets"]
+
+    assert evidence["decision"] == "ready"
+    assert evidence["verified_asset_count"] == len(evidence["assets"]) == 5
+    assert {asset["path"] for asset in evidence["assets"]} == {
+        "images/000001.jpg",
+        "depth/000001.npy",
+        "masks/valid.png",
+        "metadata/planes.json",
+        "pointcloud_preview/preview.json",
+    }
+    assert all(asset["checksum"].startswith("sha256:") for asset in evidence["assets"])
+    assert not any(path.is_symlink() for path in (tmp_path / "handoff").rglob("*"))
+
+
+def test_export_world_studio_capture_assets_fail_closed(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    write_image(package / "images/000001.jpg")
+
+    write_json_strict(package / "capture.json", {
+        "schema": "capture_splat.v0.3",
+        "frames": [{"rgb": "images/000001.jpg", "depth": "depth/missing.npy"}],
+    })
+    with pytest.raises(ValueError, match="not self-contained"):
+        export_world_studio_handoff(package, tmp_path / "missing", copy_files=True)
+    assert not (tmp_path / "missing").exists()
+
+    write_json_strict(package / "capture.json", {
+        "schema": "capture_splat.v0.3",
+        "planes_file": "../outside.json",
+        "frames": [],
+    })
+    with pytest.raises(ValueError, match="escapes package"):
+        export_world_studio_handoff(package, tmp_path / "escape", copy_files=True)
+
+    (package / "Asset.bin").write_bytes(b"asset")
+    write_json_strict(package / "capture.json", {
+        "schema": "capture_splat.v0.3",
+        "asset_file": "Asset.bin",
+        "frames": [{"rgb": "asset.bin"}],
+    })
+    with pytest.raises(ValueError, match="case-colliding"):
+        export_world_studio_handoff(package, tmp_path / "collision", copy_files=True)
