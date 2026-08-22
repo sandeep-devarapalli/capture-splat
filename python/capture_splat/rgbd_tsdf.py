@@ -40,7 +40,7 @@ def _sha256(path: Path) -> str:
     before_path = path.lstat()
     if not stat.S_ISREG(before_path.st_mode):
         raise ValueError(f"checksum input is not a regular file: {path}")
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(path, flags)
     digest = hashlib.sha256()
     try:
