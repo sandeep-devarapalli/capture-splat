@@ -9,6 +9,7 @@ import math
 import os
 import shutil
 import tempfile
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -570,13 +571,153 @@ def _canonical_frame_set(frames: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _colmap_evidence(sparse_dir: Path | None) -> dict[str, Any]:
+def _name_set_digest(names: list[str]) -> str:
+    digest = hashlib.sha256()
+    for name in sorted(names):
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\n")
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _registered_image_names(images_txt: Path) -> tuple[list[str], int]:
+    names: list[str] = []
+    invalid_records = 0
+    expect_pose = True
+    for raw_line in images_txt.read_text(encoding="utf-8").splitlines():
+        stripped = raw_line.strip()
+        if stripped.startswith("#"):
+            continue
+        if not expect_pose:
+            expect_pose = True
+            if stripped:
+                points = stripped.split()
+                try:
+                    if len(points) % 3:
+                        raise ValueError
+                    for index in range(0, len(points), 3):
+                        coordinates = (float(points[index]), float(points[index + 1]))
+                        if not all(math.isfinite(value) for value in coordinates):
+                            raise ValueError
+                        int(points[index + 2])
+                except ValueError:
+                    invalid_records += 1
+            continue
+        if not stripped:
+            continue
+        parts = stripped.split(maxsplit=9)
+        try:
+            if len(parts) < 10:
+                raise ValueError
+            int(parts[0])
+            pose = [float(value) for value in parts[1:8]]
+            if not all(math.isfinite(value) for value in pose):
+                raise ValueError
+            if sum(value * value for value in pose[:4]) == 0.0:
+                raise ValueError
+            int(parts[8])
+        except ValueError:
+            invalid_records += 1
+            continue
+        names.append(parts[9])
+        expect_pose = False
+    if not expect_pose:
+        invalid_records += 1
+    return names, invalid_records
+
+
+def _registered_rgbd_overlap(
+    registered_names: list[str],
+    capture: dict[str, Any] | None,
+    capture_root: Path | None,
+    package: Path,
+    parse_complete: bool,
+) -> dict[str, Any]:
+    matching = "unique_case_sensitive_rgb_basename_with_same_root_rgb_and_depth_v1"
+
+    def unavailable(reason: str) -> dict[str, Any]:
+        return {
+            "available": False,
+            "reason": reason,
+            "matching": matching,
+            "depth_bearing_capture_frame_count": 0,
+            "matched_count": 0,
+            "ambiguous_basename_count": 0,
+            "unmatched_registered_image_count": len(registered_names),
+        }
+
+    if not parse_complete or not isinstance(capture, dict):
+        return unavailable(
+            "colmap_images_parse_incomplete" if not parse_complete else "capture_manifest_unavailable"
+        )
+    roots = [package, *([capture_root] if capture_root is not None else [])]
+    capture_names: list[str] = []
+    frames = capture.get("frames", [])
+    if not isinstance(frames, list) or any(not isinstance(frame, dict) for frame in frames):
+        return unavailable("capture_frames_invalid")
+    for frame in frames:
+        if not isinstance(frame, dict):
+            continue
+        quality = frame.get("capture_quality") or frame.get("quality")
+        rejected = frame.get("accepted") is False or (
+            isinstance(quality, dict) and quality.get("accepted") is False
+        )
+        rgb = next(
+            (
+                frame.get(key)
+                for key in ("rgb", "image", "image_path", "file_path")
+                if isinstance(frame.get(key), str) and frame.get(key)
+            ),
+            None,
+        )
+        depth = frame.get("depth")
+        if rejected or not isinstance(rgb, str) or not isinstance(depth, str):
+            continue
+        if not any(_confined_file(root, rgb) and _confined_file(root, depth) for root in roots):
+            continue
+        capture_names.append(rgb.replace("\\", "/").rsplit("/", 1)[-1])
+    registered_basenames = [name.replace("\\", "/").rsplit("/", 1)[-1] for name in registered_names]
+    registered_counts = Counter(registered_basenames)
+    capture_counts = Counter(capture_names)
+    shared = set(registered_counts) & set(capture_counts)
+    matched = sorted(name for name in shared if registered_counts[name] == capture_counts[name] == 1)
+    ambiguous = [name for name in shared if registered_counts[name] != 1 or capture_counts[name] != 1]
+    return {
+        "available": True,
+        "matching": matching,
+        "depth_bearing_capture_frame_count": len(capture_names),
+        "matched_count": len(matched),
+        "matched_name_digest": _name_set_digest(matched),
+        "ambiguous_basename_count": len(ambiguous),
+        "unmatched_registered_image_count": len(registered_names) - len(matched),
+    }
+
+
+def _colmap_evidence(
+    sparse_dir: Path | None,
+    capture: dict[str, Any] | None,
+    capture_root: Path | None,
+    package: Path,
+) -> dict[str, Any]:
     if sparse_dir is None:
         return {
             "available": False,
             "camera_count": 0,
             "camera_models": [],
             "registered_images_available": False,
+            "registered_image_count": 0,
+            "registered_image_parse_status": "unavailable",
+            "registered_image_invalid_record_count": 0,
+            "registered_image_name_digest": None,
+            "registered_rgbd_overlap_count": None,
+            "registered_rgbd_overlap": {
+                "available": False,
+                "reason": "colmap_images_unavailable",
+                "matching": "unique_case_sensitive_rgb_basename_with_same_root_rgb_and_depth_v1",
+                "depth_bearing_capture_frame_count": 0,
+                "matched_count": 0,
+                "ambiguous_basename_count": 0,
+                "unmatched_registered_image_count": 0,
+            },
             "sparse_points_available": False,
         }
     cameras = sparse_dir / "cameras.txt"
@@ -598,11 +739,31 @@ def _colmap_evidence(sparse_dir: Path | None) -> dict[str, Any]:
             model = parts[1]
             if 0 < len(model) <= 64 and all(character.isalnum() or character == "_" for character in model):
                 models.add(model)
+    images_txt = sparse_dir / "images.txt"
+    registered_names, invalid_records = _registered_image_names(images_txt) if images_txt.is_file() else ([], 0)
+    parse_status = (
+        "complete"
+        if images_txt.is_file() and invalid_records == 0
+        else "unavailable" if not images_txt.is_file() else "partial"
+    )
+    overlap = _registered_rgbd_overlap(
+        registered_names,
+        capture,
+        capture_root,
+        package,
+        parse_status == "complete",
+    )
     return {
         "available": cameras.is_file() and (sparse_dir / "images.txt").is_file(),
         "camera_count": camera_count,
         "camera_models": sorted(models),
-        "registered_images_available": (sparse_dir / "images.txt").is_file(),
+        "registered_images_available": images_txt.is_file(),
+        "registered_image_count": len(registered_names),
+        "registered_image_parse_status": parse_status,
+        "registered_image_invalid_record_count": invalid_records,
+        "registered_image_name_digest": _name_set_digest(registered_names) if images_txt.is_file() else None,
+        "registered_rgbd_overlap_count": overlap["matched_count"] if overlap["available"] else None,
+        "registered_rgbd_overlap": overlap,
         "sparse_points_available": (sparse_dir / "points3D.txt").is_file(),
     }
 
@@ -720,7 +881,7 @@ def _training_dataset(
                 "asset": "capture_manifest" if copied_capture is not None else None,
             },
             "sfm": {
-                **_colmap_evidence(copied_sparse),
+                **_colmap_evidence(copied_sparse, capture, capture_root, package),
                 "asset": "colmap_sparse" if copied_sparse is not None else None,
             },
             "depth": _frame_asset_evidence(capture, capture_root, package, ("depth",)),

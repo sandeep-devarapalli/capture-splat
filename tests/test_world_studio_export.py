@@ -9,6 +9,8 @@ from capture_splat.world_studio_export import (
     MANIFEST_NAME,
     _measurement_eligibility,
     _mesh_walk_evidence,
+    _registered_image_names,
+    _registered_rgbd_overlap,
     _sha256,
     export_world_studio_handoff,
 )
@@ -34,6 +36,48 @@ def write_ascii_ply(path: Path) -> None:
         ]) + "\n",
         encoding="ascii",
     )
+
+
+def test_registered_image_evidence_requires_complete_record_pairs(tmp_path: Path) -> None:
+    pose = "1 1 0 0 0 0 0 0 1 000001.jpg"
+    truncated = tmp_path / "truncated.txt"
+    truncated.write_text(f"{pose}\n", encoding="utf-8")
+    assert _registered_image_names(truncated) == (["000001.jpg"], 1)
+
+    malformed = tmp_path / "malformed.txt"
+    malformed.write_text(f"{pose}\nnan 0 -1\n", encoding="utf-8")
+    assert _registered_image_names(malformed) == (["000001.jpg"], 1)
+
+    complete = tmp_path / "complete.txt"
+    complete.write_text(f"{pose}\n\n", encoding="utf-8")
+    assert _registered_image_names(complete) == (["000001.jpg"], 0)
+
+    malformed_poses = tmp_path / "malformed_poses.txt"
+    malformed_poses.write_text(
+        "2 nan 0 0 0 0 0 0 1 nonfinite.jpg\n\n"
+        "3 0 0 0 0 0 0 0 1 zero_quaternion.jpg\n\n",
+        encoding="utf-8",
+    )
+    assert _registered_image_names(malformed_poses) == ([], 2)
+
+
+def test_registered_rgbd_overlap_requires_one_authoritative_root(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    capture_root = tmp_path / "capture"
+    write_image(package / "rgb/000001.jpg")
+    (capture_root / "depth").mkdir(parents=True)
+    np.save(capture_root / "depth/000001.npy", np.ones((2, 2), dtype=np.float32))
+    capture = {"frames": [{"rgb": "rgb/000001.jpg", "depth": "depth/000001.npy"}]}
+
+    separated = _registered_rgbd_overlap(
+        ["000001.jpg"], capture, capture_root, package, True,
+    )
+    assert separated["matched_count"] == 0
+    assert separated["depth_bearing_capture_frame_count"] == 0
+
+    write_image(capture_root / "rgb/000001.jpg")
+    paired = _registered_rgbd_overlap(["000001.jpg"], capture, capture_root, package, True)
+    assert paired["matched_count"] == paired["depth_bearing_capture_frame_count"] == 1
 
 
 def test_mesh_walk_evidence_holds_legacy_truncated_mesh(tmp_path: Path) -> None:
@@ -138,6 +182,8 @@ def test_export_world_studio_records_sanitized_training_dataset(tmp_path: Path) 
     capture = tmp_path / "capture"
     (capture / "depth").mkdir(parents=True)
     (capture / "confidence").mkdir(parents=True)
+    write_image(capture / "rgb/000001.jpg")
+    write_image(capture / "rgb/000002.jpg")
     np.save(capture / "depth" / "000001.npy", np.ones((2, 2), dtype=np.float32))
     np.save(capture / "confidence" / "000001.npy", np.ones((2, 2), dtype=np.uint8))
     write_image(capture / "masks" / "person" / "000001.png")
@@ -197,6 +243,19 @@ def test_export_world_studio_records_sanitized_training_dataset(tmp_path: Path) 
     assert dataset["projection"]["native_equirectangular"] is False
     assert dataset["evidence"]["sfm"]["camera_count"] == 2
     assert dataset["evidence"]["sfm"]["camera_models"] == ["OPENCV", "PINHOLE"]
+    assert dataset["evidence"]["sfm"]["registered_image_count"] == 2
+    assert dataset["evidence"]["sfm"]["registered_image_parse_status"] == "complete"
+    assert dataset["evidence"]["sfm"]["registered_rgbd_overlap_count"] == 1
+    assert dataset["evidence"]["sfm"]["registered_rgbd_overlap"] == {
+        "available": True,
+        "matching": "unique_case_sensitive_rgb_basename_with_same_root_rgb_and_depth_v1",
+        "depth_bearing_capture_frame_count": 1,
+        "matched_count": 1,
+        "matched_name_digest": dataset["evidence"]["sfm"]["registered_rgbd_overlap"]["matched_name_digest"],
+        "ambiguous_basename_count": 0,
+        "unmatched_registered_image_count": 1,
+    }
+    assert dataset["evidence"]["sfm"]["registered_rgbd_overlap"]["matched_name_digest"].startswith("sha256:")
     assert dataset["evidence"]["depth"] == {
         "referenced_frame_count": 2,
         "available_frame_count": 1,
