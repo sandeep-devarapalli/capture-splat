@@ -571,6 +571,29 @@ Studio controller reset, physical probes, and every collision/navigation/
 physics/Newton authority remain held. No fallback floor, hole fill, portal, or
 other synthetic geometry is permitted.
 
+Capture a new open-door state before testing another reduction hypothesis. To
+record the current missing-evidence state, run:
+
+```bash
+capture-splat validate-portal-route-evidence \
+  --handoff runs/scan/world_studio_package \
+  --out runs/scan/portal_route_receipt
+```
+
+Supplying `--evidence portal_route_evidence.json` invokes the strict v0.1
+contract. It checksum-binds the immutable v0.3 open-state handoff, raw RoomPlan
+plus its checksum-bound rigid registration into `arkit_world` meters, measured
+portal polygon/plane/width/height/threshold, observed free-space samples
+supporting a crossing corridor, registered RGB-D views on side A, through the
+opening, and side B, and the prior closed-state handoff/reducer/probe bundle.
+Missing evidence emits a deterministic held receipt; malformed, non-finite,
+tampered, frame-mismatched, scale-mismatched, or authority-granting evidence
+rejects. Even a complete producer contract remains held for source/reduced
+World Studio collision probes, controller reset, and a physical clearance
+traversal. It does not synthesize geometry, modify either capture, start
+reduction, or mark the room traversable. The exact fields are documented in
+[Portal and Route Evidence](portal_route_evidence.md).
+
 Use `--measurement-points` with
 `--measurement-points-frame metric_colmap_world` only for a seed whose accepted
 metric-scale report is bound to the same sparse model and exact PLY checksum.

@@ -22,6 +22,7 @@ from .colmap_support_repair import build_colmap_support_repair
 from .ingest import ingest_capture
 from .live_replay import DEFAULT_LIVE_RECEIVER, replay_live_session
 from .ply_stats import prune_ply_by_alpha, sanitize_ply_drop_non_finite
+from .portal_route_evidence import validate_portal_route_evidence
 from .prepare_capture import prepare_capture
 from .reconstruct import STAGES, reconstruct_capture
 from .render_source_qa import run_render_source_qa
@@ -168,6 +169,13 @@ def main() -> None:
     p_reduce_collider.add_argument("--out", type=Path, required=True)
     p_reduce_collider.add_argument("--max-faces", type=int, default=60_000)
     p_reduce_collider.add_argument("--boundary-weight", type=float, default=100.0)
+    p_portal_route = sub.add_parser(
+        "validate-portal-route-evidence",
+        help="Validate checksum-bound open-portal evidence or emit an explicit held receipt",
+    )
+    p_portal_route.add_argument("--handoff", type=Path, required=True)
+    p_portal_route.add_argument("--evidence", type=Path)
+    p_portal_route.add_argument("--out", type=Path, required=True)
     p_reconstruct = sub.add_parser("reconstruct", help="Run the resumable capture-to-3DGS evidence pipeline")
     p_reconstruct.add_argument("--capture", type=Path, required=True)
     p_reconstruct.add_argument("--out", type=Path, required=True)
@@ -594,6 +602,12 @@ def main() -> None:
             args.out,
             max_faces=args.max_faces,
             boundary_weight=args.boundary_weight,
+        )
+    elif args.command == "validate-portal-route-evidence":
+        payload = validate_portal_route_evidence(
+            args.handoff,
+            args.out,
+            evidence=args.evidence,
         )
     elif args.command == "reconstruct":
         payload = reconstruct_capture(

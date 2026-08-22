@@ -510,6 +510,24 @@ evidence; trained splats are review proposals, not metric, collision, semantic,
 or navigation authority. Finite PLY and QA decisions are not high-quality
 claims.
 
+Record the current absence of open-portal evidence without changing the
+handoff:
+
+```bash
+capture-splat validate-portal-route-evidence \
+  --handoff runs/room_01/world_studio_package \
+  --out runs/room_01/portal_route_receipt
+```
+
+After a separate open-door capture supplies the strict evidence package, add
+`--evidence /path/to/portal_route_evidence.json`. The validator binds the exact
+v0.3 handoff, registered RoomPlan, portal plane/polygon/dimensions/threshold,
+observed route free space, registered RGB-D views on both sides and through the
+opening, and the prior closed-state control. A valid producer contract still
+emits `hold`: it never starts reduction, marks the room traversable, or grants
+collision/navigation/physics/Newton authority. See
+[Portal and Route Evidence](docs/portal_route_evidence.md).
+
 ### Replay an exported capture to World Studio
 
 The production iPhone workflow is local-first: record and finalize on device,
