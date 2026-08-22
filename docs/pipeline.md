@@ -434,7 +434,9 @@ navigation authority.
 
 The output directory must be fresh. Export builds in an owned sibling stage and publishes it
 with an exclusive atomic rename, so failures leave no partial handoff and an existing file,
-directory, or symlink is never replaced.
+directory, or symlink is never replaced. With `--copy-files`, every relative asset declared
+by `capture.json` is copied, verified by size and SHA-256, and inventoried in the handoff
+manifest. Missing, escaping, case-colliding, or conflicting assets fail the export.
 
 The additive `training_dataset` block is a sanitized evidence inventory, not a
 trainer request or run receipt. It records:

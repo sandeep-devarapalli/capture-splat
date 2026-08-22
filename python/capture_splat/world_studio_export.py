@@ -18,6 +18,12 @@ from .json_utils import load_json_strict, write_json_strict
 from .ply_stats import inspect_ply
 from .rgbd_seed import camera_alignment_report
 from .scene_transform import SIDECAR_NAME, metric_package_status
+from .training_supervision import (
+    capture_manifest_asset_conflicts,
+    capture_manifest_asset_references,
+    confined_capture_path,
+    copy_capture_manifest_assets,
+)
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 MANIFEST_NAME = "capture-splat.world-studio.json"
@@ -283,7 +289,7 @@ def _capture_asset(
     relative = capture.get(key, fallback)
     if not isinstance(relative, str) or not relative:
         return None
-    path = capture_manifest.resolve().parent / relative
+    path = confined_capture_path(capture_manifest.resolve().parent, relative)
     return path if path.exists() else None
 
 
@@ -826,6 +832,17 @@ def export_world_studio_handoff(
     splat = splat or _first_existing(package, ("scene.splat", "splat.splat"))
     spz = spz or _first_existing(package, ("scene.spz", "splat.spz"))
     capture_data = load_json_strict(capture_manifest) if capture_manifest and capture_manifest.exists() else None
+    capture_asset_paths: list[str] = []
+    if copy_files and capture_manifest is not None:
+        if not isinstance(capture_data, dict):
+            raise ValueError("capture manifest must be a JSON object")
+        capture_asset_paths = sorted(set(capture_manifest_asset_references(capture_data)))
+        collisions = capture_manifest_asset_conflicts(out_dir, capture_asset_paths)
+        if collisions:
+            raise ValueError(f"case-colliding capture manifest assets: {collisions}")
+        for relative in capture_asset_paths:
+            confined_capture_path(capture_manifest.parent, relative)
+            confined_capture_path(out_dir, relative)
     navigation_mesh = navigation_mesh or _capture_asset(
         capture_manifest, capture_data, "arkit_mesh_file", "geometry/arkit_mesh.ply"
     )
@@ -924,6 +941,49 @@ def export_world_studio_handoff(
         spatial_guidance, out_dir, "spatial_guidance_report.json", copy_files
     )
     copied_measurement_points = _copy_asset(measurement_points, out_dir, "measurement_points.ply", copy_files)
+
+    capture_asset_copy = None
+    if copy_files and capture_manifest is not None and isinstance(capture_data, dict):
+        protected = {MANIFEST_NAME, sparse_dir_name, "quality"}
+        for path in (
+            copied_gaussian,
+            copied_points,
+            copied_capture,
+            copied_transforms,
+            copied_poses,
+            copied_camera_poses,
+            copied_splat,
+            copied_spz,
+            copied_navigation_mesh,
+            copied_mesh_report,
+            copied_room_semantics,
+            copied_camera_trajectory,
+            copied_planes,
+            copied_source_capture,
+            copied_room_plan,
+            copied_room_plan_report,
+            copied_metric_scale_report,
+            copied_known_scale_report,
+            copied_collision_candidate,
+            copied_collision_report,
+            copied_render_source_qa,
+            copied_ply_stats,
+            copied_spatial_guidance,
+            copied_measurement_points,
+        ):
+            if path is not None:
+                protected.add(path.relative_to(out_dir).as_posix())
+        capture_asset_copy = copy_capture_manifest_assets(
+            capture_manifest.parent,
+            out_dir,
+            capture_data,
+            protected=protected,
+        )
+        if not capture_asset_copy["complete"]:
+            raise ValueError(
+                "capture manifest assets are not self-contained: "
+                f"missing={capture_asset_copy['missing']} conflicts={capture_asset_copy['conflicts']}"
+            )
 
     assets: dict[str, Any] = {}
     if copied_points:
@@ -1061,6 +1121,13 @@ def export_world_studio_handoff(
             "training_dataset inventories capture evidence and does not claim that any trainer consumed it.",
         ],
     }
+    if capture_asset_copy is not None:
+        manifest["capture_manifest_assets"] = {
+            "schema": "capture_splat.capture_manifest_assets.v0.1",
+            **capture_asset_copy,
+            "verification": "source_destination_size_and_sha256",
+            "assets": [_file_ref(out_dir / relative, out_dir) for relative in capture_asset_paths],
+        }
     dataparser_transform = _dataparser_transform(gaussian)
     if dataparser_transform is not None:
         manifest["dataparser_transform"] = dataparser_transform
