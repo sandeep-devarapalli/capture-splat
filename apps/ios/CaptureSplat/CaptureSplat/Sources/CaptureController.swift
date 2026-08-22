@@ -5411,7 +5411,7 @@ extension CaptureController: ARSessionDelegate {
     }
 
     private func finalizePointCloudPreview() -> (count: Int, url: URL?) {
-        guard let directory = currentSessionDirectory, !pointCloudPreviewSamples.isEmpty else {
+        guard let directory = currentSessionDirectory else {
             return (pointCloudPreviewSamples.count, pointCloudPreviewFile)
         }
         let url = directory

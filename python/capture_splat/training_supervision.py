@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 import math
 import shutil
-from pathlib import Path
+import unicodedata
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 import numpy as np
@@ -16,6 +17,14 @@ REPORT_RELATIVE = Path("metadata/training_supervision.json")
 FRAME_ASSET_KEYS = {
     "rgb", "image", "image_path", "file_path", "depth", "confidence",
     "person_mask", "valid_mask", "object_mask",
+}
+WINDOWS_INVALID_NAME_CHARACTERS = frozenset('<>:"|?*')
+WINDOWS_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+    *(f"COM{index}" for index in "¹²³"),
+    *(f"LPT{index}" for index in "¹²³"),
 }
 
 
@@ -42,10 +51,30 @@ def stage_file_if_absent(source: Path, destination: Path) -> str:
 
 
 def _canonical_relative(relative: str) -> str:
-    declared = Path(relative)
-    if not relative or declared.is_absolute() or ".." in declared.parts or declared.as_posix() == ".":
+    declared = PurePosixPath(relative)
+    windows = PureWindowsPath(relative)
+    if (
+        not relative
+        or "\\" in relative
+        or declared.is_absolute()
+        or windows.drive
+        or ".." in declared.parts
+        or declared.as_posix() == "."
+    ):
         raise ValueError(f"capture asset path escapes package: {relative}")
+    for component in declared.parts:
+        stem = component.rstrip(" .").split(".", 1)[0].rstrip(" .").upper()
+        if (
+            component.endswith((" ", "."))
+            or stem in WINDOWS_RESERVED_NAMES
+            or any(ord(character) < 32 or character in WINDOWS_INVALID_NAME_CHARACTERS for character in component)
+        ):
+            raise ValueError(f"capture asset path is not portable: {relative}")
     return declared.as_posix()
+
+
+def _portable_path_key(relative: str) -> str:
+    return unicodedata.normalize("NFC", relative.casefold())
 
 
 def confined_capture_path(root: Path, relative: str) -> Path:
@@ -57,16 +86,19 @@ def confined_capture_path(root: Path, relative: str) -> Path:
     return path
 
 
-def _capture_asset_references(capture: dict[str, Any]) -> list[str]:
+def capture_manifest_asset_references(capture: dict[str, Any]) -> list[str]:
     references: list[str] = []
     for key, value in capture.items():
         if key.endswith("_file") and value is not None:
             if not isinstance(value, str) or not value:
                 raise ValueError(f"capture asset {key} must be a non-empty relative path")
             references.append(_canonical_relative(value))
-    for frame in capture.get("frames", []):
+    frames = capture.get("frames", [])
+    if not isinstance(frames, list):
+        raise ValueError("capture frames must be a list")
+    for frame in frames:
         if not isinstance(frame, dict):
-            continue
+            raise ValueError("capture frame must be an object")
         for key in FRAME_ASSET_KEYS:
             value = frame.get(key)
             if value is None:
@@ -75,6 +107,30 @@ def _capture_asset_references(capture: dict[str, Any]) -> list[str]:
                 raise ValueError(f"capture frame asset {key} must be a non-empty relative path")
             references.append(_canonical_relative(value))
     return references
+
+
+def capture_manifest_asset_conflicts(target_root: Path, references: list[str]) -> list[str]:
+    target_root = target_root.resolve()
+    seen_declared: dict[str, str] = {}
+    seen_destinations: dict[str, str] = {}
+    conflicts: set[str] = set()
+    for relative in sorted(set(references)):
+        keys = (
+            (seen_declared, relative),
+            (
+                seen_destinations,
+                confined_capture_path(target_root, relative)
+                .resolve()
+                .relative_to(target_root)
+                .as_posix(),
+            ),
+        )
+        for seen, key in keys:
+            key = _portable_path_key(key)
+            previous = seen.setdefault(key, relative)
+            if previous != relative:
+                conflicts.update((previous, relative))
+    return sorted(conflicts)
 
 
 def copy_capture_manifest_assets(
@@ -87,10 +143,27 @@ def copy_capture_manifest_assets(
     source_root = source_root.resolve()
     target_root = target_root.resolve()
     protected = {
-        confined_capture_path(target_root, path).resolve().relative_to(target_root).as_posix().casefold()
+        _portable_path_key(
+            confined_capture_path(target_root, path).resolve().relative_to(target_root).as_posix()
+        )
         for path in protected or set()
     }
-    references = _capture_asset_references(capture)
+    references = capture_manifest_asset_references(capture)
+    collisions = capture_manifest_asset_conflicts(target_root, references)
+    if collisions:
+        return {
+            "reference_count": len(references),
+            "unique_asset_count": len(set(references)),
+            "copied": 0,
+            "copied_paths": [],
+            "existing": 0,
+            "verified_asset_count": 0,
+            "missing": [],
+            "conflicts": collisions,
+            "duplicate_reference_count": len(references) - len(set(references)),
+            "complete": False,
+            "decision": "hold",
+        }
     resolved = {
         relative: (confined_capture_path(source_root, relative), confined_capture_path(target_root, relative))
         for relative in references
@@ -101,7 +174,9 @@ def copy_capture_manifest_assets(
     missing: list[str] = []
     conflicts: list[str] = []
     for relative, (source, destination) in sorted(resolved.items()):
-        protected_relative = destination.resolve().relative_to(target_root).as_posix().casefold()
+        protected_relative = _portable_path_key(
+            destination.resolve().relative_to(target_root).as_posix()
+        )
         if any(protected_relative == path or protected_relative.startswith(f"{path}/") for path in protected):
             conflicts.append(relative)
             continue
