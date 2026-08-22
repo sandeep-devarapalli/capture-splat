@@ -28,6 +28,9 @@ CAPTURE_PROFILES = ("object", "room_interior", "walkthrough", "outdoor", "video_
 
 
 def _publish_exclusive(source: Path, destination: Path) -> None:
+    if os.name == "nt":
+        os.rename(source, destination)
+        return
     libc = ctypes.CDLL(None, use_errno=True)
     if hasattr(libc, "renamex_np"):
         result = libc.renamex_np(
@@ -41,9 +44,6 @@ def _publish_exclusive(source: Path, destination: Path) -> None:
             os.fsencode(destination),
             ctypes.c_uint(1),
         )
-    elif os.name == "nt":
-        os.rename(source, destination)
-        return
     else:
         raise OSError(errno.ENOTSUP, "exclusive directory rename is unavailable", destination)
     if result != 0:
