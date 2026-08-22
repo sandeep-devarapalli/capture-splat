@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from capture_splat.json_utils import load_json_strict, write_json_strict
@@ -343,21 +344,80 @@ def test_export_world_studio_rejects_missing_images(tmp_path: Path) -> None:
         assert "no source images" in str(error)
     else:
         raise AssertionError("expected missing image package to fail")
+    assert not (tmp_path / "world_studio").exists()
+    assert not list(tmp_path.glob(".world_studio.*.partial"))
 
 
-def test_export_world_studio_can_write_into_package_without_removing_assets(tmp_path: Path) -> None:
+def test_export_world_studio_rejects_existing_package_target(tmp_path: Path) -> None:
     package = tmp_path / "colmap_package"
     write_image(package / "images" / "000001.jpg")
     write_ascii_ply(package / "splat.ply")
+    image_sha = _sha256(package / "images/000001.jpg")
+    splat_sha = _sha256(package / "splat.ply")
 
-    export_world_studio_handoff(package, package, copy_files=False)
-    manifest = load_json_strict(package / MANIFEST_NAME)
+    with pytest.raises(FileExistsError, match="refusing to replace"):
+        export_world_studio_handoff(package, package, copy_files=False)
 
-    assert (package / "images" / "000001.jpg").exists()
-    assert (package / "splat.ply").exists()
-    assert manifest["source_frames"][0]["rgb_path"] == "images/000001.jpg"
-    assert manifest["assets"]["gaussian_ply"]["path"] == "splat.ply"
-    assert manifest["assets"]["gaussian_ply"]["variant"] == "raw"
+    assert _sha256(package / "images/000001.jpg") == image_sha
+    assert _sha256(package / "splat.ply") == splat_sha
+    assert not (package / MANIFEST_NAME).exists()
+
+
+def test_export_world_studio_never_replaces_existing_target(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    write_image(package / "images/000001.jpg")
+    target = tmp_path / "handoff"
+    target.mkdir()
+    sentinel = target / "sentinel"
+    sentinel.write_bytes(b"preserve")
+
+    with pytest.raises(FileExistsError, match="refusing to replace"):
+        export_world_studio_handoff(package, target, copy_files=True)
+    assert sentinel.read_bytes() == b"preserve"
+    assert list(target.iterdir()) == [sentinel]
+    assert not list(tmp_path.glob(".handoff.*.partial"))
+
+    file_target = tmp_path / "handoff-file"
+    file_target.write_bytes(b"file")
+    with pytest.raises(FileExistsError, match="refusing to replace"):
+        export_world_studio_handoff(package, file_target, copy_files=True)
+    assert file_target.read_bytes() == b"file"
+    assert not list(tmp_path.glob(".handoff-file.*.partial"))
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    outside_sentinel = outside / "sentinel"
+    outside_sentinel.write_bytes(b"outside")
+    alias = tmp_path / "handoff-link"
+    alias.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(FileExistsError, match="refusing to replace"):
+        export_world_studio_handoff(package, alias, copy_files=True)
+    assert alias.is_symlink()
+    assert outside_sentinel.read_bytes() == b"outside"
+    assert not list(tmp_path.glob(".handoff-link.*.partial"))
+
+
+def test_export_world_studio_publication_race_leaves_winner_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "package"
+    write_image(package / "images/000001.jpg")
+    target = tmp_path / "handoff"
+
+    def lose_publication_race(source: Path, destination: Path) -> None:
+        destination.mkdir()
+        (destination / "sentinel").write_bytes(b"winner")
+        raise FileExistsError(destination)
+
+    monkeypatch.setattr(
+        "capture_splat.world_studio_export._publish_exclusive",
+        lose_publication_race,
+    )
+    with pytest.raises(FileExistsError):
+        export_world_studio_handoff(package, target, copy_files=True)
+    assert (target / "sentinel").read_bytes() == b"winner"
+    assert list(target.iterdir()) == [target / "sentinel"]
+    assert not list(tmp_path.glob(".handoff.*.partial"))
 
 
 def test_export_world_studio_prefers_alpha_pruned_gaussian(tmp_path: Path) -> None:
