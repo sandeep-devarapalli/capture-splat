@@ -104,6 +104,14 @@ spatial cells, floor/wall labels, finite triangles, and correct meter units are
 software prerequisites; they do not prove watertight floors, retained walls,
 splat registration, safe movement, or navigation authority.
 
+Likewise, an Open3D-reduced hybrid collider that meets its triangle budget and
+software ray probes is still a held candidate. Nearest-surface class transfer,
+bidirectional distance checks, and component/topology comparisons do not prove
+an unobserved opening is clear. Without a checksum-bound route or portal
+contract, doorway traversal, controller reset, physical collision behavior,
+and Newton authority remain explicitly unavailable; no fallback floor is
+created to hide missing evidence.
+
 AprilTag scale validation checks one measured target against registered camera
 geometry. A passing tag report validates that checksum-bound artifact and scale
 threshold only. It does not prove every surface is accurate, remove camera-pose

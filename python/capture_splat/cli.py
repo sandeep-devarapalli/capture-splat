@@ -38,6 +38,7 @@ from .gsplat_runner import doctor as gsplat_doctor
 from .gsplat_runner import run_gsplat
 from .hloc_runner import hloc_status
 from .hybrid_surface import build_hybrid_surface
+from .reduced_collider import reduce_hybrid_collider
 from .vksplat_ladder import parse_steps, run_vksplat_ladder
 from .weak_frames_report import run_weak_frames_report
 from .vksplat_runner import doctor as vksplat_doctor
@@ -159,6 +160,14 @@ def main() -> None:
     p_hybrid.add_argument("--minimum-normal-dot", type=float, default=0.8)
     p_hybrid.add_argument("--ambiguity-epsilon", type=float, default=0.00001)
     p_hybrid.add_argument("--collider-triangle-budget", type=int, default=60_000)
+    p_reduce_collider = sub.add_parser(
+        "reduce-hybrid-collider",
+        help="Reduce a checksum-bound held hybrid collider and emit held software probes",
+    )
+    p_reduce_collider.add_argument("--hybrid-report", type=Path, required=True)
+    p_reduce_collider.add_argument("--out", type=Path, required=True)
+    p_reduce_collider.add_argument("--max-faces", type=int, default=60_000)
+    p_reduce_collider.add_argument("--boundary-weight", type=float, default=100.0)
     p_reconstruct = sub.add_parser("reconstruct", help="Run the resumable capture-to-3DGS evidence pipeline")
     p_reconstruct.add_argument("--capture", type=Path, required=True)
     p_reconstruct.add_argument("--out", type=Path, required=True)
@@ -578,6 +587,13 @@ def main() -> None:
             minimum_normal_dot=args.minimum_normal_dot,
             ambiguity_epsilon=args.ambiguity_epsilon,
             collider_triangle_budget=args.collider_triangle_budget,
+        )
+    elif args.command == "reduce-hybrid-collider":
+        payload = reduce_hybrid_collider(
+            args.hybrid_report,
+            args.out,
+            max_faces=args.max_faces,
+            boundary_weight=args.boundary_weight,
         )
     elif args.command == "reconstruct":
         payload = reconstruct_capture(

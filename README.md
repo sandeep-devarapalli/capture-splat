@@ -264,6 +264,25 @@ not simplified and stays held against the 60,000-triangle Walk budget,
 doorway/opening continuity, unknown coverage, and physical collision probes.
 No fallback floor or synthetic geometry is added.
 
+Reduce that held, checksum-bound candidate for the 60,000-triangle Walk intake
+without changing the source package:
+
+```bash
+capture-splat reduce-hybrid-collider \
+  --hybrid-report runs/my_scan/hybrid_surface/capture_splat_hybrid_surface_report.json \
+  --out runs/my_scan/reduced_collider
+```
+
+The command pins Open3D 0.19 quadric decimation, emits a separate reduced PLY,
+and maps every reduced face back to a source face. A known class transfers only
+when centroid-and-vertex nearest-surface samples agree within the distance,
+normal, and class-ambiguity rails; unknown source support can only relabel the
+candidate to unknown. Bidirectional surface, component, and topology metrics
+plus deterministic floor, wall, and closed-door ray probes are written to
+strict reports. No portal or route contract is inferred, so doorway clearance,
+downstream controller reset, physical validation, and all collision,
+navigation, physics, and Newton authority remain held.
+
 Trainer normalization is a separate scale boundary. `--normalization auto`
 disables gsplat world normalization only when the package has an accepted
 `metric_scale_report.json`, its sparse-model checksums still match, and the
