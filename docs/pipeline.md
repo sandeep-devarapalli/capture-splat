@@ -507,6 +507,27 @@ frame. A valid output remains `hold` with collision and navigation authority
 false until floor continuity, wall retention, and registered splat overlap are
 checked physically.
 
+When a legacy handoff retains checksum-bound RGB-D frames but its ARKit mesh is
+truncated, `build-rgbd-tsdf` can form a non-destructive derived mesh candidate:
+
+```bash
+capture-splat build-rgbd-tsdf \
+  --handoff runs/scan/world_studio_package \
+  --out runs/scan/rgbd_tsdf
+```
+
+The fixed first-slice recipe uses Open3D 0.19, 3 cm voxels, 12 cm truncation,
+confidence at least 1, and depths in `(0.05, 7.0]` meters. ARKit camera poses
+are converted with `camera_to_world @ diag(1,-1,-1,1)` before Open3D receives
+the inverse extrinsic. Frame assets are verified and processed one at a time.
+A finite mesh is useful proposal evidence even when coverage warnings remain;
+it grants no metric, collision, navigation, measurement, physics, or Newton
+authority. Camera-center cells are trajectory coverage only. Depth-render
+support, observed-surface coverage, structural continuity, splat registration,
+and physical validation remain explicit pending rails. Valid masks and any
+checksum-bound person masks are separate filters; sparse person-mask coverage
+does not imply complete dynamic cleanup.
+
 Use `--measurement-points` with
 `--measurement-points-frame metric_colmap_world` only for a seed whose accepted
 metric-scale report is bound to the same sparse model and exact PLY checksum.

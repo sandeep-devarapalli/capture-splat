@@ -220,6 +220,27 @@ assets. Without explicit scale authority, the compatible seed remains in
 COLMAP units and is reported as non-metric. The source package is unchanged
 and COLMAP-refined cameras remain the visual reconstruction baseline.
 
+For a self-contained World Studio v0.3 handoff with registered iPhone RGB-D
+evidence, build a separate Open3D TSDF mesh proposal without modifying the
+handoff:
+
+```bash
+python -m pip install -e '.[tsdf]'
+capture-splat build-rgbd-tsdf \
+  --handoff runs/my_scan/world_studio_package \
+  --out runs/my_scan/rgbd_tsdf
+```
+
+The command verifies the handoff, capture manifest, COLMAP registration list,
+and every consumed RGB/depth/confidence/mask checksum. It streams the matched
+frames through a fixed meter-scale fusion recipe and writes a finite mesh plus
+`capture_splat.rgbd_tsdf_report.v0.1`. The result remains `hold`: it is derived
+geometry that still needs coverage, registration, collision, and physical
+validation before World Studio or Newton may treat it as authoritative. Valid
+masks and separately recorded person masks are applied independently; person
+masks may cover only a subset of frames and do not establish complete dynamic
+cleanup.
+
 Trainer normalization is a separate scale boundary. `--normalization auto`
 disables gsplat world normalization only when the package has an accepted
 `metric_scale_report.json`, its sparse-model checksums still match, and the
