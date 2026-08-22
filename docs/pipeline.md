@@ -457,13 +457,21 @@ data contracts, but it does not vendor or copy GPL trainer implementation. A
 successful external process exit does not establish that every advertised
 strategy, photometric mode, quantization path, or sensor input was applied.
 
-Reference benchmark hydration is limited to NeRF Synthetic Lego and the
-original-3DGS Deep Blending Playroom scene. Validate source, license, expected
-files, and completeness before measuring either. Keep local iPhone captures as
-a separate physical-capture lane. Begin efficiency measurements on Apple
-Silicon; cross-vendor, 8 GB, and multi-million-Gaussian claims remain `hold`
-until the named hardware, commands, repetitions, raw results, noise, and fixed
-quality rails are recorded.
+The standard matrix is NeRF Synthetic Lego for deterministic smoke, original-3DGS Deep
+Blending Playroom as the completed real-scene control, and complete Mip-NeRF 360 Bonsai
+`images_2` as the active 360 quality lane. Validate source, license, expected files, and
+completeness before measuring them. Keep local iPhone captures and Room-01 as separate
+physical capture-to-world lanes. Begin efficiency measurements on Apple Silicon;
+cross-vendor, 8 GB, and multi-million-Gaussian claims remain `hold` until the named hardware,
+commands, repetitions, raw results, noise, and fixed quality rails are recorded. Those holds
+gate only their named claims; they do not block formation of a proposal package or separately
+validated Room-01 metric/collision work.
+
+Room-01 requires a fresh self-contained v0.3 export and a World Studio consumer receipt.
+Record actual registered-image and registered-RGB-D overlap counts from the produced model;
+do not hard-code the previously observed 168-camera overlap. Until the portable-export
+follow-up copies and verifies every `capture.json`-referenced asset, the producer contract is
+complete but the Room-01 portable package gate remains open.
 
 For a Gaussian PLY, the exporter always writes
 `quality/ply_stats.json` from the exact packaged PLY. With

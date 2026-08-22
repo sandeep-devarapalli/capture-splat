@@ -37,12 +37,16 @@ training, QA, or World Studio handoffs.
 - The first measured efficiency lane is Apple Silicon. Hold cross-vendor,
   8 GB, and multi-million-Gaussian capacity claims until the named hardware,
   commands, repetitions, raw results, noise, and quality rails are recorded.
-- Reference-data hydration is limited to NeRF Synthetic Lego and the original
-  3DGS Deep Blending Playroom scene. Validate source, license, expected files,
-  and reference completeness before benchmarking. Do not substitute Bonsai or
-  another scene.
-- Keep local iPhone captures as a separate real-capture lane with device,
-  thermal, finalization, SfM, and fixed-camera QA evidence.
+- The standard matrix is NeRF Synthetic Lego for deterministic smoke,
+  original-3DGS Deep Blending Playroom as the completed real-scene control,
+  and complete Mip-NeRF 360 Bonsai `images_2` as the active 360 quality lane.
+  Validate source, license, expected files, and reference completeness before
+  benchmarking.
+- Keep local iPhone captures and Room-01 as a separate capture-to-world lane
+  with device, thermal, finalization, SfM, metric, and fixed-camera evidence.
+- A held benchmark gates only its named claim or promotion. It does not block
+  forming a proposal package or downstream Room-01 metric/collision work that
+  passes its own gates.
 
 ## Validation
 

@@ -59,7 +59,22 @@ Calibration outcomes are owned by World Studio.
 | Live Session Foundation | Strict replay-first source-frame, camera, quality, sidecar, ACK, resume, and finalization contract | completed |
 | Authenticated Sender And Device Acceptance | Optional paired TLS transport with bounded store-and-forward, thermal safety, and device evidence | experimental and evidence-blocked on iPhone; production capture uses local finalization and manual export |
 | Calibration Capture Evidence | Guided and synchronized experimental imagery with apparatus/scale provenance, without inferred physics authority | planned and evidence-blocked |
-| Training Dataset And External Provider Evidence | Additive v0.3 dataset inventory plus a future World Studio job contract for pinned external trainers | producer complete; consumer, job execution, and benchmark promotion planned |
+| Training Dataset And External Provider Evidence | Additive v0.3 dataset inventory and self-contained Room-01 producer evidence for pinned external trainers | producer contract complete; portable Room-01 receipt and World Studio consumer evidence open |
+
+### Immediate Capture Slice: Room-01
+
+- Use finalized local capture plus Manual Export; optional live transport is not required.
+- Export a fresh self-contained v0.3 package whose source images, COLMAP model, RGB-D,
+  depth/confidence, masks, ARKit mesh/report, trajectory, planes, RoomPlan, and scale evidence
+  are checksum-bound when present.
+- Record actual registered-image and registered-RGB-D overlap counts from the produced model.
+  The previously observed 168-camera overlap is a verification target, not a hard-coded value.
+- Preserve a source mesh marked `truncated: true` as evidence only; it cannot acquire collision
+  or navigation authority.
+- Obtain a World Studio consumer receipt. Spirula execution, canonical publication, collision
+  promotion, OpenUSD, Newton, and robot/UAV Episodes remain downstream World Studio work.
+
+Live sender, equirectangular, cross-vendor, capacity, and timing holds do not block this slice.
 
 The completed foundation is permanent `proposal_only` evidence transport. Manual export is
 the production iPhone boundary and does not depend on the authenticated sender. The sender
@@ -99,9 +114,9 @@ Studio may compile into its target Newton runtime after separate validation.
 - Start measured efficiency work on Apple Silicon and keep cross-vendor, 8 GB,
   and multi-million-Gaussian claims at `hold` until named hardware, commands,
   repetitions, raw results, noise, and the same quality rails are recorded.
-- Hydrate only NeRF Synthetic Lego and original-3DGS Deep Blending Playroom as
-  reference benchmark scenes, after validating source, license, expected
-  files, and completeness. Keep physical iPhone captures as a separate lane.
+- Use Lego, Playroom, and complete Bonsai `images_2` for their declared standard
+  lanes after validating source, license, expected files, and completeness.
+  Keep physical iPhone captures and Room-01 as a separate lane.
 - Compare observable Capture Splat, SplatKing, KIRI Engine, and similar
   outputs without claiming access to proprietary internals.
 

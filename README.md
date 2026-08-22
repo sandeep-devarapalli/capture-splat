@@ -46,6 +46,12 @@ calibration trials, matched demonstrations, deployment recapture, and physical-d
 acceptance. The [Newton Simulation Handoff](docs/newton_simulation_handoff.md) records the
 strict boundary without adding a simulator dependency.
 
+The immediate cross-repository product slice is Room-01. Capture Splat must produce a
+self-contained, checksum-bound v0.3 evidence package; World Studio separately owns external
+Spirula execution, canonical publication, collision promotion, OpenUSD/Newton, and robot or
+UAV Episodes. Optional live transfer and held equirectangular, vendor, capacity, or timing
+claims do not block that package work.
+
 ## Quickstart: Mac + iPhone
 
 ```bash
