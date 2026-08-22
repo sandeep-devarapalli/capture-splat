@@ -71,6 +71,9 @@ Calibration outcomes are owned by World Studio.
   The previously observed 168-camera overlap is a verification target, not a hard-coded value.
 - Preserve a source mesh marked `truncated: true` as evidence only; it cannot acquire collision
   or navigation authority.
+- Record the closed capture's missing RoomPlan/portal/free-space/route evidence with the held
+  portal-route receipt. A new open-door capture must satisfy the checksum-bound v0.1 contract
+  before any opening-aware reduction hypothesis starts.
 - Obtain a World Studio consumer receipt. Spirula execution, canonical publication, collision
   promotion, OpenUSD, Newton, and robot/UAV Episodes remain downstream World Studio work.
 

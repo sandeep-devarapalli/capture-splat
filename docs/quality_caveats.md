@@ -107,10 +107,11 @@ splat registration, safe movement, or navigation authority.
 Likewise, an Open3D-reduced hybrid collider that meets its triangle budget and
 software ray probes is still a held candidate. Nearest-surface class transfer,
 bidirectional distance checks, and component/topology comparisons do not prove
-an unobserved opening is clear. Without a checksum-bound route or portal
-contract, doorway traversal, controller reset, physical collision behavior,
-and Newton authority remain explicitly unavailable; no fallback floor is
-created to hide missing evidence.
+an unobserved opening is clear. The shipped portal-route validator can bind a
+future open-door capture, but the current Room-01 capture does not contain that
+RoomPlan/portal/free-space/route evidence. Doorway traversal, controller reset,
+physical collision behavior, and Newton authority therefore remain explicitly
+unavailable; no fallback floor is created to hide missing evidence.
 
 AprilTag scale validation checks one measured target against registered camera
 geometry. A passing tag report validates that checksum-bound artifact and scale
