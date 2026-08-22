@@ -36,14 +36,21 @@ continuous video, trained splats, and synchronized experiment imagery. Passive c
 does not establish mass, inertia, friction, restitution, stiffness, force, torque, or
 physics authority.
 
-Capture Splat tracks three repo-local milestones in [ROADMAP.md](ROADMAP.md): the completed
-Live Session Foundation, Authenticated Sender And Device Acceptance, and Calibration
-Capture Evidence. World packaging, editing, navigation, simulation, and Physical Asset
+Capture Splat tracks four repo-local milestones in [ROADMAP.md](ROADMAP.md): the completed
+Live Session Foundation, Authenticated Sender And Device Acceptance, Calibration Capture
+Evidence, and Training Dataset And External Provider Evidence. World packaging, editing,
+navigation, simulation, and Physical Asset
 Calibration remain World Studio responsibilities. The
 [Real2Sim Capture Program](docs/real2sim_capture_program.md) defines task/site briefs,
 calibration trials, matched demonstrations, deployment recapture, and physical-device
 acceptance. The [Newton Simulation Handoff](docs/newton_simulation_handoff.md) records the
 strict boundary without adding a simulator dependency.
+
+The immediate cross-repository product slice is Room-01. Capture Splat must produce a
+self-contained, checksum-bound v0.3 evidence package; World Studio separately owns external
+Spirula execution, canonical publication, collision promotion, OpenUSD/Newton, and robot or
+UAV Episodes. Optional live transfer and held equirectangular, vendor, capacity, or timing
+claims do not block that package work.
 
 ## Quickstart: Mac + iPhone
 
@@ -424,7 +431,11 @@ capture-splat export-world-studio \
 ```
 
 This writes `capture-splat.world-studio.json` with schema
-`capture_splat.world_studio_handoff.v0.2`. When a Gaussian PLY is present, the
+`capture_splat.world_studio_handoff.v0.3`. Its additive, checksum-bound
+`training_dataset` block inventories source frames, observed cameras,
+projection provenance, and available capture/SfM/sensor/mask/mesh evidence
+without claiming that a trainer consumed it; v0.2 handoffs remain resumable.
+When a Gaussian PLY is present, the
 exporter computes finite/splat statistics from that exact packaged PLY. An
 optional strict render/source QA summary is copied as validation evidence.
 Prepared iPhone packages also preserve available ARKit mesh, planes, camera

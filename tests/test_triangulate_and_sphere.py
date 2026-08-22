@@ -37,10 +37,41 @@ def test_triangulate_dry_run_records_pipeline(tmp_path: Path, monkeypatch: pytes
     names = [command[1] for command in summary["commands"]]
     assert names == ["feature_extractor", "sequential_matcher", "point_triangulator", "bundle_adjuster"]
     assert summary["decision"] == "dry_run"
+    assert summary["authority"]["registration_evidence"] is False
     assert summary["authority"]["pose_prior"] == "device_poses"
     assert summary["colmap_cuda"] is True
     saved = load_json_strict(tmp_path / "out" / "capture_splat_sfm_summary.json")
     assert saved["mode"] == "triangulate_device_pose_prior"
+
+
+def test_triangulate_sets_registration_authority_after_model_stats(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("capture_splat.sfm_runner.find_binary", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("capture_splat.sfm_runner.colmap_has_cuda", lambda: True)
+    package = make_pose_package(tmp_path)
+
+    class Completed:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def run_command(command: list[str], **_kwargs: object) -> Completed:
+        if command[1] == "point_triangulator":
+            source = Path(command[command.index("--input_path") + 1])
+            model = Path(command[command.index("--output_path") + 1])
+            for name in ("cameras.txt", "images.txt", "points3D.txt"):
+                (model / name).write_bytes((source / name).read_bytes())
+        return Completed()
+
+    monkeypatch.setattr("capture_splat.sfm_runner.subprocess.run", run_command)
+
+    summary = run_triangulate(package, tmp_path / "out")
+    saved = load_json_strict(tmp_path / "out" / "capture_splat_sfm_summary.json")
+
+    assert summary["decision"] == "promote"
+    assert summary["model"]["registered_images"] == 3
+    assert saved["authority"]["registration_evidence"] is True
 
 
 def test_triangulate_requires_poses(tmp_path: Path) -> None:

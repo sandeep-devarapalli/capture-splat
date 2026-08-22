@@ -16,7 +16,9 @@ from .scene_transform import SIDECAR_NAME, metric_package_status
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 MANIFEST_NAME = "capture-splat.world-studio.json"
-SCHEMA = "capture_splat.world_studio_handoff.v0.2"
+SCHEMA = "capture_splat.world_studio_handoff.v0.3"
+SUPPORTED_SCHEMAS = ("capture_splat.world_studio_handoff.v0.2", SCHEMA)
+TRAINING_DATASET_SCHEMA = "capture_splat.training_dataset.v0.1"
 CAPTURE_PROFILES = ("object", "room_interior", "walkthrough", "outdoor", "video_360")
 
 
@@ -490,6 +492,201 @@ def _frames(images: list[Path], out_dir: Path) -> list[dict[str, Any]]:
     return frames
 
 
+def _canonical_frame_set(frames: list[dict[str, Any]]) -> dict[str, Any]:
+    digest = hashlib.sha256()
+    for frame in sorted(frames, key=lambda value: str(value["rgb_path"])):
+        digest.update(str(frame["rgb_path"]).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(str(frame["size_bytes"]).encode("ascii"))
+        digest.update(b"\0")
+        digest.update(str(frame["checksum"]).encode("ascii"))
+        digest.update(b"\n")
+    return {
+        "count": len(frames),
+        "digest": f"sha256:{digest.hexdigest()}",
+        "canonicalization": "utf8_relative_path_nul_size_nul_sha256_lf_v1",
+    }
+
+
+def _colmap_evidence(sparse_dir: Path | None) -> dict[str, Any]:
+    if sparse_dir is None:
+        return {
+            "available": False,
+            "camera_count": 0,
+            "camera_models": [],
+            "registered_images_available": False,
+            "sparse_points_available": False,
+        }
+    cameras = sparse_dir / "cameras.txt"
+    models: set[str] = set()
+    camera_count = 0
+    if cameras.is_file():
+        for raw_line in cameras.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            try:
+                int(parts[0])
+            except ValueError:
+                continue
+            camera_count += 1
+            model = parts[1]
+            if 0 < len(model) <= 64 and all(character.isalnum() or character == "_" for character in model):
+                models.add(model)
+    return {
+        "available": cameras.is_file() and (sparse_dir / "images.txt").is_file(),
+        "camera_count": camera_count,
+        "camera_models": sorted(models),
+        "registered_images_available": (sparse_dir / "images.txt").is_file(),
+        "sparse_points_available": (sparse_dir / "points3D.txt").is_file(),
+    }
+
+
+def _confined_file(root: Path, relative: str) -> bool:
+    try:
+        path = (root / relative).resolve()
+        path.relative_to(root.resolve())
+    except (OSError, ValueError):
+        return False
+    return path.is_file()
+
+
+def _frame_asset_evidence(
+    capture: dict[str, Any] | None,
+    capture_root: Path | None,
+    package: Path,
+    keys: tuple[str, ...],
+) -> dict[str, int]:
+    referenced = 0
+    available = 0
+    frames = capture.get("frames", []) if isinstance(capture, dict) else []
+    for frame in frames:
+        if not isinstance(frame, dict):
+            continue
+        references = [frame.get(key) for key in keys]
+        references = [value for value in references if isinstance(value, str) and value]
+        if not references:
+            continue
+        referenced += 1
+        roots = (package, capture_root) if capture_root is not None else (package,)
+        if any(_confined_file(root, relative) for root in roots for relative in references):
+            available += 1
+    return {
+        "referenced_frame_count": referenced,
+        "available_frame_count": available,
+    }
+
+
+def _projection_evidence(
+    package: Path,
+    capture_manifest: Path | None,
+    capture_profile: str,
+) -> dict[str, Any]:
+    roots = [package]
+    if capture_manifest is not None:
+        roots.append(capture_manifest.resolve().parent)
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        for relative in (
+            "metadata/source_equirectangular_rig.json",
+            "metadata/equirectangular_rig.json",
+        ):
+            candidate = root / relative
+            resolved = candidate.resolve()
+            if candidate.is_file() and resolved not in seen:
+                candidates.append(candidate)
+                seen.add(resolved)
+    for candidate in candidates:
+        try:
+            rig = load_json_strict(candidate)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(rig, dict) or rig.get("schema") != "capture_splat.equirectangular_rig.v0.1":
+            continue
+        projection_model = str(rig.get("projection_model", "")).upper()
+        if projection_model == "PINHOLE":
+            mode = "projected_pinhole_from_equirectangular"
+        elif projection_model == "EQUIRECTANGULAR":
+            mode = "native_equirectangular"
+        else:
+            mode = "unresolved_equirectangular_source"
+        return {
+            "mode": mode,
+            "source_is_equirectangular": True,
+            "training_images_are_projected_pinhole": mode == "projected_pinhole_from_equirectangular",
+            "native_equirectangular": mode == "native_equirectangular",
+            "rig_evidence": {
+                "available": True,
+                "schema": rig["schema"],
+                "checksum": _sha256(candidate),
+            },
+        }
+    mode = "unresolved_360_source" if capture_profile == "video_360" else "perspective"
+    return {
+        "mode": mode,
+        "source_is_equirectangular": None if mode == "unresolved_360_source" else False,
+        "training_images_are_projected_pinhole": False,
+        "native_equirectangular": False,
+        "rig_evidence": {"available": False},
+    }
+
+
+def _training_dataset(
+    package: Path,
+    source_frames: list[dict[str, Any]],
+    copied_sparse: Path | None,
+    capture_manifest: Path | None,
+    capture: dict[str, Any] | None,
+    capture_profile: str,
+    copied_capture: Path | None,
+    copied_navigation_mesh: Path | None,
+    copied_mesh_report: Path | None,
+) -> dict[str, Any]:
+    capture_root = capture_manifest.resolve().parent if capture_manifest is not None else None
+    return {
+        "schema": TRAINING_DATASET_SCHEMA,
+        "capture_profile": capture_profile,
+        "source_frame_set": _canonical_frame_set(source_frames),
+        "projection": _projection_evidence(package, capture_manifest, capture_profile),
+        "evidence": {
+            "capture_manifest": {
+                "available": copied_capture is not None,
+                "asset": "capture_manifest" if copied_capture is not None else None,
+            },
+            "sfm": {
+                **_colmap_evidence(copied_sparse),
+                "asset": "colmap_sparse" if copied_sparse is not None else None,
+            },
+            "depth": _frame_asset_evidence(capture, capture_root, package, ("depth",)),
+            "confidence": _frame_asset_evidence(capture, capture_root, package, ("confidence",)),
+            "masks": _frame_asset_evidence(
+                capture,
+                capture_root,
+                package,
+                ("valid_mask", "person_mask", "object_mask"),
+            ),
+            "mesh": {
+                "available": copied_navigation_mesh is not None,
+                "asset": "navigation_mesh" if copied_navigation_mesh is not None else None,
+                "report_available": copied_mesh_report is not None,
+                "report_asset": "mesh_report" if copied_mesh_report is not None else None,
+            },
+        },
+        "authority": {
+            "capture_evidence_only": True,
+            "trainer_consumption_claim": False,
+            "training_execution_authority": False,
+            "quality_claim": False,
+            "metric_authority": False,
+            "collision_authority": False,
+        },
+    }
+
+
 def _dataparser_transform(gaussian: Path | None) -> list[list[float]] | None:
     """Trainer world transform from train.json next to the trained PLY.
 
@@ -761,13 +958,36 @@ def export_world_studio_handoff(
             measurement_units,
         )
 
+    profile = capture_profile
+    captured_profile = capture_data.get("capture_profile") if isinstance(capture_data, dict) else None
+    if profile is None and isinstance(captured_profile, str) and captured_profile in CAPTURE_PROFILES:
+        profile = captured_profile
+    dataset_profile = profile or (
+        captured_profile
+        if isinstance(captured_profile, str)
+        and 0 < len(captured_profile) <= 64
+        and all(character.isalnum() or character in {"_", "-"} for character in captured_profile)
+        else "unspecified"
+    )
+    source_frames = _frames(copied_images, out_dir)
     manifest = {
         "schema": SCHEMA,
         "status": "visual_evidence_with_3dgs_proposal",
         "source_package": package.name,
-        "source_frames": _frames(copied_images, out_dir),
-        "frames": _frames(copied_images, out_dir),
+        "source_frames": source_frames,
+        "frames": source_frames,
         "assets": assets,
+        "training_dataset": _training_dataset(
+            package,
+            source_frames,
+            copied_sparse,
+            capture_manifest,
+            capture_data,
+            dataset_profile,
+            copied_capture,
+            copied_navigation_mesh,
+            copied_mesh_report,
+        ),
         "authority": {
             "source_frames": "visual_evidence",
             "trained_splats": "review_proposal",
@@ -781,6 +1001,7 @@ def export_world_studio_handoff(
             "Source frames are visual evidence.",
             "Trained splats are review proposals, not metric, collision, semantic, or navigation authority.",
             "Attached render/source QA and PLY statistics are validation evidence, not a high-quality claim.",
+            "training_dataset inventories capture evidence and does not claim that any trainer consumed it.",
         ],
     }
     dataparser_transform = _dataparser_transform(gaussian)
@@ -846,14 +1067,6 @@ def export_world_studio_handoff(
     extent = _scene_extent(gaussian)
     if extent is not None:
         manifest.update(extent)
-    profile = capture_profile
-    if profile is None and capture_manifest is not None and capture_manifest.exists():
-        try:
-            capture_data = json.loads(capture_manifest.read_text(encoding="utf-8"))
-            candidate = capture_data.get("capture_profile") if isinstance(capture_data, dict) else None
-            profile = candidate if isinstance(candidate, str) else None
-        except (OSError, ValueError):
-            profile = None
     if profile in CAPTURE_PROFILES:
         manifest["capture_profile"] = profile
     session_config = capture_data.get("session_config") if isinstance(capture_data, dict) else None

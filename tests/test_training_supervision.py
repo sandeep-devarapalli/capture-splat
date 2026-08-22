@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 import numpy as np
@@ -5,6 +6,7 @@ import pytest
 
 from capture_splat.json_utils import load_json_strict, write_json_strict
 from capture_splat.training_supervision import (
+    copy_capture_manifest_assets,
     copy_capture_supervision_assets,
     prepare_training_supervision,
     resolve_supervision_policy,
@@ -83,11 +85,16 @@ def test_supervision_checksum_tamper_is_rejected(tmp_path: Path) -> None:
         supervision_evidence(package)
 
 
-def test_copy_capture_supervision_assets_preserves_relative_paths(tmp_path: Path) -> None:
+def test_copy_capture_supervision_assets_preserves_relative_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source = make_package(tmp_path / "source")
     target = tmp_path / "target"
     target.mkdir()
     capture = load_json_strict(source / "capture.json")
+    capture["planes_file"] = "metadata/planes.json"
+    (source / "metadata").mkdir()
+    (source / "metadata/planes.json").write_text("{}\n", encoding="utf-8")
 
     result = copy_capture_supervision_assets(source, target, capture)
 
@@ -95,6 +102,34 @@ def test_copy_capture_supervision_assets_preserves_relative_paths(tmp_path: Path
     assert result["copied"] == 2
     assert (target / "depth/000001.npy").is_file()
     assert (target / "confidence/000001.npy").is_file()
+
+    (target / "images").mkdir()
+    (target / "images/000001.jpg").write_bytes(b"generated")
+    assets = copy_capture_manifest_assets(source, target, capture)
+    assert assets["complete"] is False
+    assert assets["conflicts"] == ["images/000001.jpg"]
+    assert (target / "images/000001.jpg").read_bytes() == b"generated"
+    assert (target / "metadata/planes.json").is_file()
+    assert hashlib.sha256((source / "metadata/planes.json").read_bytes()).digest() == hashlib.sha256(
+        (target / "metadata/planes.json").read_bytes()
+    ).digest()
+
+    missing = copy_capture_manifest_assets(source, tmp_path / "missing", {
+        "planes_file": "metadata/missing.json",
+        "frames": [{"object_mask": "masks/missing.png"}],
+    })
+    assert missing["decision"] == "hold"
+    assert set(missing["missing"]) == {"metadata/missing.json", "masks/missing.png"}
+
+    monkeypatch.setattr(
+        "capture_splat.training_supervision.shutil.copy2",
+        lambda _source, destination: Path(destination).write_bytes(b"corrupt"),
+    )
+    corrupt = copy_capture_manifest_assets(source, tmp_path / "corrupt", {
+        "planes_file": "metadata/planes.json", "frames": []})
+    assert corrupt["decision"] == "hold"
+    assert corrupt["conflicts"] == ["metadata/planes.json"]
+    assert corrupt["verified_asset_count"] == 0
 
 
 def test_copy_capture_supervision_rejects_escape(tmp_path: Path) -> None:
@@ -104,11 +139,54 @@ def test_copy_capture_supervision_rejects_escape(tmp_path: Path) -> None:
     target.mkdir()
 
     with pytest.raises(ValueError, match="escapes package"):
-        copy_capture_supervision_assets(
+        copy_capture_manifest_assets(
             source,
             target,
-            {"frames": [{"depth": "../outside.npy"}]},
+            {"planes_file": "../outside.npy", "frames": []},
         )
+
+    (source / "metadata").mkdir()
+    (source / "metadata/camera_evidence.json").write_text("{}\n", encoding="utf-8")
+    (source / "sparse/0").mkdir(parents=True)
+    (source / "sparse/0/images.txt").write_text("# model\n", encoding="utf-8")
+    protected = copy_capture_manifest_assets(source, target, {
+        "camera_evidence_file": "metadata/./camera_evidence.json",
+        "duplicate_file": "metadata//camera_evidence.json",
+        "case_file": "metadata/CAMERA_EVIDENCE.json",
+        "sparse_file": "sparse//0/images.txt",
+        "case_sparse_file": "Sparse/0/images.txt",
+        "frames": [],
+    }, protected={"metadata/camera_evidence.json", "sparse"})
+    assert protected["reference_count"] == 5
+    assert protected["unique_asset_count"] == 4
+    assert set(protected["conflicts"]) == {
+        "metadata/camera_evidence.json", "metadata/CAMERA_EVIDENCE.json",
+        "sparse/0/images.txt", "Sparse/0/images.txt",
+    }
+
+    (source / "metadata/user.json").write_text("{}\n", encoding="utf-8")
+    (target / "metadata").mkdir()
+    (target / "metadata/user.json").symlink_to("camera_evidence.json")
+    (source / "model_alias/0").mkdir(parents=True)
+    (source / "model_alias/0/images.txt").write_text("# model\n", encoding="utf-8")
+    (target / "model_alias").symlink_to("sparse", target_is_directory=True)
+    aliases = copy_capture_manifest_assets(source, target, {
+        "user_file": "metadata/user.json", "model_file": "model_alias/0/images.txt",
+    }, protected={"metadata/camera_evidence.json", "sparse"})
+    assert set(aliases["conflicts"]) == {"metadata/user.json", "model_alias/0/images.txt"}
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "asset.bin").write_bytes(b"outside")
+    (source / "source_link").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="escapes package"):
+        copy_capture_manifest_assets(source, target, {"asset_file": "source_link/asset.bin"})
+
+    (source / "target_link").mkdir()
+    (source / "target_link/asset.bin").write_bytes(b"inside")
+    (target / "target_link").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="escapes package"):
+        copy_capture_manifest_assets(source, target, {"asset_file": "target_link/asset.bin"})
 
 
 def test_required_supervision_blocks_unsupported_trainer(tmp_path: Path) -> None:

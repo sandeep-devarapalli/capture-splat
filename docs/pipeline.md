@@ -80,7 +80,9 @@ capture-splat reconstruct \
 
 The command writes one strict top-level summary while retaining every stage
 summary under numbered directories. `--dry-run` plans without invoking SfM or
-training, `--stop-after sfm` (or another named stage) bounds a probe, and
+training and must keep `authority.registration_evidence` false; that authority
+becomes true only after a produced model is read and summarized. `--stop-after sfm`
+(or another named stage) bounds a probe, and
 `--resume` reuses completed summaries. A held RGB-D fit continues with the
 unaugmented COLMAP package. Missing fixed-camera raw renders skip QA and keep
 the final decision at `hold`; they are not inferred from full viewer screens.
@@ -422,12 +424,54 @@ capture-splat export-world-studio \
 ```
 
 The command writes `capture-splat.world-studio.json` with schema
-`capture_splat.world_studio_handoff.v0.2` and relative paths only. It can include
+`capture_splat.world_studio_handoff.v0.3` and relative paths only. Existing v0.2
+handoffs remain resumable. It can include
 source frames, ordinary `points.ply`, Gaussian `.ply`, `capture.json`,
 `transforms.json`, COLMAP sparse text files, and optional `.splat`/`.spz`
 references when present. The handoff keeps source frames as visual evidence and
 trained splats as review proposals, not metric, collision, semantic, or
 navigation authority.
+
+The additive `training_dataset` block is a sanitized evidence inventory, not a
+trainer request or run receipt. It records:
+
+- a canonical source-frame count and SHA-256 digest over each relative path,
+  size, and content checksum;
+- observed COLMAP camera models and sparse-model availability;
+- capture profile and whether a 360 source is perspective, projected pinhole
+  from equirectangular evidence, native equirectangular, or unresolved;
+- available capture-manifest, depth, confidence, mask, and mesh evidence; and
+- permanent capture-evidence-only authority with no trainer-consumption claim.
+
+It contains no raw trainer summary, command, executable path, or local absolute
+path. World Studio must verify this receipt before constructing any future
+training job. A separate job contract must bind the provider, executable or
+container revision, input digest, recipe, hardware, output checksums, runtime
+measurements, and final `promote|hold|reject` decision.
+
+### External Trainer And Benchmark Boundary
+
+Spirula-derived capability work stays behind a pinned, user-installed external
+process boundary. Capture Splat may implement original adapters and compatible
+data contracts, but it does not vendor or copy GPL trainer implementation. A
+successful external process exit does not establish that every advertised
+strategy, photometric mode, quantization path, or sensor input was applied.
+
+The standard matrix is NeRF Synthetic Lego for deterministic smoke, original-3DGS Deep
+Blending Playroom as the completed real-scene control, and complete Mip-NeRF 360 Bonsai
+`images_2` as the active 360 quality lane. Validate source, license, expected files, and
+completeness before measuring them. Keep local iPhone captures and Room-01 as separate
+physical capture-to-world lanes. Begin efficiency measurements on Apple Silicon;
+cross-vendor, 8 GB, and multi-million-Gaussian claims remain `hold` until the named hardware,
+commands, repetitions, raw results, noise, and fixed quality rails are recorded. Those holds
+gate only their named claims; they do not block formation of a proposal package or separately
+validated Room-01 metric/collision work.
+
+Room-01 requires a fresh self-contained v0.3 export and a World Studio consumer receipt.
+Record actual registered-image and registered-RGB-D overlap counts from the produced model;
+do not hard-code the previously observed 168-camera overlap. Until the portable-export
+follow-up copies and verifies every `capture.json`-referenced asset, the producer contract is
+complete but the Room-01 portable package gate remains open.
 
 For a Gaussian PLY, the exporter always writes
 `quality/ply_stats.json` from the exact packaged PLY. With

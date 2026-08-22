@@ -19,6 +19,11 @@ Capture Splat has implemented the core public capture-to-3DGS path:
   ladders.
 - Strict capture, camera, photometric, PLY, weak-frame, raw-render, and
   World Studio handoff reports preserve `promote|hold|reject` decisions.
+- World Studio handoff v0.3 adds a sanitized, checksum-bound
+  `training_dataset` inventory: canonical source-frame-set digest, observed
+  COLMAP camera models, projection provenance, capture profile, and available
+  capture/SfM/depth/confidence/mask/mesh evidence. It does not claim that a
+  trainer consumed those inputs.
 - Package orientation and trainer normalization are recorded as separate
   transforms so viewers do not have to guess how a trained PLY relates to
   source cameras.
@@ -54,6 +59,22 @@ Calibration outcomes are owned by World Studio.
 | Live Session Foundation | Strict replay-first source-frame, camera, quality, sidecar, ACK, resume, and finalization contract | completed |
 | Authenticated Sender And Device Acceptance | Optional paired TLS transport with bounded store-and-forward, thermal safety, and device evidence | experimental and evidence-blocked on iPhone; production capture uses local finalization and manual export |
 | Calibration Capture Evidence | Guided and synchronized experimental imagery with apparatus/scale provenance, without inferred physics authority | planned and evidence-blocked |
+| Training Dataset And External Provider Evidence | Additive v0.3 dataset inventory and self-contained Room-01 producer evidence for pinned external trainers | producer contract complete; portable Room-01 receipt and World Studio consumer evidence open |
+
+### Immediate Capture Slice: Room-01
+
+- Use finalized local capture plus Manual Export; optional live transport is not required.
+- Export a fresh self-contained v0.3 package whose source images, COLMAP model, RGB-D,
+  depth/confidence, masks, ARKit mesh/report, trajectory, planes, RoomPlan, and scale evidence
+  are checksum-bound when present.
+- Record actual registered-image and registered-RGB-D overlap counts from the produced model.
+  The previously observed 168-camera overlap is a verification target, not a hard-coded value.
+- Preserve a source mesh marked `truncated: true` as evidence only; it cannot acquire collision
+  or navigation authority.
+- Obtain a World Studio consumer receipt. Spirula execution, canonical publication, collision
+  promotion, OpenUSD, Newton, and robot/UAV Episodes remain downstream World Studio work.
+
+Live sender, equirectangular, cross-vendor, capacity, and timing holds do not block this slice.
 
 The completed foundation is permanent `proposal_only` evidence transport. Manual export is
 the production iPhone boundary and does not depend on the authenticated sender. The sender
@@ -90,6 +111,12 @@ Studio may compile into its target Newton runtime after separate validation.
   RoomPlan coordinate continuity, and absence of retained-frame warnings.
 - Run every retained capture through global SfM, fixed-camera `3000 -> 7000`
   render QA, and only then consider `15000 -> 30000`.
+- Start measured efficiency work on Apple Silicon and keep cross-vendor, 8 GB,
+  and multi-million-Gaussian claims at `hold` until named hardware, commands,
+  repetitions, raw results, noise, and the same quality rails are recorded.
+- Use Lego, Playroom, and complete Bonsai `images_2` for their declared standard
+  lanes after validating source, license, expected files, and completeness.
+  Keep physical iPhone captures and Room-01 as a separate lane.
 - Compare observable Capture Splat, SplatKing, KIRI Engine, and similar
   outputs without claiming access to proprietary internals.
 
@@ -113,6 +140,10 @@ Studio may compile into its target Newton runtime after separate validation.
 
 ### Reconstruction
 
+- Keep Spirula-derived capability work behind a pinned, user-installed external
+  process boundary. Do not vendor or copy GPL implementation into Capture
+  Splat. A future World Studio job contract may request a provider run, but
+  `training_dataset` remains input evidence rather than execution evidence.
 - Benchmark the shipped checksum-bound sensor depth/normal supervision
   contract on trainers that expose dedicated metric-sensor inputs. Current
   public VkSplat and gsplat baselines preserve the evidence but do not consume
@@ -129,6 +160,9 @@ Studio may compile into its target Newton runtime after separate validation.
 
 ### World Studio
 
+- Consume handoff v0.3 while continuing to accept v0.2, validate the canonical
+  frame-set and evidence fields, and keep trainer execution/result receipts in
+  a separate future World job contract.
 - Consume the shipped handoff `world_up`, frame-aware `initial_camera`, source
   capture, planes, RoomPlan, trajectory, and metric-evidence sidecars end to
   end.
@@ -144,6 +178,8 @@ Studio may compile into its target Newton runtime after separate validation.
 
 - VkSplat/Vulkan remains the public baseline; gsplat/CUDA is the cloud
   alternative. OpenSplat/MPS remains comparison-only.
+- Spirula is an external research/provider boundary, not vendored Capture Splat
+  code and not evidence of cross-vendor support until measured here.
 - COLMAP-refined cameras remain the visual reconstruction baseline. ARKit
   pose/depth is a prior and metric evidence.
 - Short runs are smoke tests. Serious quality gates remain

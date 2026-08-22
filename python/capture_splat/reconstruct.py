@@ -16,6 +16,7 @@ from .rgbd_seed import build_rgbd_metric_seed
 from .sfm_runner import run_sfm
 from .training_supervision import prepare_training_supervision
 from .vksplat_ladder import DEFAULT_STEPS, run_vksplat_ladder
+from .world_studio_export import SUPPORTED_SCHEMAS as WORLD_STUDIO_HANDOFF_SCHEMAS
 from .world_studio_export import export_world_studio_handoff
 
 SUMMARY_NAME = "capture_splat_reconstruction_summary.json"
@@ -73,12 +74,13 @@ def _load_resume(
     path: Path,
     resume: bool,
     required: tuple[str, ...],
-    expected_schema: str,
+    expected_schema: str | tuple[str, ...],
 ) -> dict[str, Any] | None:
     if not resume or not path.exists():
         return None
     summary = load_json_strict(path)
-    if summary.get("schema") != expected_schema:
+    expected_schemas = (expected_schema,) if isinstance(expected_schema, str) else expected_schema
+    if summary.get("schema") not in expected_schemas:
         raise ValueError(f"resume summary {path} has unexpected schema {summary.get('schema')!r}")
     missing = [key for key in required if key not in summary]
     if missing:
@@ -712,7 +714,7 @@ def reconstruct_capture(
         manifest_path,
         "export" in completed_stages,
         ("status", "assets"),
-        "capture_splat.world_studio_handoff.v0.2",
+        WORLD_STUDIO_HANDOFF_SCHEMAS,
     )
     export_resumed = handoff is not None
     measurement_frame = seed.get("output_coordinate_frame")

@@ -96,7 +96,7 @@ def test_export_world_studio_writes_relative_handoff_manifest(tmp_path: Path) ->
     )
     manifest = load_json_strict(tmp_path / "world_studio" / MANIFEST_NAME)
 
-    assert summary["schema"] == "capture_splat.world_studio_handoff.v0.2"
+    assert summary["schema"] == "capture_splat.world_studio_handoff.v0.3"
     assert manifest["status"] == "visual_evidence_with_3dgs_proposal"
     assert manifest["source_frames"][0]["rgb_path"] == "images/000001.jpg"
     assert manifest["source_frames"][0]["source_role"] == "visual_evidence"
@@ -112,6 +112,127 @@ def test_export_world_studio_writes_relative_handoff_manifest(tmp_path: Path) ->
     assert manifest["authority"]["semantic_authority"] is False
     assert manifest["authority"]["navigation_authority"] is False
     assert all(not Path(frame["rgb_path"]).is_absolute() for frame in manifest["source_frames"])
+
+
+def test_export_world_studio_records_sanitized_training_dataset(tmp_path: Path) -> None:
+    package = tmp_path / "colmap_package"
+    write_image(package / "images" / "000001.jpg")
+    write_image(package / "images" / "000002.jpg")
+    sparse = package / "sparse" / "0"
+    sparse.mkdir(parents=True)
+    (sparse / "cameras.txt").write_text(
+        "1 PINHOLE 8 6 8 8 4 3\n2 OPENCV 8 6 8 8 4 3 0 0 0 0\n",
+        encoding="utf-8",
+    )
+    (sparse / "images.txt").write_text(
+        "1 1 0 0 0 0 0 0 1 000001.jpg\n\n2 1 0 0 0 -1 0 0 2 000002.jpg\n\n",
+        encoding="utf-8",
+    )
+    (sparse / "points3D.txt").write_text("# empty\n", encoding="utf-8")
+    write_json_strict(package / "metadata" / "source_equirectangular_rig.json", {
+        "schema": "capture_splat.equirectangular_rig.v0.1",
+        "projection_model": "PINHOLE",
+    })
+
+    capture = tmp_path / "capture"
+    (capture / "depth").mkdir(parents=True)
+    (capture / "confidence").mkdir(parents=True)
+    np.save(capture / "depth" / "000001.npy", np.ones((2, 2), dtype=np.float32))
+    np.save(capture / "confidence" / "000001.npy", np.ones((2, 2), dtype=np.uint8))
+    write_image(capture / "masks" / "person" / "000001.png")
+    write_image(capture / "masks" / "valid" / "000002.png")
+    write_ascii_ply(capture / "geometry" / "arkit_mesh.ply")
+    write_json_strict(capture / "geometry" / "arkit_mesh_report.json", {
+        "status": "finite_mesh_written",
+        "non_finite_vertex_count": 0,
+    })
+    write_json_strict(capture / "capture.json", {
+        "schema": "capture_splat.v0.3",
+        "capture_profile": "video_360",
+        "arkit_mesh_file": "geometry/arkit_mesh.ply",
+        "arkit_mesh_report_file": "geometry/arkit_mesh_report.json",
+        "frames": [
+            {
+                "rgb": "rgb/000001.jpg",
+                "depth": "depth/000001.npy",
+                "confidence": "confidence/000001.npy",
+                "person_mask": "masks/person/000001.png",
+                "capture_quality": {"accepted": True},
+                "transform_matrix": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+            },
+            {
+                "rgb": "rgb/000002.jpg",
+                "depth": "depth/000002.npy",
+                "valid_mask": "masks/valid/000002.png",
+                "capture_quality": {"accepted": True},
+                "transform_matrix": [[1, 0, 0, 1], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+            },
+        ],
+    })
+
+    export_world_studio_handoff(
+        package,
+        tmp_path / "world_studio_a",
+        capture_manifest=capture / "capture.json",
+        copy_files=True,
+    )
+    export_world_studio_handoff(
+        package,
+        tmp_path / "world_studio_b",
+        capture_manifest=capture / "capture.json",
+        copy_files=True,
+    )
+    manifest = load_json_strict(tmp_path / "world_studio_a" / MANIFEST_NAME)
+    second = load_json_strict(tmp_path / "world_studio_b" / MANIFEST_NAME)
+    dataset = manifest["training_dataset"]
+
+    assert dataset["schema"] == "capture_splat.training_dataset.v0.1"
+    assert dataset["capture_profile"] == "video_360"
+    assert dataset["source_frame_set"]["count"] == 2
+    assert dataset["source_frame_set"]["digest"].startswith("sha256:")
+    assert dataset["source_frame_set"] == second["training_dataset"]["source_frame_set"]
+    assert dataset["projection"]["mode"] == "projected_pinhole_from_equirectangular"
+    assert dataset["projection"]["training_images_are_projected_pinhole"] is True
+    assert dataset["projection"]["native_equirectangular"] is False
+    assert dataset["evidence"]["sfm"]["camera_count"] == 2
+    assert dataset["evidence"]["sfm"]["camera_models"] == ["OPENCV", "PINHOLE"]
+    assert dataset["evidence"]["depth"] == {
+        "referenced_frame_count": 2,
+        "available_frame_count": 1,
+    }
+    assert dataset["evidence"]["confidence"] == {
+        "referenced_frame_count": 1,
+        "available_frame_count": 1,
+    }
+    assert dataset["evidence"]["masks"] == {
+        "referenced_frame_count": 2,
+        "available_frame_count": 2,
+    }
+    assert dataset["evidence"]["mesh"]["available"] is True
+    assert dataset["authority"]["capture_evidence_only"] is True
+    assert dataset["authority"]["trainer_consumption_claim"] is False
+    assert str(tmp_path) not in str(dataset)
+
+
+def test_export_world_studio_distinguishes_native_equirectangular_evidence(tmp_path: Path) -> None:
+    package = tmp_path / "native_360"
+    write_image(package / "images" / "000001.jpg")
+    write_json_strict(package / "metadata" / "equirectangular_rig.json", {
+        "schema": "capture_splat.equirectangular_rig.v0.1",
+        "projection_model": "EQUIRECTANGULAR",
+    })
+
+    export_world_studio_handoff(
+        package,
+        tmp_path / "world_studio",
+        capture_profile="video_360",
+        copy_files=True,
+    )
+    dataset = load_json_strict(tmp_path / "world_studio" / MANIFEST_NAME)["training_dataset"]
+
+    assert dataset["projection"]["mode"] == "native_equirectangular"
+    assert dataset["projection"]["native_equirectangular"] is True
+    assert dataset["projection"]["training_images_are_projected_pinhole"] is False
 
 
 def test_export_world_studio_attaches_quality_evidence(tmp_path: Path) -> None:
@@ -254,7 +375,7 @@ def test_export_world_studio_prefers_alpha_pruned_gaussian(tmp_path: Path) -> No
     assert gaussian["source_name"] == "splat.pruned_a12.ply"
 
 
-def test_export_world_studio_v02_scene_fields(tmp_path: Path) -> None:
+def test_export_world_studio_v03_scene_fields(tmp_path: Path) -> None:
     package = tmp_path / "colmap_package"
     write_image(package / "images" / "000001.jpg")
     sparse = package / "sparse" / "0"
@@ -289,7 +410,7 @@ def test_export_world_studio_v02_scene_fields(tmp_path: Path) -> None:
     export_world_studio_handoff(package, tmp_path / "world_studio", copy_files=True)
     manifest = load_json_strict(tmp_path / "world_studio" / MANIFEST_NAME)
 
-    assert manifest["schema"] == "capture_splat.world_studio_handoff.v0.2"
+    assert manifest["schema"] == "capture_splat.world_studio_handoff.v0.3"
     assert manifest["scene_transform"]["trainer_transform_source"] == "trainer_train_json"
     assert manifest["dataparser_transform"] == manifest["scene_transform"]["trainer_transform"]
     assert manifest["scene_radius"] > 0

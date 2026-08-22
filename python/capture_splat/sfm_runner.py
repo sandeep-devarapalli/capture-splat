@@ -12,7 +12,12 @@ from typing import Any
 from .background_sphere import append_background_sphere
 from .hloc_runner import hloc_status, planned_frontend, run_hloc_frontend
 from .json_utils import load_json_strict, write_json_strict
-from .training_supervision import copy_capture_supervision_assets
+from .training_supervision import (
+    copy_capture_manifest_assets,
+    copy_capture_supervision_assets,
+    confined_capture_path,
+    stage_file_if_absent,
+)
 from .scene_transform import PACKAGE_ORIENTATION_NAME, write_package_orientation_transform
 from .sfm_evidence import (
     apply_camera_priors,
@@ -25,6 +30,17 @@ from .sfm_evidence import (
 )
 
 SUMMARY_SCHEMA = "capture_splat.sfm_summary.v0.1"
+SFM_GENERATED_PATHS = {
+    "capture.json",
+    "capture_splat_sfm_summary.json",
+    "database.db",
+    "database_global.db",
+    "metadata/camera_evidence.json",
+    "metadata/fixed_camera_evaluation_set.json",
+    f"metadata/{PACKAGE_ORIENTATION_NAME}",
+    "hloc",
+    "sparse",
+}
 GLOMAP_MAPPER_ARGS = [
     "--ba_iteration_num", "5",
     "--skip_pruning", "0",
@@ -504,23 +520,26 @@ def run_sfm(
     elif loop_detection and vocab_tree is None:
         loop_detection = False
     out_dir.mkdir(parents=True, exist_ok=True)
-    package_images = out_dir / "images"
-    if copy_images and package_images.resolve() != images_dir:
+    package_images = confined_capture_path(out_dir, "images")
+    if copy_images and package_images != images_dir:
         package_images.mkdir(parents=True, exist_ok=True)
         for path in sorted(images_dir.iterdir()):
             if path.suffix.lower() in {".jpg", ".jpeg", ".png"}:
-                target = package_images / path.name
-                if not target.exists():
-                    shutil.copy2(path, target)
+                target = confined_capture_path(package_images, path.name)
+                if stage_file_if_absent(path, target) == "conflict":
+                    blockers.append(f"package_image_conflict:{path.name}")
         run_images = package_images
     else:
         run_images = images_dir
     package_capture_manifest = capture_manifest
+    capture_manifest_copy = "not_copied"
     supervision_copy = {"copied": 0, "paths": [], "missing": [], "complete": True}
+    capture_asset_copy = {"complete": True, "decision": "not_copied", "missing": [], "conflicts": []}
     if capture_manifest is not None and copy_images:
-        target_manifest = out_dir / "capture.json"
-        if target_manifest.resolve() != capture_manifest:
-            shutil.copy2(capture_manifest, target_manifest)
+        target_manifest = confined_capture_path(out_dir, "capture.json")
+        capture_manifest_copy = stage_file_if_absent(capture_manifest, target_manifest)
+        if capture_manifest_copy == "conflict":
+            blockers.append("capture_manifest_conflict")
         package_capture_manifest = target_manifest
         supervision_copy = copy_capture_supervision_assets(
             capture_manifest.parent,
@@ -529,12 +548,27 @@ def run_sfm(
         )
         if supervision_copy["missing"]:
             warnings.append("capture_supervision_sidecars_missing")
+        if supervision_copy["conflicts"]:
+            blockers.append("capture_supervision_sidecars_conflict")
     if resolved_mask_dir is not None and copy_images:
-        mask_copy = copy_valid_masks(resolved_mask_dir, out_dir / "masks" / "valid")
-        run_mask_dir = out_dir / "masks" / "valid"
+        run_mask_dir = confined_capture_path(out_dir, "masks/valid")
+        mask_copy = copy_valid_masks(resolved_mask_dir, run_mask_dir)
     else:
         mask_copy = {"status": "disabled" if masks == "off" else "source", "copied": 0}
         run_mask_dir = resolved_mask_dir
+    if mask_copy.get("conflicts"):
+        blockers.append("valid_masks_conflict")
+    if capture_manifest is not None and copy_images:
+        capture_asset_copy = copy_capture_manifest_assets(
+            capture_manifest.parent,
+            out_dir,
+            capture_metadata,
+            protected=SFM_GENERATED_PATHS,
+        )
+        if capture_asset_copy["missing"]:
+            warnings.append("capture_manifest_assets_missing")
+        if capture_asset_copy["conflicts"]:
+            blockers.append("capture_manifest_assets_conflict_with_sfm_output")
     total_images = count_images(run_images)
     commands = build_commands(
         run_images,
@@ -566,7 +600,9 @@ def run_sfm(
         "colmap_capabilities": capabilities,
         "capture_manifest": str(capture_manifest) if capture_manifest else None,
         "package_capture_manifest": str(package_capture_manifest) if package_capture_manifest else None,
+        "capture_manifest_copy": capture_manifest_copy,
         "supervision_copy": supervision_copy,
+        "capture_asset_copy": capture_asset_copy,
         "camera_policy": {"requested": camera_policy, "resolved": resolved_camera_policy},
         "camera_evidence": camera_report,
         "prepared_capture": prepared_capture,
@@ -601,7 +637,7 @@ def run_sfm(
         "colmap_cuda": colmap_cuda,
         "cpu_matching_override": bool(allow_cpu_matching and colmap_cuda is not True),
         "dry_run": dry_run,
-        "authority": {"registration_evidence": True, "quality_claim": False},
+        "authority": {"registration_evidence": False, "quality_claim": False},
     }
     write_json_strict(out_dir / "metadata" / "camera_evidence.json", camera_report)
     if blockers or dry_run:
@@ -674,7 +710,10 @@ def run_sfm(
     model_to_text(sparse_zero)
     stats = read_model_stats(sparse_zero)
     summary["model"] = stats
+    summary["authority"]["registration_evidence"] = True
     decision, ratio = decide(stats["registered_images"], total_images, min_reject_ratio, min_hold_ratio)
+    if decision == "promote" and not capture_asset_copy["complete"]:
+        decision = "hold"
     summary["registered_ratio"] = ratio
     summary["decision"] = decision
     summary["sparse_dir"] = str(sparse_zero)
@@ -766,7 +805,7 @@ def run_triangulate(
         "colmap_cuda": colmap_cuda,
         "cpu_matching_override": bool(allow_cpu_matching and colmap_cuda is not True),
         "dry_run": dry_run,
-        "authority": {"registration_evidence": True, "pose_prior": "device_poses", "quality_claim": False},
+        "authority": {"registration_evidence": False, "pose_prior": "device_poses", "quality_claim": False},
     }
     out_dir.mkdir(parents=True, exist_ok=True)
     if summary["blockers"] or dry_run:
@@ -802,6 +841,7 @@ def run_triangulate(
     model_to_text(sparse_zero)
     stats = read_model_stats(sparse_zero)
     summary["model"] = stats
+    summary["authority"]["registration_evidence"] = True
     decision, ratio = decide(stats["registered_images"], total_images, min_reject_ratio, min_hold_ratio)
     summary["registered_ratio"] = ratio
     summary["decision"] = decision

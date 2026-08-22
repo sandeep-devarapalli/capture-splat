@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import math
-import shutil
 import sqlite3
 import struct
 from pathlib import Path
@@ -12,6 +11,7 @@ import numpy as np
 from PIL import Image
 
 from .json_utils import load_json_strict, write_json_strict
+from .training_supervision import confined_capture_path, stage_file_if_absent
 
 CAMERA_REPORT_SCHEMA = "capture_splat.camera_evidence.v0.1"
 PHOTOMETRIC_REPORT_SCHEMA = "capture_splat.photometric_evidence.v0.1"
@@ -221,15 +221,28 @@ def photometric_evidence_report(frames: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def copy_valid_masks(source: Path | None, destination: Path) -> dict[str, Any]:
-    result = {"source": str(source) if source else None, "destination": str(destination), "copied": 0}
+    result = {
+        "source": str(source) if source else None,
+        "destination": str(destination),
+        "copied": 0,
+        "existing": 0,
+        "conflicts": [],
+    }
     if source is None or not source.is_dir():
         result["status"] = "missing"
         return result
     destination.mkdir(parents=True, exist_ok=True)
     for path in sorted(source.glob("*.png")):
-        shutil.copy2(path, destination / path.name)
-        result["copied"] += 1
-    result["status"] = "ready" if result["copied"] else "empty"
+        status = stage_file_if_absent(path, confined_capture_path(destination, path.name))
+        if status == "conflict":
+            result["conflicts"].append(path.name)
+        elif status in {"copied", "existing"}:
+            result[status] += 1
+    result["status"] = (
+        "conflict" if result["conflicts"]
+        else "ready" if result["copied"] or result["existing"]
+        else "empty"
+    )
     return result
 
 
