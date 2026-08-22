@@ -443,7 +443,8 @@ trainer request or run receipt. It records:
 
 - a canonical source-frame count and SHA-256 digest over each relative path,
   size, and content checksum;
-- observed COLMAP camera models and sparse-model availability;
+- observed COLMAP camera models, registered-image count, and measured overlap with unique
+  depth-bearing capture-frame basenames;
 - capture profile and whether a 360 source is perspective, projected pinhole
   from equirectangular evidence, native equirectangular, or unresolved;
 - available capture-manifest, depth, confidence, mask, and mesh evidence; and
