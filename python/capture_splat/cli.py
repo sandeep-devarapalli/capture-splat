@@ -26,6 +26,7 @@ from .prepare_capture import prepare_capture
 from .reconstruct import STAGES, reconstruct_capture
 from .render_source_qa import run_render_source_qa
 from .rgbd_seed import build_rgbd_metric_seed
+from .rgbd_tsdf import build_rgbd_tsdf
 from .reconstruction_recipe import RECIPES, plan_reconstruction
 from .scene_transform import write_scene_transform_sidecar
 from .sfm_runner import colmap_capabilities, colmap_has_cuda, run_sfm, run_triangulate
@@ -140,6 +141,12 @@ def main() -> None:
     p_seed.add_argument("--voxel-size", type=float, default=0.02)
     p_seed.add_argument("--max-points", type=int, default=250_000)
     p_seed.add_argument("--seed-source", choices=["auto", "depth", "mesh"], default="auto")
+    p_tsdf = sub.add_parser(
+        "build-rgbd-tsdf",
+        help="Fuse checksum-bound registered iPhone RGB-D frames into a held Open3D mesh candidate",
+    )
+    p_tsdf.add_argument("--handoff", type=Path, required=True)
+    p_tsdf.add_argument("--out", type=Path, required=True)
     p_reconstruct = sub.add_parser("reconstruct", help="Run the resumable capture-to-3DGS evidence pipeline")
     p_reconstruct.add_argument("--capture", type=Path, required=True)
     p_reconstruct.add_argument("--out", type=Path, required=True)
@@ -548,6 +555,8 @@ def main() -> None:
             max_points=args.max_points,
             seed_source=args.seed_source,
         )
+    elif args.command == "build-rgbd-tsdf":
+        payload = build_rgbd_tsdf(args.handoff, args.out)
     elif args.command == "reconstruct":
         payload = reconstruct_capture(
             args.capture,
