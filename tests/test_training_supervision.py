@@ -144,6 +144,31 @@ def test_copy_capture_supervision_rejects_escape(tmp_path: Path) -> None:
             target,
             {"planes_file": "../outside.npy", "frames": []},
         )
+    for relative in (r"..\outside.npy", "C:/outside.npy", r"\\server\share\outside.npy"):
+        with pytest.raises(ValueError, match="escapes package"):
+            copy_capture_manifest_assets(
+                source, target, {"planes_file": relative, "frames": []}
+            )
+    for relative in (
+        "CON.json", "CON .txt", "COM1 .log", "COM¹.txt",
+        "metadata/name.", "metadata/name ", "a?b", "file:stream",
+    ):
+        with pytest.raises(ValueError, match="not portable"):
+            copy_capture_manifest_assets(
+                source, target, {"planes_file": relative, "frames": []}
+            )
+    for frames in ({}, ["not-an-object"]):
+        with pytest.raises(ValueError, match="capture frame"):
+            copy_capture_manifest_assets(source, target, {"frames": frames})
+
+    unicode_collision = copy_capture_manifest_assets(source, target, {
+        "composed_file": "metadata/é.json",
+        "decomposed_file": "metadata/e\N{COMBINING ACUTE ACCENT}.json",
+        "frames": [],
+    })
+    assert set(unicode_collision["conflicts"]) == {
+        "metadata/é.json", "metadata/e\N{COMBINING ACUTE ACCENT}.json",
+    }
 
     (source / "metadata").mkdir()
     (source / "metadata/camera_evidence.json").write_text("{}\n", encoding="utf-8")
