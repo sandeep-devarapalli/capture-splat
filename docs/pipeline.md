@@ -549,12 +549,27 @@ reported as deterministic coverage evidence. The preserved truncated ARKit mesh 
 local semantic evidence only. Door-labelled surfaces are not doorway clearance,
 and this surface-only compiler does not infer free space.
 
-The separate collider candidate intentionally preserves the same topology in
-this slice. Its strict report records whether the 60,000-triangle Walk budget
-is exceeded and keeps doorway clearance, wall/opening continuity, unknown
-coverage, and physical probes held. Opening-aware simplification and effective
-collider comparison are downstream work; no fallback floor or synthetic fill
-is permitted.
+The first collider candidate intentionally preserves the same topology. Reduce
+that immutable, checksum-bound source separately with:
+
+```bash
+capture-splat reduce-hybrid-collider \
+  --hybrid-report runs/scan/hybrid_surface/capture_splat_hybrid_surface_report.json \
+  --out runs/scan/reduced_collider
+```
+
+The reducer pins Open3D 0.19 quadric decimation to at most 60,000 triangles and
+retains a deterministic source-face index on every output face. Semantic
+transfer is fail-closed: centroid and all vertices must agree on one supported
+nearest source class, class-equivalent ties stay unknown, and nearby unknown
+source samples may only turn a known candidate face back to unknown. The
+reports include source-to-reduced and reduced-to-source geometry, structural
+component retention, topology changes, and repeated floor, wall, and
+closed-door ray probes. The unsimplified source remains unchanged. This slice
+does not consume a route or portal contract, so `doorway_probe_missing`, World
+Studio controller reset, physical probes, and every collision/navigation/
+physics/Newton authority remain held. No fallback floor, hole fill, portal, or
+other synthetic geometry is permitted.
 
 Use `--measurement-points` with
 `--measurement-points-frame metric_colmap_world` only for a seed whose accepted
