@@ -241,6 +241,29 @@ masks and separately recorded person masks are applied independently; person
 masks may cover only a subset of frames and do not establish complete dynamic
 cleanup.
 
+Transfer only locally supported classes from the preserved ARKit mesh onto
+that exact TSDF topology with:
+
+```bash
+capture-splat build-hybrid-surface \
+  --handoff runs/my_scan/world_studio_package \
+  --tsdf-report runs/my_scan/rgbd_tsdf/capture_splat_rgbd_tsdf_report.json \
+  --out runs/my_scan/hybrid_surface
+```
+
+The compiler requires a checksum-bound v0.3 handoff, accepted metric
+registration, matching ARKit-world meter declarations, and an unchanged TSDF
+report/mesh. A class transfers only when the face centroid and all three
+vertices pass the configured nearest-distance and absolute-normal thresholds
+and agree on one known class, with no competing class inside the declared
+10-micrometre distance-equivalence band. Every other face remains `unknown`.
+The strict report includes per-class and unknown counts, areas, bounds, and
+shared-edge connected components. The emitted
+collider candidate preserves the TSDF topology and source-face mapping; it is
+not simplified and stays held against the 60,000-triangle Walk budget,
+doorway/opening continuity, unknown coverage, and physical collision probes.
+No fallback floor or synthetic geometry is added.
+
 Trainer normalization is a separate scale boundary. `--normalization auto`
 disables gsplat world normalization only when the package has an accepted
 `metric_scale_report.json`, its sparse-model checksums still match, and the
