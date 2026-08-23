@@ -1,11 +1,16 @@
+import hashlib
+import math
 from pathlib import Path
+
+import numpy as np
 from PIL import Image
 import pytest
 
 from tests.test_capture_schema import make_capture
-from capture_splat.colmap_export import export_colmap_text
+from capture_splat.colmap_export import arkit_camera_to_colmap_pose, export_colmap_text
 from capture_splat.ingest import ingest_capture
 from capture_splat.json_utils import load_json_strict, write_json_strict
+from capture_splat.rgbd_seed import quaternion_rotation
 
 
 def test_colmap_export_writes_text_model(tmp_path: Path) -> None:
@@ -18,6 +23,46 @@ def test_colmap_export_writes_text_model(tmp_path: Path) -> None:
     assert (sparse / "images.txt").exists()
     assert (sparse / "points3D.txt").exists()
     assert (out / "images" / "000001.jpg").exists()
+    report = load_json_strict(out / "capture_splat_colmap_summary.json")
+    images = sparse / "images.txt"
+    assert report["coordinate_contract"]["camera_to_world_conversion"] == (
+        "opencv_c2w = arkit_c2w @ diag(1,-1,-1,1)"
+    )
+    assert report["outputs"]["images"] == {
+        "bytes": images.stat().st_size,
+        "checksum": f"sha256:{hashlib.sha256(images.read_bytes()).hexdigest()}",
+    }
+
+
+def test_arkit_camera_axes_convert_to_colmap_opencv_axes() -> None:
+    angle = math.radians(37.0)
+    rotation_y = np.asarray([
+        [math.cos(angle), 0.0, math.sin(angle)],
+        [0.0, 1.0, 0.0],
+        [-math.sin(angle), 0.0, math.cos(angle)],
+    ])
+    camera_to_world = np.eye(4)
+    camera_to_world[:3, :3] = rotation_y
+    camera_to_world[:3, 3] = [1.25, -0.4, 2.75]
+
+    quaternion, translation = arkit_camera_to_colmap_pose(camera_to_world)
+    rotation_world_to_camera = quaternion_rotation(*quaternion)
+    reconstructed = np.eye(4)
+    reconstructed[:3, :3] = rotation_world_to_camera.T
+    reconstructed[:3, 3] = -rotation_world_to_camera.T @ translation
+
+    expected = camera_to_world @ np.diag([1.0, -1.0, -1.0, 1.0])
+    np.testing.assert_allclose(reconstructed, expected, atol=1e-12)
+    world_point_in_front = camera_to_world @ np.asarray([0.2, -0.1, -3.0, 1.0])
+    opencv_point = rotation_world_to_camera @ world_point_in_front[:3] + translation
+    np.testing.assert_allclose(opencv_point, [0.2, 0.1, 3.0], atol=1e-12)
+
+
+def test_arkit_camera_pose_rejects_reflection() -> None:
+    camera_to_world = np.diag([-1.0, 1.0, 1.0, 1.0])
+
+    with pytest.raises(ValueError, match="right-handed"):
+        arkit_camera_to_colmap_pose(camera_to_world)
 
 
 def test_colmap_export_scales_intrinsics_to_rgb_image_size(tmp_path: Path) -> None:
