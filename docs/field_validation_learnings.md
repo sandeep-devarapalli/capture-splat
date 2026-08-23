@@ -6,7 +6,9 @@ These notes capture the practical lessons from the first iPhone Video 3DGS valid
 
 - Default local backend: Vulkan/VkSplat.
 - Fallback Apple-local backend: OpenSplat/MPS, useful for comparison but less stable in the tested fixed-step room/video paths.
-- SfM/pose baseline: COLMAP-refined image packages remain the strongest starting point for iPhone video captures.
+- SfM/pose product candidate: pinned Spirula built-in SfM after same-input
+  evidence-gated promotion. External HLOC/COLMAP remains the frozen
+  conformance control and fallback.
 - Output target: standard Gaussian Splatting `.ply` plus metadata summaries, not a proprietary viewer format.
 - Authority stance: generated splats are visual proposals, not metric geometry, collision geometry, semantic ground truth, or planning authority.
 
@@ -59,13 +61,50 @@ Every serious training run should record and reject on these before claiming pro
 ## Pipeline Lessons
 
 - Preserve source images and generated training packages separately. Do not overwrite evidence.
-- Prefer COLMAP-refined packages for training, but record when ARKit pose/depth is used as a carrier or fallback.
+- Prefer a same-input-promoted pinned Spirula built-in SfM package for new
+  product work, while retaining the external HLOC/COLMAP package as the frozen
+  control and fallback. Record when ARKit pose/depth is used as a prior or
+  metric carrier.
 - Keep duplicate/weighted packages traceable. If images are duplicated for supervision, the metadata must show the source frame, role, copy index, and non-authoritative status.
 - Compare backends on the exact same input package before drawing conclusions.
 - VkSplat should be the default baseline for this repo, but OpenSplat/MPS remains useful as a sanity-check backend on Apple machines.
-- Integrated global COLMAP is the default mapper. HLOC retrieval is the scaling
-  path for larger packages; Caspar remains an explicit post-global BA
-  experiment rather than the global solver.
+- The shipped CLI retains integrated global COLMAP and HLOC retrieval as the
+  frozen control/fallback path. Pinned Spirula built-in SfM is the preferred
+  product candidate only after same-input promotion; Caspar remains an
+  explicit post-global BA experiment rather than the global solver.
+
+## Room-01 Open-Door Native Spirula Evidence (2026-08-23)
+
+- Pinned Spirula built-in SfM registered `411 / 450` prepared images overall,
+  including `217 / 246` continuous-video frames and `194 / 204` RGB-D frames.
+  The run is registration evidence only: ALIKED and LightGlue used
+  Vulkan/MoltenVK, while the accurate baseline used CPU double-precision bundle
+  adjustment. It does not establish speed, all-GPU execution, or cross-vendor
+  performance.
+- The ARKit-to-COLMAP metric alignment was accepted at
+  `0.455587656 m / COLMAP unit`. Camera-center residuals were `0.029027 m`
+  median and `0.057314 m` p95, and the metric seed contains `92,906` points.
+  This preserves meter-scale evidence; it is not physical measurement or
+  collision authority.
+- The 7,000-step Spirula run produced a finite SH3 PLY with `1,498,066`
+  Gaussians and `371,521,900` bytes. Its SHA-256 is
+  `56dc6ab645f099bef670f07516046ce9ddcd65d94c44c007e08f35374bb37bd8`.
+  Spark promoted only the exact functional load, orbit, zoom, movement, reset,
+  and teardown checks. It did not promote visual quality, unrestricted novel
+  views, metric geometry, collision, navigation, physics, capacity, or timing.
+- The complete open-door trajectory contains one clean crossing of `door_1`,
+  whose reported width is `0.7616868 m`. Accepted RGB-D support by portal
+  region is nevertheless `side_a / through / side_b = 0 / 0 / 204`. With no
+  accepted RGB-D view on side A or through the opening, the strict portal
+  producer and collision authority remain `hold`.
+- RGB-D fusion produced a TSDF with `136,810` vertices and `260,038` faces.
+  The hybrid surface retained `59.1417%` unknown coverage. The bounded
+  reduction emitted `59,999` faces but increased unknown coverage to
+  `91.0382%` and failed the floor, wall, door-retention, and collision-probe
+  rails. Neither mesh may be promoted as collision authority.
+- Rapier is a downstream World Studio consumer. This Capture Splat checkpoint
+  records the held producer result and does not infer consumer or physics
+  authority from it.
 
 ## Carry-Forward From The vid2scene Comparison (2026-07-08)
 
