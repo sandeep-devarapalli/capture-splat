@@ -92,11 +92,21 @@ Every serious training run should record and reject on these before claiming pro
   Spark promoted only the exact functional load, orbit, zoom, movement, reset,
   and teardown checks. It did not promote visual quality, unrestricted novel
   views, metric geometry, collision, navigation, physics, capacity, or timing.
+- Exterior clouding and floaters are expected outside the observed volume of
+  this interior-only capture. They do not downgrade supported inward views;
+  `7,000` denotes training steps, not retained Gaussian count.
 - The complete open-door trajectory contains one clean crossing of `door_1`,
   whose reported width is `0.7616868 m`. Accepted RGB-D support by portal
   region is nevertheless `side_a / through / side_b = 0 / 0 / 204`. With no
   accepted RGB-D view on side A or through the opening, the strict portal
-  producer and collision authority remain `hold`.
+  producer and collision authority remain `hold`. Side A and side B are the
+  opposite spatial sides of this same doorway, not two physical doors. The
+  evidence may still feed a downstream non-authoritative proxy when unknown
+  space stays no-go and every inferred surface is identified as a hypothesis.
+- The track-aware positive-ID repair preserves all `875,338` point-track
+  references and lets native portal binding complete for `411` frames. Its
+  registered accepted RGB-D region counts are `0 / 0 / 194`; identity is no
+  longer the blocker, while missing side-A/threshold geometry still is.
 - RGB-D fusion produced a TSDF with `136,810` vertices and `260,038` faces.
   The hybrid surface retained `59.1417%` unknown coverage. The bounded
   reduction emitted `59,999` faces but increased unknown coverage to

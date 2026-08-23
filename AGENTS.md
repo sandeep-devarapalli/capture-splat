@@ -74,6 +74,13 @@ training, QA, or World Studio handoffs.
 - A held benchmark gates only its named claim or promotion. It does not block
   forming a proposal package or downstream Room-01 metric/collision work that
   passes its own gates.
+- For an interior-only 3DGS capture, exterior clouding and floaters are expected
+  missing-ray behavior. Grade the supported interior volume and keep training
+  steps distinct from retained Gaussian count.
+- "Both sides" of a doorway means the two spatial sides of one portal, not two
+  physical doors. One-sided RGB-D evidence may remain useful for a held producer
+  receipt and a downstream hypothesis-tagged proxy with unknown space no-go; it
+  must not be promoted as measured collision, navigation, or physics authority.
 
 ## Validation
 

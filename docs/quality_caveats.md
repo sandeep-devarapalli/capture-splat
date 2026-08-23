@@ -107,11 +107,13 @@ splat registration, safe movement, or navigation authority.
 Likewise, an Open3D-reduced hybrid collider that meets its triangle budget and
 software ray probes is still a held candidate. Nearest-surface class transfer,
 bidirectional distance checks, and component/topology comparisons do not prove
-an unobserved opening is clear. The shipped portal-route validator can bind a
-future open-door capture, but the current Room-01 capture does not contain that
-RoomPlan/portal/free-space/route evidence. Doorway traversal, controller reset,
-physical collision behavior, and Newton authority therefore remain explicitly
-unavailable; no fallback floor is created to hide missing evidence.
+an unobserved opening is clear. The open-door Room-01 capture contains RoomPlan
+and one `door_1` trajectory crossing, but its accepted RGB-D evidence is only on
+one spatial side of that portal. The positive-ID repair lets native binding
+complete without changing that spatial limitation. Capture Splat preserves the
+held evidence; World Studio may form a hypothesis-tagged experimental proxy
+with unknown space no-go, but doorway traversal, physical collision behavior,
+and Newton authority remain unavailable without their independent gates.
 
 AprilTag scale validation checks one measured target against registered camera
 geometry. A passing tag report validates that checksum-bound artifact and scale
