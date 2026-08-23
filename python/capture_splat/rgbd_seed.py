@@ -12,6 +12,10 @@ from PIL import Image
 
 from .background_sphere import next_point_id
 from .capture_schema import iter_frames, load_capture
+from .colmap_model import (
+    detect_colmap_model_format,
+    materialize_colmap_text_model,
+)
 from .json_utils import load_json_strict, write_json_strict
 from .ply_stats import inspect_ply, load_ply_scalar_samples
 from .scene_transform import PACKAGE_ORIENTATION_NAME, PACKAGE_ORIENTATION_SCHEMA
@@ -476,11 +480,8 @@ def build_rgbd_metric_seed(
     out_dir = out_dir.resolve()
     if not (capture_dir / "capture.json").exists():
         raise FileNotFoundError(f"capture.json missing: {capture_dir}")
-    if not (package_dir / "sparse/0/images.txt").exists():
-        raise FileNotFoundError(f"COLMAP images.txt missing: {package_dir / 'sparse/0/images.txt'}")
-    for name in ("cameras.txt", "points3D.txt"):
-        if not (package_dir / "sparse/0" / name).exists():
-            raise FileNotFoundError(f"COLMAP text model file missing: {package_dir / 'sparse/0' / name}")
+    source_sparse = package_dir / "sparse/0"
+    model_format = detect_colmap_model_format(source_sparse)
     if out_dir.exists() and any(out_dir.iterdir()):
         raise FileExistsError(f"RGB-D seed output is not empty: {out_dir}")
     if minimum_cameras < 3:
@@ -496,7 +497,21 @@ def build_rgbd_metric_seed(
     output_package = out_dir / "package"
     out_dir.mkdir(parents=True, exist_ok=True)
     shutil.copytree(package_dir, output_package)
-    source, target, names = _matched_centers(capture_dir, package_dir)
+    conversion_report: dict[str, Any] | None = None
+    conversion_report_path: Path | None = None
+    if model_format == "binary":
+        copied_sparse = output_package / "sparse/0"
+        conversion_report = materialize_colmap_text_model(
+            copied_sparse,
+            copied_sparse,
+        )
+        for name, evidence in conversion_report["source_files"].items():
+            evidence["path"] = f"sparse/0/{name}"
+        for name, evidence in conversion_report["output_files"].items():
+            evidence["path"] = f"sparse/0/{name}"
+        conversion_report_path = output_package / "metadata/colmap_binary_text_conversion.json"
+        write_json_strict(conversion_report_path, conversion_report)
+    source, target, names = _matched_centers(capture_dir, output_package)
     alignment, transform = _alignment_report(
         source, target, minimum_cameras, max_median_fraction, max_p95_fraction
     )
@@ -511,6 +526,10 @@ def build_rgbd_metric_seed(
         "seed_point_count": 0,
         "seed_source_requested": seed_source,
         "seed_source_resolved": None,
+        "colmap_model_input_format": model_format,
+        "colmap_binary_text_conversion_report": (
+            str(conversion_report_path) if conversion_report_path is not None else None
+        ),
         "package_augmented": False,
         "decision": "hold",
         "authority": {
@@ -605,6 +624,17 @@ def build_rgbd_metric_seed(
     orientation_path = output_package / "metadata" / PACKAGE_ORIENTATION_NAME
     backup = output_package / "sparse/0_colmap_refined"
     shutil.copytree(points_txt.parent, backup)
+    if conversion_report is not None and conversion_report_path is not None:
+        for files in (conversion_report["source_files"], conversion_report["output_files"]):
+            for name, evidence in files.items():
+                backup_path = backup / name
+                if (
+                    evidence["bytes"] != backup_path.stat().st_size
+                    or evidence["checksum"] != _sha256(backup_path)
+                ):
+                    raise ValueError(f"COLMAP binary-to-text backup parity failed: {name}")
+                evidence["path"] = f"sparse/0_colmap_refined/{name}"
+        write_json_strict(conversion_report_path, conversion_report)
     input_checksums = {
         "images_txt": _sha256(images_txt),
         "cameras_txt": _sha256(cameras_txt),
@@ -613,6 +643,8 @@ def build_rgbd_metric_seed(
     }
     if orientation_path.exists():
         input_checksums["package_orientation_transform"] = _sha256(orientation_path)
+    if conversion_report_path is not None:
+        input_checksums["colmap_binary_text_conversion_report"] = _sha256(conversion_report_path)
     if metric_scale_accepted:
         _scale_colmap_images(images_txt, meters_per_colmap_unit)
         _scale_colmap_points(points_txt, meters_per_colmap_unit)

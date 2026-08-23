@@ -17,6 +17,12 @@ training, QA, or World Studio handoffs.
 - Treat GPL-licensed Spirula implementations as pinned, user-installed external
   processes. Do not vendor, import, or copy their implementation into this
   Apache-2.0 repository.
+- Treat pinned Spirula built-in SfM as the preferred product candidate only
+  after same-input evidence-gated promotion. Keep external HLOC/COLMAP as the
+  frozen conformance control and fallback.
+- Do not equate built-in Vulkan SfM with zero CPU work or an all-GPU pipeline.
+  Bind each stage, selected device, host work, and any Apple/MoltenVK
+  bundle-adjustment fallback before making backend or speed claims.
 - Keep generated datasets, captures, models, renders, and benchmark results out
   of Git.
 
