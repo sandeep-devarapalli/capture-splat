@@ -72,9 +72,9 @@ Calibration outcomes are owned by World Studio.
   The previously observed 168-camera overlap is a verification target, not a hard-coded value.
 - Preserve a source mesh marked `truncated: true` as evidence only; it cannot acquire collision
   or navigation authority.
-- Record the closed capture's missing RoomPlan/portal/free-space/route evidence with the held
-  portal-route receipt. A new open-door capture must satisfy the checksum-bound v0.1 contract
-  before any opening-aware reduction hypothesis starts.
+- Preserve the prior closed capture as a control. The current open-door revision carries
+  RoomPlan and a trajectory crossing, while its one-sided registered RGB-D coverage remains a
+  held producer result; opening-aware reduction must retain that uncertainty explicitly.
 - Obtain a World Studio consumer receipt. Spirula execution, canonical publication, collision
   promotion, OpenUSD, Newton, and robot/UAV Episodes remain downstream World Studio work.
 
@@ -92,10 +92,21 @@ Calibration outcomes are owned by World Studio.
   `56dc6ab645f099bef670f07516046ce9ddcd65d94c44c007e08f35374bb37bd8`.
   Only the Spark functional load/orbit/zoom/reset contract promoted; visual,
   metric, collision, navigation, physics, and performance authority did not.
+- Exterior clouding/floaters are expected outside this interior-only capture's
+  observed-ray volume and do not downgrade supported interior views. `7,000`
+  is a training-step count, not the number of retained Gaussians.
 - The open-door trajectory contains one clean `door_1` crossing at a measured
   width of `0.7616868 m`, but accepted RGB-D support by portal region is
   `side_a / through / side_b = 0 / 0 / 204`. The portal producer and collision
-  authority therefore remain `hold`.
+  authority therefore remain `hold`. Side A and side B are opposite sides of
+  this one portal, not two doors. A supplemental reverse pass is useful but is
+  not required for World Studio to form a non-authoritative proxy with unknown
+  space no-go and explicit hypothesis surfaces.
+- PR [#67](https://github.com/sandeep-devarapalli/capture-splat/pull/67)
+  fixes the zero-based native image-ID defect with a track-aware derived model.
+  Native binding now completes for `411` registered prepared frames and reports
+  registered accepted RGB-D support `0 / 0 / 194`; this confirms the remaining
+  hold is missing spatial evidence, not a camera-identity parser failure.
 - The RGB-D TSDF has `136,810` vertices and `260,038` faces; the hybrid surface
   is `59.1417%` unknown. Reduction produced `59,999` faces but raised unknown
   coverage to `91.0382%` and failed floor, wall, door-retention, and probe
