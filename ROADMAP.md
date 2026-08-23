@@ -13,10 +13,11 @@ Capture Splat has implemented the core public capture-to-3DGS path:
 - The on-device Projects library persists finalized, partial, and invalid
   capture evidence across launches and supports historical preview/share
   without fabricating a re-finalization.
-- The host pipeline prepares captures, runs integrated global COLMAP or HLOC
-  retrieval, preserves per-frame camera and mask evidence, builds a gated
-  RGB-D or ARKit mesh metric seed, and trains controlled VkSplat or gsplat
-  ladders.
+- The host pipeline prepares captures, preserves per-frame camera and mask
+  evidence, builds a gated RGB-D or ARKit mesh metric seed, and trains
+  controlled VkSplat or gsplat ladders. Pinned Spirula built-in SfM is the
+  preferred product candidate after same-input evidence-gated promotion;
+  external HLOC/COLMAP remains the frozen conformance control and fallback.
 - Strict capture, camera, photometric, PLY, weak-frame, raw-render, and
   World Studio handoff reports preserve `promote|hold|reject` decisions.
 - World Studio handoff v0.3 adds a sanitized, checksum-bound
@@ -59,7 +60,7 @@ Calibration outcomes are owned by World Studio.
 | Live Session Foundation | Strict replay-first source-frame, camera, quality, sidecar, ACK, resume, and finalization contract | completed |
 | Authenticated Sender And Device Acceptance | Optional paired TLS transport with bounded store-and-forward, thermal safety, and device evidence | experimental and evidence-blocked on iPhone; production capture uses local finalization and manual export |
 | Calibration Capture Evidence | Guided and synchronized experimental imagery with apparatus/scale provenance, without inferred physics authority | planned and evidence-blocked |
-| Training Dataset And External Provider Evidence | Additive v0.3 dataset inventory and self-contained Room-01 producer evidence for pinned external trainers | producer contract complete; portable Room-01 receipt and World Studio consumer evidence open |
+| Training Dataset And External Provider Evidence | Additive v0.3 dataset inventory and self-contained Room-01 producer evidence for pinned external trainers | producer contract and Room-01 visual proposal complete; portal and collision producer held |
 
 ### Immediate Capture Slice: Room-01
 
@@ -76,6 +77,31 @@ Calibration outcomes are owned by World Studio.
   before any opening-aware reduction hypothesis starts.
 - Obtain a World Studio consumer receipt. Spirula execution, canonical publication, collision
   promotion, OpenUSD, Newton, and robot/UAV Episodes remain downstream World Studio work.
+
+#### 2026-08-23 Evidence Checkpoint
+
+- Pinned Spirula built-in SfM registered `411 / 450` prepared images:
+  `217 / 246` continuous-video frames and `194 / 204` RGB-D frames. This is
+  Room-01 registration evidence, not a performance or all-GPU claim.
+- Metric alignment was accepted at `0.455587656 m / COLMAP unit`, with
+  `0.029027 m` median and `0.057314 m` p95 camera-center residuals. The
+  checksum-bound metric seed contains `92,906` points; physical measurement
+  authority remains separately gated.
+- The 7,000-step Spirula run produced a finite SH3 PLY with `1,498,066`
+  Gaussians and `371,521,900` bytes. Its SHA-256 is
+  `56dc6ab645f099bef670f07516046ce9ddcd65d94c44c007e08f35374bb37bd8`.
+  Only the Spark functional load/orbit/zoom/reset contract promoted; visual,
+  metric, collision, navigation, physics, and performance authority did not.
+- The open-door trajectory contains one clean `door_1` crossing at a measured
+  width of `0.7616868 m`, but accepted RGB-D support by portal region is
+  `side_a / through / side_b = 0 / 0 / 204`. The portal producer and collision
+  authority therefore remain `hold`.
+- The RGB-D TSDF has `136,810` vertices and `260,038` faces; the hybrid surface
+  is `59.1417%` unknown. Reduction produced `59,999` faces but raised unknown
+  coverage to `91.0382%` and failed floor, wall, door-retention, and probe
+  rails. It is not a collision candidate for promotion.
+- Rapier consumption remains downstream in World Studio. Capture Splat records
+  and preserves the producer holds rather than granting downstream authority.
 
 Live sender, equirectangular, cross-vendor, capacity, and timing holds do not block this slice.
 
@@ -147,6 +173,12 @@ Studio may compile into its target Newton runtime after separate validation.
   process boundary. Do not vendor or copy GPL implementation into Capture
   Splat. A future World Studio job contract may request a provider run, but
   `training_dataset` remains input evidence rather than execution evidence.
+- Treat pinned Spirula built-in SfM as the preferred product candidate only
+  after a same-input evidence-gated promotion. Keep external HLOC/COLMAP as the
+  frozen conformance control and fallback. Bind the selected Vulkan device and
+  host stages; the accurate Room-01 Apple run used Vulkan/MoltenVK for ALIKED
+  and LightGlue but CPU double-precision bundle adjustment. Do not convert that
+  stage-level result into a speed or all-GPU claim.
 - Benchmark the shipped checksum-bound sensor depth/normal supervision
   contract on trainers that expose dedicated metric-sensor inputs. Current
   public VkSplat and gsplat baselines preserve the evidence but do not consume
@@ -183,8 +215,10 @@ Studio may compile into its target Newton runtime after separate validation.
   alternative. OpenSplat/MPS remains comparison-only.
 - Spirula is an external research/provider boundary, not vendored Capture Splat
   code and not evidence of cross-vendor support until measured here.
-- COLMAP-refined cameras remain the visual reconstruction baseline. ARKit
-  pose/depth is a prior and metric evidence.
+- Pinned Spirula built-in SfM is the preferred product candidate after
+  same-input evidence-gated promotion; external HLOC/COLMAP is the frozen
+  conformance control and fallback. ARKit pose/depth remains a prior and metric
+  evidence.
 - Short runs are smoke tests. Serious quality gates remain
   `3000 -> 7000 -> 15000 -> 30000`.
 - Longer training cannot repair weak capture, poor registration, bad
