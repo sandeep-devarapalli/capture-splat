@@ -235,6 +235,34 @@ ARKit priors and otherwise modifies a copied database before global mapping.
 with `opencv_c2w = arkit_c2w @ diag(1,-1,-1,1)` and checksum-binds the source
 manifest plus emitted sparse text model in its summary.
 
+An external SfM provider text model that emits zero-based or otherwise
+non-canonical image IDs can be normalized into a separate sparse text model
+without changing the provider output. Create its output parent first:
+
+```bash
+mkdir -p runs/scan/provider_package_positive_ids/sparse
+capture-splat normalize-colmap-image-ids \
+  --source-sparse runs/scan/provider_package/sparse/0 \
+  --out runs/scan/provider_package_positive_ids/sparse/0
+```
+
+This first slice accepts complete COLMAP text models only; binary input fails
+closed without output. The command validates the complete source model first,
+maps source image IDs in ascending order to contiguous positive IDs `1..N`,
+and rewrites every
+`points3D` track reference through the same map. Cameras, poses, image names,
+2D observations, point IDs, and point geometry remain unchanged. It publishes
+only to a fresh output directory and writes
+`capture_splat_colmap_image_id_normalization.json` with source/output hashes,
+the ID map, semantic parity, and proposal-only authority. Rig or frame
+components block because their image-ID references are not yet represented by
+this derived contract. The immutable-snapshot and exclusive-publication path
+currently requires POSIX descriptor-relative `O_NOFOLLOW` support and fails
+closed on other platforms or on an unexpectedly large source/output directory
+listing. It also fails closed above a 16 MiB text line, 12 GiB aggregate source,
+one million cameras/images, or five million points/observations/track elements;
+these are safety bounds, not validated capacity claims.
+
 Canonical feature/training masks are white where pixels are valid. Room masks
 are full-frame minus available people/dynamic evidence. Desk/object masks
 require object support and intersect it with inverse person evidence. Auto mode

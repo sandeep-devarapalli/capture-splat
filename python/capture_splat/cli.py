@@ -17,6 +17,7 @@ from .equirectangular_import import import_equirectangular
 from .equirectangular_sfm import run_equirectangular_rig_sfm
 from .frames_extract import run_extract_frames
 from .colmap_focused_repair import run_colmap_focused_repair
+from .colmap_model import normalize_colmap_image_ids
 from .colmap_support_delta import compare_colmap_support_delta
 from .colmap_support_repair import build_colmap_support_repair
 from .ingest import ingest_capture
@@ -88,6 +89,12 @@ def main() -> None:
     p_colmap = sub.add_parser("colmap-export", help="Write COLMAP text package")
     p_colmap.add_argument("--capture", type=Path, required=True)
     p_colmap.add_argument("--out", type=Path, required=True)
+    p_normalize_colmap_ids = sub.add_parser(
+        "normalize-colmap-image-ids",
+        help="Normalize image IDs in a COLMAP text model into a fresh text model",
+    )
+    p_normalize_colmap_ids.add_argument("--source-sparse", type=Path, required=True)
+    p_normalize_colmap_ids.add_argument("--out", type=Path, required=True)
     p_capture_quality = sub.add_parser("capture-quality-report", help="Summarize capture-time quality before training")
     p_capture_quality.add_argument("--capture", type=Path, required=True)
     p_capture_quality.add_argument("--out", type=Path, required=True)
@@ -543,6 +550,8 @@ def main() -> None:
         )
     elif args.command == "colmap-export":
         payload = export_colmap_text(args.capture, args.out)
+    elif args.command == "normalize-colmap-image-ids":
+        payload = normalize_colmap_image_ids(args.source_sparse, args.out)
     elif args.command == "capture-quality-report":
         payload = run_capture_quality_report(
             args.capture,
