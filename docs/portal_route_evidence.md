@@ -42,6 +42,10 @@ back through the held descriptor, and the bound input/output state is checked
 again through context exit, including rejected reports. A host without
 descriptor-relative directory opens/scanning and `O_NOFOLLOW` support rejects
 this command instead of falling back to path-based reads.
+Windows is therefore intentionally unsupported for this producer until an
+equivalent no-reparse-point, descriptor-held implementation exists; its CI
+suite skips these POSIX-specific adversarial cases while runtime still fails
+closed.
 
 All CLI arguments must use physical canonical paths, not symlink aliases. On
 macOS, use `/private/tmp/...` and `/private/var/...` instead of `/tmp/...` or

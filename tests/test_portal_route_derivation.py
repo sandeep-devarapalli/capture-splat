@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -10,6 +11,12 @@ from capture_splat import cli, portal_route_derivation
 from capture_splat.portal_route_derivation import (
     REPORT_NAME,
     derive_portal_route_evidence,
+)
+
+
+pytestmark = pytest.mark.skipif(
+    os.name == "nt",
+    reason="portal derivation deliberately requires POSIX descriptor-relative no-follow I/O",
 )
 
 
