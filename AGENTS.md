@@ -32,6 +32,10 @@ training, QA, or World Studio handoffs.
   compatibility when extending v0.3.
 - Use strict JSON, relative paths, SHA-256 bindings, finite-number checks, and
   explicit coordinate frames and units.
+- Capture and Nerfstudio `camera_to_world` poses use ARKit/OpenGL camera axes
+  (x right, y up, z back). A COLMAP/OpenCV pose must right-multiply that c2w by
+  `diag(1,-1,-1,1)` exactly once before inversion; camera centers alone cannot
+  detect a missing flip.
 - Portal diagnostics must bind the declared complete contiguous trajectory,
   accept only bounded normal-tracking crossing brackets, and count SfM image
   membership only after canonical-path plus exact byte parity; write no output

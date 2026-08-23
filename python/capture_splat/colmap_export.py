@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import math
 import shutil
 from pathlib import Path
@@ -13,20 +14,66 @@ from .capture_schema import frame_selection_summary, iter_frames, load_capture
 from .json_utils import write_json_strict
 
 
+ARKIT_TO_OPENCV_CAMERA = np.diag([1.0, -1.0, -1.0, 1.0])
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _file_evidence(path: Path) -> dict[str, Any]:
+    return {"bytes": path.stat().st_size, "checksum": _sha256(path)}
+
+
 def rotation_matrix_to_quaternion_wxyz(matrix: np.ndarray) -> tuple[float, float, float, float]:
     m = matrix
     trace = float(np.trace(m))
     if trace > 0.0:
         s = math.sqrt(trace + 1.0) * 2.0
-        return (0.25 * s, (m[2, 1] - m[1, 2]) / s, (m[0, 2] - m[2, 0]) / s, (m[1, 0] - m[0, 1]) / s)
-    if m[0, 0] > m[1, 1] and m[0, 0] > m[2, 2]:
+        quaternion = (0.25 * s, (m[2, 1] - m[1, 2]) / s, (m[0, 2] - m[2, 0]) / s, (m[1, 0] - m[0, 1]) / s)
+    elif m[0, 0] > m[1, 1] and m[0, 0] > m[2, 2]:
         s = math.sqrt(1.0 + m[0, 0] - m[1, 1] - m[2, 2]) * 2.0
-        return ((m[2, 1] - m[1, 2]) / s, 0.25 * s, (m[0, 1] + m[1, 0]) / s, (m[0, 2] + m[2, 0]) / s)
-    if m[1, 1] > m[2, 2]:
+        quaternion = ((m[2, 1] - m[1, 2]) / s, 0.25 * s, (m[0, 1] + m[1, 0]) / s, (m[0, 2] + m[2, 0]) / s)
+    elif m[1, 1] > m[2, 2]:
         s = math.sqrt(1.0 + m[1, 1] - m[0, 0] - m[2, 2]) * 2.0
-        return ((m[0, 2] - m[2, 0]) / s, (m[0, 1] + m[1, 0]) / s, 0.25 * s, (m[1, 2] + m[2, 1]) / s)
-    s = math.sqrt(1.0 + m[2, 2] - m[0, 0] - m[1, 1]) * 2.0
-    return ((m[1, 0] - m[0, 1]) / s, (m[0, 2] + m[2, 0]) / s, (m[1, 2] + m[2, 1]) / s, 0.25 * s)
+        quaternion = ((m[0, 2] - m[2, 0]) / s, (m[0, 1] + m[1, 0]) / s, 0.25 * s, (m[1, 2] + m[2, 1]) / s)
+    else:
+        s = math.sqrt(1.0 + m[2, 2] - m[0, 0] - m[1, 1]) * 2.0
+        quaternion = ((m[1, 0] - m[0, 1]) / s, (m[0, 2] + m[2, 0]) / s, (m[1, 2] + m[2, 1]) / s, 0.25 * s)
+    norm = math.sqrt(sum(value * value for value in quaternion))
+    if not math.isfinite(norm) or norm <= 0:
+        raise ValueError("camera rotation produced an invalid quaternion")
+    normalized = tuple(value / norm for value in quaternion)
+    if normalized[0] < 0:
+        normalized = tuple(-value for value in normalized)
+    return normalized
+
+
+def arkit_camera_to_colmap_pose(camera_to_world: np.ndarray) -> tuple[tuple[float, float, float, float], np.ndarray]:
+    if camera_to_world.shape != (4, 4) or not np.all(np.isfinite(camera_to_world)):
+        raise ValueError("ARKit camera_to_world must be a finite 4x4 matrix")
+    if not np.allclose(camera_to_world[3], [0.0, 0.0, 0.0, 1.0], atol=1e-5, rtol=0.0):
+        raise ValueError("ARKit camera_to_world must be affine")
+    rotation = camera_to_world[:3, :3]
+    if not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-5, rtol=0.0):
+        raise ValueError("ARKit camera_to_world rotation must be orthonormal")
+    determinant = float(np.linalg.det(rotation))
+    if not math.isclose(determinant, 1.0, abs_tol=1e-5, rel_tol=0.0):
+        raise ValueError("ARKit camera_to_world rotation must be right-handed")
+    opencv_camera_to_world = camera_to_world @ ARKIT_TO_OPENCV_CAMERA
+    world_to_camera_rotation = opencv_camera_to_world[:3, :3].T
+    left, _, right = np.linalg.svd(world_to_camera_rotation)
+    world_to_camera_rotation = left @ right
+    if np.linalg.det(world_to_camera_rotation) < 0:
+        left[:, -1] *= -1
+        world_to_camera_rotation = left @ right
+    translation = -world_to_camera_rotation @ camera_to_world[:3, 3]
+    quaternion = rotation_matrix_to_quaternion_wxyz(world_to_camera_rotation)
+    return quaternion, translation
 
 
 def intrinsics_for_image(intrinsics: dict[str, float], image_path: Path) -> dict[str, float]:
@@ -77,9 +124,8 @@ def export_colmap_text(capture_dir: Path, out_dir: Path, copy_images: bool = Tru
         if copy_images:
             shutil.copy2(src, image_dir / name)
         c2w = np.asarray(frame.transform_matrix, dtype=float)
-        w2c = np.linalg.inv(c2w)
-        qw, qx, qy, qz = rotation_matrix_to_quaternion_wxyz(w2c[:3, :3])
-        tx, ty, tz = w2c[:3, 3]
+        (qw, qx, qy, qz), translation = arkit_camera_to_colmap_pose(c2w)
+        tx, ty, tz = translation
         image_lines.append(f"{frame.index} {qw:.12g} {qx:.12g} {qy:.12g} {qz:.12g} {tx:.12g} {ty:.12g} {tz:.12g} {camera_id} {name}")
         image_lines.append("")
         image_count += 1
@@ -88,6 +134,9 @@ def export_colmap_text(capture_dir: Path, out_dir: Path, copy_images: bool = Tru
     (sparse_dir / "cameras.txt").write_text("\n".join(camera_lines) + "\n", encoding="utf-8")
     (sparse_dir / "images.txt").write_text("\n".join(image_lines) + "\n", encoding="utf-8")
     (sparse_dir / "points3D.txt").write_text("# Empty seed cloud. Run COLMAP mapper/point_triangulator to add observations.\n", encoding="utf-8")
+    cameras_path = sparse_dir / "cameras.txt"
+    images_path = sparse_dir / "images.txt"
+    points_path = sparse_dir / "points3D.txt"
     summary = {
         "schema": "capture_splat.colmap_export_summary.v0.1",
         "capture_dir": str(capture_dir),
@@ -97,6 +146,17 @@ def export_colmap_text(capture_dir: Path, out_dir: Path, copy_images: bool = Tru
         "sparse_dir": str(sparse_dir),
         "copied_images": copy_images,
         "frame_selection": selection,
+        "coordinate_contract": {
+            "source": "arkit_camera_to_world_x_right_y_up_z_back",
+            "target": "colmap_world_to_camera_x_right_y_down_z_forward",
+            "camera_to_world_conversion": "opencv_c2w = arkit_c2w @ diag(1,-1,-1,1)",
+        },
+        "inputs": {"capture_manifest": _file_evidence(capture_dir / "capture.json")},
+        "outputs": {
+            "cameras": _file_evidence(cameras_path),
+            "images": _file_evidence(images_path),
+            "points3D": _file_evidence(points_path),
+        },
     }
     write_json_strict(out_dir / "capture_splat_colmap_summary.json", summary)
     return summary

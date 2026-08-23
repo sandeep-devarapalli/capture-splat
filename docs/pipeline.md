@@ -231,6 +231,9 @@ generic image folders use the single-camera fallback and report it. Imported
 OPENCV distortion values are passed through explicitly rather than replaced by
 zeros. `--view-graph-calibration auto` skips calibration for complete prepared
 ARKit priors and otherwise modifies a copied database before global mapping.
+`colmap-export` converts ARKit/OpenGL camera axes to COLMAP/OpenCV exactly once
+with `opencv_c2w = arkit_c2w @ diag(1,-1,-1,1)` and checksum-binds the source
+manifest plus emitted sparse text model in its summary.
 
 Canonical feature/training masks are white where pixels are valid. Room masks
 are full-frame minus available people/dynamic evidence. Desk/object masks
