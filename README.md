@@ -514,10 +514,22 @@ Record the current absence of open-portal evidence without changing the
 handoff:
 
 ```bash
+capture-splat derive-portal-route-evidence \
+  --prepared-capture runs/room_01/prepare/frames/capture.json \
+  --out runs/room_01/portal_route_derivation
+
 capture-splat validate-portal-route-evidence \
   --handoff runs/room_01/world_studio_package \
   --out runs/room_01/portal_route_receipt
 ```
+
+The derivation command measures RoomPlan-proposal crossings against the full
+trajectory and retained prepared/source RGB-D bindings. Optional
+`--sfm-package /path/to/reconstruction` requires `images/` plus
+`sparse/0/images.txt` and adds exact, case-sensitive registered-image membership
+only after size and SHA-256 parity with the prepared RGB bytes. The report
+remains held, never synthesizes missing sensor or route evidence, and never
+becomes the strict producer package described below.
 
 After a separate open-door capture supplies the strict evidence package, add
 `--evidence /path/to/portal_route_evidence.json`. The validator binds the exact
