@@ -25,6 +25,12 @@ from capture_splat.rgbd_seed import build_rgbd_metric_seed, read_colmap_camera_c
 from tests.test_rgbd_seed import _source_positions, _write_capture
 
 
+NORMALIZER_POSIX_ONLY = pytest.mark.skipif(
+    not getattr(os, "O_NOFOLLOW", 0),
+    reason="the descriptor-pinned normalizer requires POSIX O_NOFOLLOW",
+)
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -141,6 +147,7 @@ def test_binary_model_materialization_has_exact_text_parity(tmp_path: Path) -> N
     assert struct.pack("<d", converted.points3D[7].xyz[0]) == struct.pack("<d", -0.0)
 
 
+@NORMALIZER_POSIX_ONLY
 def test_normalize_colmap_image_ids_rewrites_every_track_and_preserves_model(
     tmp_path: Path,
 ) -> None:
@@ -203,6 +210,7 @@ def test_normalize_colmap_image_ids_rewrites_every_track_and_preserves_model(
     }
 
 
+@NORMALIZER_POSIX_ONLY
 def test_normalize_colmap_image_ids_is_deterministic_and_requires_fresh_output(
     tmp_path: Path,
 ) -> None:
@@ -226,6 +234,7 @@ def test_normalize_colmap_image_ids_is_deterministic_and_requires_fresh_output(
         normalize_colmap_image_ids(sparse, sparse / "derived")
 
 
+@NORMALIZER_POSIX_ONLY
 def test_normalize_colmap_image_ids_rejects_binary_and_missing_output_parent(
     tmp_path: Path,
 ) -> None:
@@ -256,6 +265,7 @@ def test_normalize_colmap_image_ids_rejects_binary_and_missing_output_parent(
         ("MAX_COLMAP_TRACK_ELEMENTS", 1, "track element count exceeds"),
     ],
 )
+@NORMALIZER_POSIX_ONLY
 def test_normalize_colmap_image_ids_enforces_source_working_set_bounds(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -272,6 +282,7 @@ def test_normalize_colmap_image_ids_enforces_source_working_set_bounds(
     assert not (tmp_path / "normalized").exists()
 
 
+@NORMALIZER_POSIX_ONLY
 def test_normalize_colmap_image_ids_bounds_concurrent_source_append(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -302,6 +313,7 @@ def test_normalize_colmap_image_ids_bounds_concurrent_source_append(
     assert not (tmp_path / "normalized").exists()
 
 
+@NORMALIZER_POSIX_ONLY
 def test_normalize_colmap_image_ids_rejects_case_alias_inside_source(
     tmp_path: Path,
 ) -> None:
@@ -317,6 +329,7 @@ def test_normalize_colmap_image_ids_rejects_case_alias_inside_source(
 
 
 @pytest.mark.parametrize("component", ["Frames.txt", "RIGS.bin"])
+@NORMALIZER_POSIX_ONLY
 def test_normalize_colmap_image_ids_rejects_casefold_rig_components(
     tmp_path: Path, component: str,
 ) -> None:
@@ -329,6 +342,7 @@ def test_normalize_colmap_image_ids_rejects_casefold_rig_components(
     assert not (tmp_path / "normalized").exists()
 
 
+@NORMALIZER_POSIX_ONLY
 def test_normalize_colmap_image_ids_publication_race_preserves_winner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -351,6 +365,7 @@ def test_normalize_colmap_image_ids_publication_race_preserves_winner(
     assert not list(tmp_path.glob(".normalized.*.partial"))
 
 
+@NORMALIZER_POSIX_ONLY
 def test_normalize_colmap_image_ids_stage_swap_does_not_touch_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -380,6 +395,7 @@ def test_normalize_colmap_image_ids_stage_swap_does_not_touch_source(
     assert source_hashes == {path.name: _sha256(path) for path in source.iterdir()}
 
 
+@NORMALIZER_POSIX_ONLY
 def test_normalize_colmap_image_ids_parent_swap_cannot_publish_attacker(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -416,6 +432,7 @@ def test_normalize_colmap_image_ids_parent_swap_cannot_publish_attacker(
     ("tamper", "message"),
     [("camera", "file changed"), ("extra", "unexpected files")],
 )
+@NORMALIZER_POSIX_ONLY
 def test_normalize_colmap_image_ids_rejects_published_file_tampering(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -454,6 +471,7 @@ def test_normalize_colmap_image_ids_rejects_published_file_tampering(
     assert not (tmp_path / "normalized").exists()
 
 
+@NORMALIZER_POSIX_ONLY
 def test_normalize_colmap_image_ids_rejects_late_source_drift(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -476,6 +494,7 @@ def test_normalize_colmap_image_ids_rejects_late_source_drift(
     assert not list(tmp_path.glob(".normalized.*.partial"))
 
 
+@NORMALIZER_POSIX_ONLY
 def test_normalize_colmap_image_ids_rejects_source_aba_swap(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -515,6 +534,7 @@ def test_normalize_colmap_image_ids_rejects_source_aba_swap(
     assert not (tmp_path / "normalized").exists()
 
 
+@NORMALIZER_POSIX_ONLY
 def test_normalize_colmap_image_ids_rejects_invalid_tracks_without_output(
     tmp_path: Path,
 ) -> None:
@@ -531,6 +551,7 @@ def test_normalize_colmap_image_ids_rejects_invalid_tracks_without_output(
     assert not (tmp_path / "normalized").exists()
 
 
+@NORMALIZER_POSIX_ONLY
 def test_normalize_colmap_image_ids_cli_writes_strict_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
