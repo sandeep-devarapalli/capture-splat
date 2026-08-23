@@ -5,6 +5,34 @@ gate. It validates a future open-door Room-01 capture without modifying the
 capture, the v0.3 World Studio handoff, the unsimplified hybrid surface, or the
 held reduced collider.
 
+## Derive a capture diagnostic
+
+Use the prepared capture to measure whether its RoomPlan proposal, full video
+trajectory, and retained RGB-D frames could support a future evidence package:
+
+```bash
+capture-splat derive-portal-route-evidence \
+  --prepared-capture runs/room_01/prepare/frames/capture.json \
+  --out runs/room_01/portal_route_derivation
+```
+
+After SfM, add `--sfm-package /path/to/reconstruction`. The package must contain
+`images/` and `sparse/0/images.txt`. A registered name counts only when its
+canonical, case-sensitive path selects regular non-symlink bytes whose size and
+SHA-256 exactly match the prepared RGB. The report binds those matches with a
+deterministic aggregate parity digest. This is not a metric
+RoomPlan-to-COLMAP registration receipt.
+
+The command streams and hashes the complete `0..video_frame_count-1`
+trajectory, verifies prepared video and retained RGB-D
+pose/timestamp/intrinsics bindings plus prepared asset presence, and selects a
+portal only when exactly one RoomPlan proposal has a bounded, contiguous
+normal-tracking crossing inside its rectangle. It never fabricates RGB-D, free
+space, a threshold, a route, or a closed-state control. Its deterministic
+`capture_splat.portal_route_derivation.v0.1` report is diagnostic and always
+held with all authority false; it is not a
+`capture_splat.portal_route_evidence.v0.1` producer package.
+
 Running without `--evidence` is intentional. It writes
 `capture_splat_portal_route_validation_report.json` with every missing
 RoomPlan, portal, route, free-space, registered-RGB-D, and closed-control rail

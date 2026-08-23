@@ -26,6 +26,10 @@ training, QA, or World Studio handoffs.
   compatibility when extending v0.3.
 - Use strict JSON, relative paths, SHA-256 bindings, finite-number checks, and
   explicit coordinate frames and units.
+- Portal diagnostics must bind the declared complete contiguous trajectory,
+  accept only bounded normal-tracking crossing brackets, and count SfM image
+  membership only after canonical-path plus exact byte parity; write no output
+  inside either immutable input package.
 - Dataset evidence does not prove a trainer consumed it. A finite PLY, viewer
   load, import, or completed job does not prove visual quality, metric scale,
   collision safety, navigation readiness, or physics authority.

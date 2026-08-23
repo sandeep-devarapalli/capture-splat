@@ -22,6 +22,7 @@ from .colmap_support_repair import build_colmap_support_repair
 from .ingest import ingest_capture
 from .live_replay import DEFAULT_LIVE_RECEIVER, replay_live_session
 from .ply_stats import prune_ply_by_alpha, sanitize_ply_drop_non_finite
+from .portal_route_derivation import derive_portal_route_evidence
 from .portal_route_evidence import validate_portal_route_evidence
 from .prepare_capture import prepare_capture
 from .reconstruct import STAGES, reconstruct_capture
@@ -169,6 +170,15 @@ def main() -> None:
     p_reduce_collider.add_argument("--out", type=Path, required=True)
     p_reduce_collider.add_argument("--max-faces", type=int, default=60_000)
     p_reduce_collider.add_argument("--boundary-weight", type=float, default=100.0)
+    p_portal_derive = sub.add_parser(
+        "derive-portal-route-evidence",
+        help="Measure RoomPlan/trajectory/RGB-D portal support and emit a held diagnostic",
+    )
+    p_portal_derive.add_argument("--prepared-capture", type=Path, required=True)
+    p_portal_derive.add_argument("--sfm-package", type=Path)
+    p_portal_derive.add_argument("--portal-id")
+    p_portal_derive.add_argument("--through-band-meters", type=float, default=0.15)
+    p_portal_derive.add_argument("--out", type=Path, required=True)
     p_portal_route = sub.add_parser(
         "validate-portal-route-evidence",
         help="Validate checksum-bound open-portal evidence or emit an explicit held receipt",
@@ -602,6 +612,14 @@ def main() -> None:
             args.out,
             max_faces=args.max_faces,
             boundary_weight=args.boundary_weight,
+        )
+    elif args.command == "derive-portal-route-evidence":
+        payload = derive_portal_route_evidence(
+            args.prepared_capture,
+            args.out,
+            sfm_package=args.sfm_package,
+            portal_id=args.portal_id,
+            through_band_meters=args.through_band_meters,
         )
     elif args.command == "validate-portal-route-evidence":
         payload = validate_portal_route_evidence(
