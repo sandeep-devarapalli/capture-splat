@@ -5,12 +5,13 @@ import json
 import math
 import os
 import stat
+import unicodedata
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from .hybrid_surface import _false_authority
-from .json_utils import reject_constant, write_json_strict
-from .training_supervision import confined_capture_path
+from .json_utils import ensure_finite, reject_constant
 
 REPORT_SCHEMA = "capture_splat.portal_route_derivation.v0.1"
 REPORT_NAME = "capture_splat_portal_route_derivation_report.json"
@@ -20,12 +21,680 @@ _REGIONS = ("side_a", "through_opening", "side_b")
 _MAX_PORTALS = 256
 _MAX_TRAJECTORY_SAMPLES = 1_000_000
 _MAX_DISTANCE_EVALUATIONS = 2_000_000
-_MAX_REPORTED_CROSSINGS = 10_000
+_MAX_PREPARED_FRAMES = 100_000
+_MAX_CAPTURE_JSON_BYTES = 64 * 1024 * 1024
+_MAX_AUXILIARY_JSON_BYTES = 16 * 1024 * 1024
+_MAX_TRAJECTORY_BYTES = 512 * 1024 * 1024
+_MAX_TRAJECTORY_LINE_BYTES = 1024 * 1024
+_MAX_COLMAP_IMAGES_BYTES = 64 * 1024 * 1024
+_MAX_COLMAP_IMAGE_RECORDS = 1_000_000
+_MAX_DIRECTORY_ENTRIES = 200_000
+_MAX_DIRECTORY_NAME_BYTES = 64 * 1024 * 1024
+_MAX_OPEN_DIRECTORIES_PER_ROOT = 128
+_MAX_DIRECTORY_SCANS_PER_ROOT = 512
+_MAX_SCANNED_DIRECTORY_ENTRIES_PER_ROOT = 1_000_000
+_MAX_SCANNED_DIRECTORY_NAME_BYTES_PER_ROOT = 256 * 1024 * 1024
+_MAX_PATH_COMPONENTS = 128
+_MAX_PARITY_IMAGE_BYTES = 64 * 1024 * 1024
+_MAX_PARITY_COMBINED_BYTES = 16 * 1024 * 1024 * 1024
+_MAX_RETAINED_CROSSING_EVENTS = 256
+_MAX_REPORT_BYTES = 16 * 1024 * 1024
 _MATRIX_TOLERANCE = 1e-4
+_COLMAP_QUATERNION_TOLERANCE = 1e-3
 _MAX_CROSSING_DELTA_SECONDS = 0.5
 _MAX_CROSSING_DISTANCE_METERS = 0.5
 _MAX_CROSSING_SPEED_METERS_PER_SECOND = 3.0
 _READ_CHUNK_BYTES = 1024 * 1024
+_OPEN_DIR_FD_SUPPORTED = os.open in os.supports_dir_fd
+_STAT_DIR_FD_SUPPORTED = os.stat in os.supports_dir_fd
+_SCANDIR_FD_SUPPORTED = os.scandir in os.supports_fd
+
+
+def _portable_key(value: str) -> str:
+    return unicodedata.normalize("NFC", value.casefold())
+
+
+def _inode(metadata: os.stat_result) -> tuple[int, int]:
+    return metadata.st_dev, metadata.st_ino
+
+
+def _identity(metadata: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _directory_path_identity(metadata: os.stat_result) -> tuple[int, int, int]:
+    return metadata.st_dev, metadata.st_ino, metadata.st_mode
+
+
+def _directory_flags() -> int:
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    directory = getattr(os, "O_DIRECTORY", 0)
+    if not nofollow or not directory or not _OPEN_DIR_FD_SUPPORTED or not _STAT_DIR_FD_SUPPORTED:
+        raise RuntimeError("portal derivation requires descriptor-relative O_NOFOLLOW support")
+    return os.O_RDONLY | nofollow | directory | getattr(os, "O_CLOEXEC", 0)
+
+
+def _file_flags(*, write: bool = False, read_write: bool = False) -> int:
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not nofollow:
+        raise RuntimeError("portal derivation requires O_NOFOLLOW support")
+    if write and read_write:
+        raise ValueError("file flags cannot request both write-only and read-write access")
+    access = os.O_RDWR if read_write else (os.O_WRONLY if write else os.O_RDONLY)
+    flags = access | nofollow | getattr(os, "O_CLOEXEC", 0)
+    return flags | getattr(os, "O_BINARY", 0)
+
+
+def _directory_names(
+    descriptor: int,
+    label: str,
+    *,
+    scan_budget: _DirectoryScanBudget | None = None,
+) -> list[str]:
+    if not _SCANDIR_FD_SUPPORTED:
+        raise RuntimeError(
+            "portal derivation requires descriptor-relative directory scanning support"
+        )
+    if scan_budget is not None:
+        if scan_budget.scans + 1 > _MAX_DIRECTORY_SCANS_PER_ROOT:
+            raise ValueError(f"{label} exceeds the aggregate directory scan limit")
+        scan_budget.scans += 1
+    names: list[str] = []
+    name_bytes = 0
+    try:
+        with os.scandir(descriptor) as entries:
+            for entry in entries:
+                name = entry.name
+                if not isinstance(name, str):
+                    raise ValueError(f"{label} directory names are invalid")
+                try:
+                    encoded_bytes = len(name.encode("utf-8"))
+                except UnicodeEncodeError as error:
+                    raise ValueError(
+                        f"{label} directory name is not strict UTF-8"
+                    ) from error
+                if (
+                    len(names) >= _MAX_DIRECTORY_ENTRIES
+                    or name_bytes + encoded_bytes > _MAX_DIRECTORY_NAME_BYTES
+                ):
+                    raise ValueError(
+                        f"{label} directory exceeds the bounded enumeration limit"
+                    )
+                if scan_budget is not None:
+                    if (
+                        scan_budget.entries + 1
+                        > _MAX_SCANNED_DIRECTORY_ENTRIES_PER_ROOT
+                    ):
+                        raise ValueError(
+                            f"{label} exceeds the aggregate directory entry limit"
+                        )
+                    if (
+                        scan_budget.name_bytes + encoded_bytes
+                        > _MAX_SCANNED_DIRECTORY_NAME_BYTES_PER_ROOT
+                    ):
+                        raise ValueError(
+                            f"{label} exceeds the aggregate directory name byte limit"
+                        )
+                    scan_budget.entries += 1
+                    scan_budget.name_bytes += encoded_bytes
+                names.append(name)
+                name_bytes += encoded_bytes
+    except OSError as error:
+        raise ValueError(f"{label} directory cannot be enumerated safely") from error
+    return names
+
+
+@dataclass
+class _DirectoryScanBudget:
+    scans: int = 0
+    entries: int = 0
+    name_bytes: int = 0
+
+    def names(self, descriptor: int, label: str) -> list[str]:
+        return _directory_names(descriptor, label, scan_budget=self)
+
+
+def _name_index(names: list[str]) -> dict[str, tuple[str, ...]]:
+    grouped: dict[str, list[str]] = {}
+    for name in names:
+        grouped.setdefault(_portable_key(name), []).append(name)
+    return {key: tuple(values) for key, values in grouped.items()}
+
+
+def _require_exact_name(
+    names: dict[str, tuple[str, ...]], name: str, label: str
+) -> None:
+    aliases = names.get(_portable_key(name), ())
+    if name not in aliases:
+        if aliases:
+            raise ValueError(f"{label} physical path component casing does not match: {name}")
+        raise FileNotFoundError(f"{label} is missing: {name}")
+    if len(aliases) != 1:
+        raise ValueError(f"{label} has a casefold path alias: {name}")
+
+
+def _require_exact_component(
+    descriptor: int,
+    name: str,
+    label: str,
+    *,
+    scan_budget: _DirectoryScanBudget | None = None,
+) -> None:
+    names = (
+        scan_budget.names(descriptor, label)
+        if scan_budget is not None
+        else _directory_names(descriptor, label)
+    )
+    _require_exact_name(_name_index(names), name, label)
+
+
+def _absolute_parts(path: Path) -> tuple[Path, tuple[str, ...]]:
+    absolute = Path(os.path.abspath(os.fspath(path)))
+    if not absolute.is_absolute():
+        raise ValueError("portal derivation paths must resolve to absolute paths")
+    parts = tuple(part for part in absolute.parts if part != absolute.anchor)
+    if len(parts) > _MAX_PATH_COMPONENTS:
+        raise ValueError("portal derivation path exceeds the component limit")
+    return absolute, parts
+
+
+def _open_absolute_directory(path: Path, label: str) -> tuple[int, Path, tuple[str, ...]]:
+    absolute, parts = _absolute_parts(path)
+    descriptor = os.open(absolute.anchor, _directory_flags())
+    scan_budget = _DirectoryScanBudget()
+    try:
+        for index, name in enumerate(parts):
+            component_label = f"{label} component {'/'.join(parts[: index + 1])}"
+            _require_exact_component(
+                descriptor,
+                name,
+                component_label,
+                scan_budget=scan_budget,
+            )
+            before = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
+                raise ValueError(f"{component_label} must be a regular non-symlink directory")
+            child = os.open(name, _directory_flags(), dir_fd=descriptor)
+            opened = os.fstat(child)
+            after = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            if (
+                _directory_path_identity(before) != _directory_path_identity(opened)
+                or _directory_path_identity(opened) != _directory_path_identity(after)
+            ):
+                os.close(child)
+                raise ValueError(f"{component_label} changed while it was opened")
+            os.close(descriptor)
+            descriptor = child
+        return descriptor, absolute, parts
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+@dataclass(frozen=True)
+class _FilePin:
+    relative: str
+    parent_parts: tuple[str, ...]
+    name: str
+    identity: tuple[int, int, int, int, int, int]
+
+
+class _ConfinedRoot:
+    def __init__(self, path: Path, label: str) -> None:
+        descriptor, absolute, components = _open_absolute_directory(path, label)
+        self.path = absolute
+        self.components = components
+        self.label = label
+        self._directories: dict[tuple[str, ...], tuple[int, tuple[int, int]]] = {
+            (): (descriptor, _inode(os.fstat(descriptor)))
+        }
+        self._directory_inodes: dict[tuple[int, int], tuple[str, ...]] = {
+            _inode(os.fstat(descriptor)): ()
+        }
+        self._files: dict[str, _FilePin] = {}
+        self._file_inodes: dict[tuple[int, int], str] = {}
+        self._portable_paths: dict[str, str] = {}
+        self._directory_name_snapshots: dict[
+            tuple[str, ...], dict[str, tuple[str, ...]]
+        ] = {}
+        self._scan_budget = _DirectoryScanBudget()
+
+    def close(self) -> None:
+        for descriptor, _ in sorted(
+            self._directories.values(), key=lambda item: item[0], reverse=True
+        ):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        self._directories.clear()
+
+    def __enter__(self) -> _ConfinedRoot:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    def _directory(self, parts: tuple[str, ...], label: str) -> int:
+        if len(parts) > _MAX_PATH_COMPONENTS:
+            raise ValueError(f"{label} exceeds the path component limit")
+        existing = self._directories.get(parts)
+        if existing is not None:
+            return existing[0]
+        parent_parts = parts[:-1]
+        parent = self._directory(parent_parts, label)
+        if len(self._directories) >= _MAX_OPEN_DIRECTORIES_PER_ROOT:
+            raise ValueError(f"{label} exceeds the open directory limit")
+        name = parts[-1]
+        self._require_cached_name(parent_parts, name, label)
+        before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
+            raise ValueError(f"{label} parent component must be a regular non-symlink directory")
+        descriptor = os.open(name, _directory_flags(), dir_fd=parent)
+        try:
+            opened = os.fstat(descriptor)
+            after = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if (
+                _directory_path_identity(before) != _directory_path_identity(opened)
+                or _directory_path_identity(opened) != _directory_path_identity(after)
+            ):
+                raise ValueError(f"{label} parent component changed while it was opened")
+            inode = _inode(opened)
+            alias = self._directory_inodes.get(inode)
+            if alias is not None and alias != parts:
+                raise ValueError(f"{label} parent component is an inode alias")
+        except Exception:
+            os.close(descriptor)
+            raise
+        self._directories[parts] = (descriptor, inode)
+        self._directory_inodes[inode] = parts
+        return descriptor
+
+    def _require_cached_name(
+        self, parent_parts: tuple[str, ...], name: str, label: str
+    ) -> None:
+        names = self._directory_name_snapshots.get(parent_parts)
+        if names is None:
+            names = _name_index(
+                self._scan_budget.names(self._directories[parent_parts][0], label)
+            )
+            self._directory_name_snapshots[parent_parts] = names
+        _require_exact_name(names, name, label)
+
+    def _open_file(self, relative: Any, label: str, maximum_bytes: int) -> tuple[int, _FilePin]:
+        canonical = _canonical_relative_path(relative, label)
+        portable = _portable_key(canonical)
+        alias = self._portable_paths.get(portable)
+        if alias is not None and alias != canonical:
+            raise ValueError(f"{label} has a casefold path alias")
+        parts = PurePosixPath(canonical).parts
+        parent_parts = tuple(parts[:-1])
+        name = parts[-1]
+        parent = self._directory(parent_parts, label)
+        self._require_cached_name(parent_parts, name, label)
+        before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if (
+            stat.S_ISLNK(before.st_mode)
+            or not stat.S_ISREG(before.st_mode)
+            or before.st_size > maximum_bytes
+        ):
+            raise ValueError(f"{label} must be a bounded regular non-symlink file")
+        descriptor = os.open(name, _file_flags(), dir_fd=parent)
+        try:
+            opened = os.fstat(descriptor)
+            after = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if _identity(before) != _identity(opened) or _identity(opened) != _identity(after):
+                raise ValueError(f"{label} changed while it was opened")
+            inode = _inode(opened)
+            inode_alias = self._file_inodes.get(inode)
+            if inode_alias is not None and inode_alias != canonical:
+                raise ValueError(f"{label} is an inode alias of {inode_alias}")
+            pin = _FilePin(canonical, parent_parts, name, _identity(opened))
+            previous = self._files.get(canonical)
+            if previous is not None and previous.identity != pin.identity:
+                raise ValueError(f"{label} changed between bounded reads")
+            self._portable_paths[portable] = canonical
+            self._file_inodes[inode] = canonical
+            self._files[canonical] = pin
+            return descriptor, pin
+        except Exception:
+            os.close(descriptor)
+            raise
+
+    def _validate_file(self, pin: _FilePin) -> None:
+        parent = self._directory(pin.parent_parts, pin.relative)
+        current = os.stat(pin.name, dir_fd=parent, follow_symlinks=False)
+        if stat.S_ISLNK(current.st_mode) or not stat.S_ISREG(current.st_mode) or _identity(current) != pin.identity:
+            raise ValueError(f"{pin.relative} changed while it was read or consumed")
+
+    def snapshot(
+        self,
+        relative: Any,
+        label: str,
+        *,
+        maximum_bytes: int,
+        collect: bool,
+        reference_path: str | None = None,
+    ) -> tuple[bytes | None, dict[str, Any]]:
+        descriptor, pin = self._open_file(relative, label, maximum_bytes)
+        digest = hashlib.sha256()
+        chunks: list[bytes] | None = [] if collect else None
+        bytes_read = 0
+        try:
+            while chunk := os.read(descriptor, _READ_CHUNK_BYTES):
+                bytes_read += len(chunk)
+                if bytes_read > maximum_bytes:
+                    raise ValueError(f"{label} exceeds the bounded byte limit")
+                digest.update(chunk)
+                if chunks is not None:
+                    chunks.append(chunk)
+            if _identity(os.fstat(descriptor)) != pin.identity or bytes_read != pin.identity[3]:
+                raise ValueError(f"{label} changed while it was read")
+        finally:
+            os.close(descriptor)
+        self._validate_file(pin)
+        return (b"".join(chunks) if chunks is not None else None), {
+            "path": reference_path if reference_path is not None else pin.relative,
+            "size_bytes": bytes_read,
+            "checksum": f"sha256:{digest.hexdigest()}",
+        }
+
+    def file_size(
+        self, relative: Any, label: str, *, maximum_bytes: int
+    ) -> tuple[str, int]:
+        descriptor, pin = self._open_file(relative, label, maximum_bytes)
+        try:
+            if _identity(os.fstat(descriptor)) != pin.identity:
+                raise ValueError(f"{label} changed while it was checked")
+        finally:
+            os.close(descriptor)
+        self._validate_file(pin)
+        return pin.relative, pin.identity[3]
+
+    def check_file(
+        self, relative: Any, label: str, *, maximum_bytes: int = 1 << 63
+    ) -> str:
+        canonical, _ = self.file_size(
+            relative, label, maximum_bytes=maximum_bytes
+        )
+        return canonical
+
+    def json(
+        self, relative: Any, label: str, *, maximum_bytes: int
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        raw, reference = self.snapshot(
+            relative, label, maximum_bytes=maximum_bytes, collect=True
+        )
+        assert raw is not None
+        try:
+            value = json.loads(raw.decode("utf-8"), parse_constant=reject_constant)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError(f"{label} is not strict UTF-8 JSON") from error
+        return _object(value, label), reference
+
+    def validate(self) -> None:
+        reopened, _, _ = _open_absolute_directory(self.path, self.label)
+        try:
+            if _inode(os.fstat(reopened)) != self._directories[()][1]:
+                raise ValueError(f"{self.label} path changed during portal derivation")
+        finally:
+            os.close(reopened)
+        current_names: dict[tuple[str, ...], dict[str, tuple[str, ...]]] = {}
+        for parts, (descriptor, inode) in sorted(self._directories.items(), key=lambda item: len(item[0])):
+            if _inode(os.fstat(descriptor)) != inode:
+                raise ValueError(f"{self.label} directory descriptor changed")
+            if parts:
+                parent = self._directories[parts[:-1]][0]
+                names = current_names.get(parts[:-1])
+                if names is None:
+                    names = _name_index(self._scan_budget.names(parent, self.label))
+                    current_names[parts[:-1]] = names
+                _require_exact_name(names, parts[-1], self.label)
+                current = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+                if stat.S_ISLNK(current.st_mode) or not stat.S_ISDIR(current.st_mode) or _inode(current) != inode:
+                    raise ValueError(f"{self.label} directory path changed")
+        for pin in self._files.values():
+            names = current_names.get(pin.parent_parts)
+            if names is None:
+                names = _name_index(
+                    self._scan_budget.names(
+                        self._directories[pin.parent_parts][0], pin.relative
+                    )
+                )
+                current_names[pin.parent_parts] = names
+            _require_exact_name(names, pin.name, pin.relative)
+            self._validate_file(pin)
+
+
+def _root_validation_states(
+    roots: tuple[_ConfinedRoot, ...],
+) -> tuple[tuple[tuple[str, str, str], ...], Exception | None]:
+    states: list[tuple[str, str, str]] = []
+    first_error: Exception | None = None
+    for root in roots:
+        try:
+            root.validate()
+        except Exception as error:
+            states.append(("invalid", type(error).__name__, str(error)))
+            first_error = first_error or error
+        else:
+            states.append(("valid", "", ""))
+    return tuple(states), first_error
+
+
+class _PinnedOutput:
+    def __init__(self, out_dir: Path, immutable_roots: list[_ConfinedRoot]) -> None:
+        absolute, components = _absolute_parts(out_dir)
+        parent_descriptor, parent_path, _ = _open_absolute_directory(
+            absolute.parent, "portal derivation output parent"
+        )
+        self.path = absolute
+        self._parent = parent_descriptor
+        self._parent_path = parent_path
+        self._parent_inode = _inode(os.fstat(parent_descriptor))
+        self._name = absolute.name
+        self._created_directory = False
+        self._closed = False
+        self._written = False
+        self._directory = -1
+        self._report = -1
+        self._immutable_roots = tuple(immutable_roots)
+        self._expected_root_states: tuple[tuple[str, str, str], ...] | None = None
+        self._scan_budget = _DirectoryScanBudget()
+        try:
+            for root in immutable_roots:
+                if (
+                    components[: len(root.components)] == root.components
+                    or tuple(map(_portable_key, components[: len(root.components)]))
+                    == tuple(map(_portable_key, root.components))
+                ):
+                    raise ValueError(f"portal derivation output must be outside the immutable {root.label}")
+            names = self._scan_budget.names(
+                parent_descriptor, "portal derivation output parent"
+            )
+            aliases = [name for name in names if _portable_key(name) == _portable_key(self._name)]
+            if aliases and aliases != [self._name]:
+                raise ValueError("portal derivation output has a casefold path alias")
+            if not aliases:
+                os.mkdir(self._name, mode=0o700, dir_fd=parent_descriptor)
+                self._created_directory = True
+            before = os.stat(self._name, dir_fd=parent_descriptor, follow_symlinks=False)
+            if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
+                raise ValueError("portal derivation output must be a regular non-symlink directory")
+            self._directory = os.open(self._name, _directory_flags(), dir_fd=parent_descriptor)
+            opened = os.fstat(self._directory)
+            after = os.stat(self._name, dir_fd=parent_descriptor, follow_symlinks=False)
+            if _identity(before) != _identity(opened) or _identity(opened) != _identity(after):
+                raise ValueError("portal derivation output changed while it was opened")
+            self._directory_inode = _inode(opened)
+            if any(self._directory_inode == root._directories[()][1] for root in immutable_roots):
+                raise ValueError("portal derivation output is an inode alias of an immutable input")
+            if self._scan_budget.names(self._directory, "portal derivation output"):
+                raise FileExistsError(f"portal derivation output is not empty: {absolute}")
+            flags = _file_flags(read_write=True) | os.O_CREAT | os.O_EXCL
+            self._report = os.open(REPORT_NAME, flags, 0o600, dir_fd=self._directory)
+            report_stat = os.fstat(self._report)
+            if not stat.S_ISREG(report_stat.st_mode):
+                raise ValueError("portal derivation report reservation is not a regular file")
+            self._report_inode = _inode(report_stat)
+            self._report_identity = _identity(report_stat)
+            self._directory_identity = _identity(os.fstat(self._directory))
+            self.validate()
+        except Exception:
+            self.cleanup()
+            self.close()
+            raise
+
+    def validate(self) -> None:
+        reopened, _, _ = _open_absolute_directory(
+            self._parent_path, "portal derivation output parent"
+        )
+        try:
+            if _inode(os.fstat(reopened)) != self._parent_inode:
+                raise ValueError("portal derivation output parent path changed during analysis")
+        finally:
+            os.close(reopened)
+        _require_exact_component(
+            self._parent,
+            self._name,
+            "portal derivation output",
+            scan_budget=self._scan_budget,
+        )
+        directory_stat = os.stat(self._name, dir_fd=self._parent, follow_symlinks=False)
+        if (
+            stat.S_ISLNK(directory_stat.st_mode)
+            or not stat.S_ISDIR(directory_stat.st_mode)
+            or _inode(directory_stat) != self._directory_inode
+        ):
+            raise ValueError("portal derivation output path changed during analysis")
+        _require_exact_component(
+            self._directory,
+            REPORT_NAME,
+            "portal derivation report",
+            scan_budget=self._scan_budget,
+        )
+        report_stat = os.stat(REPORT_NAME, dir_fd=self._directory, follow_symlinks=False)
+        if (
+            stat.S_ISLNK(report_stat.st_mode)
+            or not stat.S_ISREG(report_stat.st_mode)
+            or _identity(report_stat) != self._report_identity
+        ):
+            raise ValueError("portal derivation report path changed during analysis")
+        if _identity(directory_stat) != self._directory_identity:
+            raise ValueError("portal derivation output contents changed during analysis")
+        if _inode(os.fstat(self._parent)) != self._parent_inode or _inode(os.fstat(self._directory)) != self._directory_inode:
+            raise ValueError("portal derivation output descriptor identity changed")
+
+    def bind_root_validation_states(
+        self, states: tuple[tuple[str, str, str], ...]
+    ) -> None:
+        if self._expected_root_states is not None:
+            raise RuntimeError("portal derivation root validation states are already bound")
+        self._expected_root_states = states
+
+    def validate_context(self) -> None:
+        if self._expected_root_states is None:
+            raise RuntimeError("portal derivation root validation states are not bound")
+        states, _ = _root_validation_states(self._immutable_roots)
+        if states != self._expected_root_states:
+            raise ValueError(
+                "immutable input validation state changed during report publication"
+            )
+        self.validate()
+
+    def _verify_report_bytes(self, encoded: bytes) -> tuple[int, int, int, int, int, int]:
+        before = _identity(os.fstat(self._report))
+        os.lseek(self._report, 0, os.SEEK_SET)
+        digest = hashlib.sha256()
+        offset = 0
+        while chunk := os.read(self._report, _READ_CHUNK_BYTES):
+            if offset + len(chunk) > len(encoded) or chunk != encoded[offset : offset + len(chunk)]:
+                raise ValueError("portal derivation report read-back bytes do not match")
+            digest.update(chunk)
+            offset += len(chunk)
+        after = _identity(os.fstat(self._report))
+        if before != after:
+            raise ValueError("portal derivation report changed during read-back")
+        if offset != len(encoded) or digest.digest() != hashlib.sha256(encoded).digest():
+            raise ValueError("portal derivation report read-back digest does not match")
+        return after
+
+    def write(self, payload: dict[str, Any]) -> None:
+        if self._written:
+            raise RuntimeError("portal derivation report can be written only once")
+        ensure_finite(payload)
+        encoded = (json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n").encode("utf-8")
+        if len(encoded) > _MAX_REPORT_BYTES:
+            raise ValueError("portal derivation report exceeds the bounded byte limit")
+        json.loads(encoded.decode("utf-8"), parse_constant=reject_constant)
+        self.validate()
+        offset = 0
+        while offset < len(encoded):
+            written = os.write(self._report, encoded[offset:])
+            if written <= 0:
+                raise OSError("portal derivation report write made no progress")
+            offset += written
+        os.fsync(self._report)
+        if os.fstat(self._report).st_size != len(encoded):
+            raise ValueError("portal derivation report write was incomplete")
+        self._report_identity = self._verify_report_bytes(encoded)
+        os.fsync(self._directory)
+        self.validate()
+        self._written = True
+
+    def cleanup(self) -> None:
+        if self._directory >= 0 and self._report >= 0:
+            try:
+                current = os.stat(REPORT_NAME, dir_fd=self._directory, follow_symlinks=False)
+                if _inode(current) == getattr(self, "_report_inode", None):
+                    os.unlink(REPORT_NAME, dir_fd=self._directory)
+            except (FileNotFoundError, OSError):
+                pass
+        if self._created_directory and self._parent >= 0:
+            try:
+                current = os.stat(self._name, dir_fd=self._parent, follow_symlinks=False)
+                if _inode(current) == getattr(self, "_directory_inode", None):
+                    os.rmdir(self._name, dir_fd=self._parent)
+            except (FileNotFoundError, OSError):
+                pass
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        for descriptor in (self._report, self._directory, self._parent):
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+        self._closed = True
+
+    def __enter__(self) -> _PinnedOutput:
+        return self
+
+    def __exit__(self, exception_type: object, *_: object) -> None:
+        try:
+            if self._written:
+                try:
+                    self.validate_context()
+                except Exception:
+                    self.cleanup()
+                    if exception_type is None:
+                        raise
+            elif exception_type is not None:
+                self.cleanup()
+            else:
+                self.cleanup()
+                raise RuntimeError("portal derivation exited without publishing a report")
+        finally:
+            self.close()
 
 
 def _object(value: Any, label: str) -> dict[str, Any]:
@@ -83,108 +752,25 @@ def _center(matrix: list[list[float]]) -> list[float]:
     return [matrix[index][3] for index in range(3)]
 
 
-def _regular_file(path: Path, label: str) -> Path:
-    absolute = path.absolute()
-    try:
-        metadata = absolute.lstat()
-    except FileNotFoundError as error:
-        raise FileNotFoundError(f"{label} is missing") from error
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
-        raise ValueError(f"{label} must be a regular non-symlink file")
-    return absolute.resolve()
-
-
-def _regular_directory(path: Path, label: str) -> Path:
-    absolute = path.absolute()
-    try:
-        metadata = absolute.lstat()
-    except FileNotFoundError as error:
-        raise FileNotFoundError(f"{label} is missing") from error
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
-        raise ValueError(f"{label} must be a regular non-symlink directory")
-    return absolute.resolve()
-
-
-def _identity(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (
-        metadata.st_dev,
-        metadata.st_ino,
-        metadata.st_size,
-        metadata.st_mtime_ns,
-        metadata.st_ctime_ns,
-    )
-
-
 def _snapshot(
-    path: Path, label: str, relative: str, *, collect: bool
+    path: Path,
+    label: str,
+    relative: str,
+    *,
+    collect: bool,
+    maximum_bytes: int = _MAX_CAPTURE_JSON_BYTES,
 ) -> tuple[bytes | None, dict[str, Any]]:
-    path = _regular_file(path, label)
-    before_path = path.lstat()
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags)
-    digest = hashlib.sha256()
-    chunks: list[bytes] | None = [] if collect else None
-    bytes_read = 0
-    try:
-        before_open = os.fstat(descriptor)
-        if not stat.S_ISREG(before_open.st_mode):
-            raise ValueError(f"{label} must be a regular non-symlink file")
-        while chunk := os.read(descriptor, _READ_CHUNK_BYTES):
-            digest.update(chunk)
-            bytes_read += len(chunk)
-            if chunks is not None:
-                chunks.append(chunk)
-        after_open = os.fstat(descriptor)
-    finally:
-        os.close(descriptor)
-    after_path = path.lstat()
-    if (
-        _identity(before_path) != _identity(before_open)
-        or _identity(before_open) != _identity(after_open)
-        or _identity(after_open) != _identity(after_path)
-        or bytes_read != before_open.st_size
-    ):
-        raise ValueError(f"{label} changed while it was read")
-    return (b"".join(chunks) if chunks is not None else None), {
-        "path": relative,
-        "size_bytes": bytes_read,
-        "checksum": f"sha256:{digest.hexdigest()}",
-    }
-
-
-def _json_snapshot(path: Path, label: str, relative: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    raw, reference = _snapshot(path, label, relative, collect=True)
-    assert raw is not None
-    try:
-        value = json.loads(raw.decode("utf-8"), parse_constant=reject_constant)
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError(f"{label} is not strict UTF-8 JSON") from error
-    return _object(value, label), reference
-
-
-def _asset(root: Path, relative: Any, label: str) -> tuple[Path, dict[str, Any]]:
-    if not isinstance(relative, str) or not relative:
-        raise ValueError(f"{label} must be a non-empty relative path")
-    path = confined_capture_path(root, relative)
-    path = _regular_file(path, label)
-    _, reference = _snapshot(path, label, relative, collect=False)
-    return path, reference
-
-
-def _json_asset(
-    root: Path, relative: Any, label: str
-) -> tuple[Path, dict[str, Any], dict[str, Any]]:
-    if not isinstance(relative, str) or not relative:
-        raise ValueError(f"{label} must be a non-empty relative path")
-    path = _regular_file(confined_capture_path(root, relative), label)
-    value, reference = _json_snapshot(path, label, relative)
-    return path, value, reference
-
-
-def _existing_asset(root: Path, relative: Any, label: str) -> Path:
-    if not isinstance(relative, str) or not relative:
-        raise ValueError(f"{label} must be a non-empty relative path")
-    return _regular_file(confined_capture_path(root, relative), label)
+    absolute, _ = _absolute_parts(path)
+    with _ConfinedRoot(absolute.parent, f"{label} parent") as root:
+        result = root.snapshot(
+            absolute.name,
+            label,
+            maximum_bytes=maximum_bytes,
+            collect=collect,
+            reference_path=relative,
+        )
+        root.validate()
+        return result
 
 
 def _canonical_relative_path(value: Any, label: str) -> str:
@@ -199,6 +785,7 @@ def _canonical_relative_path(value: Any, label: str) -> str:
         or ".." in declared.parts
         or canonical == "."
         or canonical != value
+        or len(declared.parts) > _MAX_PATH_COMPONENTS
     ):
         raise ValueError(f"{label} must be a canonical relative POSIX path")
     return canonical
@@ -269,7 +856,9 @@ def _portals(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "normal": normal,
                 "width_meters": width,
                 "height_meters": height,
+                "crossing_count": 0,
                 "crossings": [],
+                "rejected_crossing_count": 0,
                 "rejected_crossings": [],
             }
         )
@@ -336,12 +925,12 @@ def _crossing(
 
 
 def _prepared_frames(
-    root: Path, prepared: dict[str, Any], source: dict[str, Any]
+    root: _ConfinedRoot, prepared: dict[str, Any], source: dict[str, Any]
 ) -> tuple[
     list[dict[str, Any]],
     dict[int, dict[str, Any]],
     dict[str, int],
-    dict[str, Path],
+    dict[str, str],
 ]:
     if prepared.get("schema") != "capture_splat.v0.3" or prepared.get("source") != "capture_splat.prepare_capture":
         raise ValueError("prepared capture must use capture_splat.v0.3 prepare_capture schema")
@@ -349,9 +938,11 @@ def _prepared_frames(
     source_frames = source.get("frames")
     if not isinstance(frames, list) or not isinstance(source_frames, list):
         raise ValueError("prepared and source capture frames must be arrays")
+    if len(frames) > _MAX_PREPARED_FRAMES or len(source_frames) > _MAX_PREPARED_FRAMES:
+        raise ValueError("prepared or source frame count exceeds the bounded record limit")
     video_bindings: dict[int, dict[str, Any]] = {}
     source_indices: set[int] = set()
-    prepared_images: dict[str, Path] = {}
+    prepared_images: dict[str, str] = {}
     counts = {"continuous_video": 0, "accepted_rgbd": 0}
     for index, raw in enumerate(frames):
         frame = _object(raw, f"prepared frame {index}")
@@ -369,7 +960,7 @@ def _prepared_frames(
             image_name = PurePosixPath(rgb_relative).relative_to("images").as_posix()
         except ValueError as error:
             raise ValueError("prepared RGB must be below the prepared images directory") from error
-        rgb_path = _existing_asset(root, rgb_relative, f"prepared frame {index} RGB")
+        rgb_path = root.check_file(rgb_relative, f"prepared frame {index} RGB")
         if image_name in prepared_images:
             raise ValueError("prepared RGB paths are duplicated")
         prepared_images[image_name] = rgb_path
@@ -412,38 +1003,41 @@ def _prepared_frames(
             source_frame.get("intrinsics"), "source RGB-D intrinsics"
         ):
             raise ValueError("accepted RGB-D intrinsics do not match its source binding")
-        _existing_asset(root, frame.get("depth"), f"prepared frame {index} depth")
-        _existing_asset(root, frame.get("confidence"), f"prepared frame {index} confidence")
+        root.check_file(frame.get("depth"), f"prepared frame {index} depth")
+        root.check_file(frame.get("confidence"), f"prepared frame {index} confidence")
     return frames, video_bindings, counts, prepared_images
 
 
 def _trajectory(
-    path: Path,
+    root: _ConfinedRoot,
     relative: str,
     expected_sample_count: int,
     portals: list[dict[str, Any]],
     video_bindings: dict[int, dict[str, Any]],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    path = _regular_file(path, "full trajectory")
-    before_path = path.lstat()
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags)
+    descriptor, pin = root._open_file(relative, "full trajectory", _MAX_TRAJECTORY_BYTES)
     digest = hashlib.sha256()
     previous: dict[str, Any] | None = None
     matched: set[int] = set()
     sample_count = 0
     bytes_read = 0
     normal_tracking_samples = 0
+    accepted_crossing_count = 0
+    rejected_crossing_count = 0
+    retained_crossing_count = 0
     first: dict[str, Any] | None = None
     last: dict[str, Any] | None = None
     try:
-        before_open = os.fstat(descriptor)
-        if not stat.S_ISREG(before_open.st_mode):
-            raise ValueError("full trajectory must be a regular non-symlink file")
         with os.fdopen(descriptor, "rb", closefd=False) as handle:
-            for line_number, raw_line in enumerate(handle, 1):
+            line_number = 0
+            while raw_line := handle.readline(_MAX_TRAJECTORY_LINE_BYTES + 1):
+                line_number += 1
+                if len(raw_line) > _MAX_TRAJECTORY_LINE_BYTES:
+                    raise ValueError("trajectory line exceeds the bounded byte limit")
                 digest.update(raw_line)
                 bytes_read += len(raw_line)
+                if bytes_read > _MAX_TRAJECTORY_BYTES:
+                    raise ValueError("full trajectory exceeds the bounded byte limit")
                 try:
                     line = raw_line.decode("utf-8")
                 except UnicodeDecodeError as error:
@@ -501,29 +1095,26 @@ def _trajectory(
                     for portal in portals:
                         event, rejected = _crossing(previous, current, portal)
                         if event is not None:
-                            if len(portal["crossings"]) >= _MAX_REPORTED_CROSSINGS:
-                                raise ValueError("portal crossing count exceeds the bounded report limit")
-                            portal["crossings"].append(event)
+                            accepted_crossing_count += 1
+                            portal["crossing_count"] += 1
+                            if retained_crossing_count < _MAX_RETAINED_CROSSING_EVENTS:
+                                portal["crossings"].append(event)
+                                retained_crossing_count += 1
                         if rejected is not None:
-                            if len(portal["rejected_crossings"]) >= _MAX_REPORTED_CROSSINGS:
-                                raise ValueError(
-                                    "rejected portal crossing count exceeds the bounded report limit"
-                                )
-                            portal["rejected_crossings"].append(rejected)
+                            rejected_crossing_count += 1
+                            portal["rejected_crossing_count"] += 1
+                            if retained_crossing_count < _MAX_RETAINED_CROSSING_EVENTS:
+                                portal["rejected_crossings"].append(rejected)
+                                retained_crossing_count += 1
                 first = first or current
                 last = current
                 previous = current
         after_open = os.fstat(descriptor)
     finally:
         os.close(descriptor)
-    after_path = path.lstat()
-    if (
-        _identity(before_path) != _identity(before_open)
-        or _identity(before_open) != _identity(after_open)
-        or _identity(after_open) != _identity(after_path)
-        or bytes_read != before_open.st_size
-    ):
+    if _identity(after_open) != pin.identity or bytes_read != pin.identity[3]:
         raise ValueError("full trajectory changed while it was read")
+    root._validate_file(pin)
     if sample_count != expected_sample_count:
         raise ValueError("full trajectory sample count does not match source video_frame_count")
     if matched != set(video_bindings):
@@ -546,6 +1137,15 @@ def _trajectory(
             "maximum_distance_meters": _MAX_CROSSING_DISTANCE_METERS,
             "maximum_speed_meters_per_second": _MAX_CROSSING_SPEED_METERS_PER_SECOND,
         },
+        "crossing_event_retention": {
+            "accepted_total": accepted_crossing_count,
+            "rejected_total": rejected_crossing_count,
+            "retained_total": retained_crossing_count,
+            "omitted_total": accepted_crossing_count
+            + rejected_crossing_count
+            - retained_crossing_count,
+            "maximum_retained": _MAX_RETAINED_CROSSING_EVENTS,
+        },
     }
     reference = {
         "path": relative,
@@ -556,15 +1156,24 @@ def _trajectory(
 
 
 def _select_portal(portals: list[dict[str, Any]], requested: str | None) -> tuple[dict[str, Any] | None, str]:
+    requested_portal: dict[str, Any] | None = None
     if requested is not None:
         matches = [portal for portal in portals if portal["id"] == requested]
         if not matches:
             raise ValueError(f"requested RoomPlan portal is missing: {requested}")
-        return matches[0], "explicit"
-    crossed = [portal for portal in portals if portal["crossings"]]
-    if len(crossed) == 1:
-        return crossed[0], "unique_observed_crossing"
-    return None, "missing" if not crossed else "ambiguous"
+        requested_portal = matches[0]
+    crossed = [portal for portal in portals if portal["crossing_count"] > 0]
+    if len(crossed) != 1:
+        suffix = "missing" if not crossed else "ambiguous"
+        return None, f"requested_crossing_{suffix}" if requested is not None else suffix
+    observed = crossed[0]
+    if requested_portal is not None and observed is not requested_portal:
+        return None, "requested_crossing_mismatch"
+    return observed, (
+        "requested_unique_observed_crossing"
+        if requested is not None
+        else "unique_observed_crossing"
+    )
 
 
 def _region(point: list[float], portal: dict[str, Any], through_band: float) -> str:
@@ -582,6 +1191,7 @@ def _registered_image_names(raw: bytes) -> tuple[list[str], int]:
     except UnicodeDecodeError as error:
         raise ValueError("COLMAP images.txt is not UTF-8") from error
     names: list[str] = []
+    image_ids: set[int] = set()
     invalid_records = 0
     expect_pose = True
     for raw_line in lines:
@@ -609,16 +1219,26 @@ def _registered_image_names(raw: bytes) -> tuple[list[str], int]:
         try:
             if len(parts) < 10:
                 raise ValueError
-            int(parts[0])
+            image_id = int(parts[0])
+            if image_id <= 0 or image_id in image_ids:
+                raise ValueError
             pose = [float(value) for value in parts[1:8]]
             if not all(math.isfinite(value) for value in pose):
                 raise ValueError
-            if sum(value * value for value in pose[:4]) == 0.0:
+            quaternion_norm = math.sqrt(sum(value * value for value in pose[:4]))
+            if not math.isclose(
+                quaternion_norm, 1.0, abs_tol=_COLMAP_QUATERNION_TOLERANCE
+            ):
                 raise ValueError
-            int(parts[8])
+            camera_id = int(parts[8])
+            if camera_id <= 0:
+                raise ValueError
         except ValueError:
             invalid_records += 1
             continue
+        if len(names) >= _MAX_COLMAP_IMAGE_RECORDS:
+            raise ValueError("COLMAP images.txt exceeds the bounded image record limit")
+        image_ids.add(image_id)
         names.append(parts[9])
         expect_pose = False
     if not expect_pose:
@@ -627,7 +1247,9 @@ def _registered_image_names(raw: bytes) -> tuple[list[str], int]:
 
 
 def _registration(
-    sfm_root: Path | None, prepared_images: dict[str, Path]
+    sfm_root: _ConfinedRoot | None,
+    prepared_root: _ConfinedRoot,
+    prepared_images: dict[str, str],
 ) -> tuple[dict[str, Any], set[str]]:
     if sfm_root is None:
         return {
@@ -635,14 +1257,12 @@ def _registration(
             "reason": "colmap_registration_missing",
             "metric_roomplan_registration": False,
         }, set()
-    images_txt = _regular_file(
-        confined_capture_path(sfm_root, "sparse/0/images.txt"), "COLMAP images.txt"
-    )
-    image_root = _regular_directory(
-        confined_capture_path(sfm_root, "images"), "SfM image root"
-    )
-    raw, images_ref = _snapshot(
-        images_txt, "COLMAP images.txt", "sparse/0/images.txt", collect=True
+    sfm_root._directory(("images",), "SfM image root")
+    raw, images_ref = sfm_root.snapshot(
+        "sparse/0/images.txt",
+        "COLMAP images.txt",
+        maximum_bytes=_MAX_COLMAP_IMAGES_BYTES,
+        collect=True,
     )
     assert raw is not None
     names, invalid = _registered_image_names(raw)
@@ -651,20 +1271,57 @@ def _registration(
     canonical_names = [
         _canonical_relative_path(name, "COLMAP registered image name") for name in names
     ]
-    if len(canonical_names) != len(set(canonical_names)):
-        raise ValueError("COLMAP registered image paths are duplicated")
+    if len(canonical_names) != len(set(canonical_names)) or len(canonical_names) != len(
+        {_portable_key(name) for name in canonical_names}
+    ):
+        raise ValueError("COLMAP registered image paths are duplicated or casefold aliases")
     registered_prepared: set[str] = set()
     parity_records: list[tuple[str, int, str]] = []
+    parity_combined_bytes = 0
     for name in canonical_names:
-        sfm_image = _regular_file(
-            confined_capture_path(image_root, name), f"registered SfM image {name}"
-        )
+        sfm_relative = f"images/{name}"
         prepared_image = prepared_images.get(name)
         if prepared_image is None:
+            sfm_root.check_file(sfm_relative, f"registered SfM image {name}")
             continue
-        _, sfm_ref = _snapshot(sfm_image, f"registered SfM image {name}", name, collect=False)
-        _, prepared_ref = _snapshot(
-            prepared_image, f"prepared image matching {name}", name, collect=False
+        _, sfm_size = sfm_root.file_size(
+            sfm_relative,
+            f"registered SfM image {name}",
+            maximum_bytes=_MAX_PARITY_IMAGE_BYTES,
+        )
+        _, prepared_size = prepared_root.file_size(
+            prepared_image,
+            f"prepared image matching {name}",
+            maximum_bytes=_MAX_PARITY_IMAGE_BYTES,
+        )
+        if sfm_size != prepared_size:
+            raise ValueError(
+                f"registered SfM image size does not match prepared RGB: {name}"
+            )
+        if (
+            sfm_root._files[sfm_relative].identity[:2]
+            == prepared_root._files[prepared_image].identity[:2]
+        ):
+            raise ValueError(
+                f"registered SfM image is an inode alias of prepared RGB: {name}"
+            )
+        pair_bytes = sfm_size + prepared_size
+        if parity_combined_bytes + pair_bytes > _MAX_PARITY_COMBINED_BYTES:
+            raise ValueError("registered image parity exceeds the aggregate byte limit")
+        parity_combined_bytes += pair_bytes
+        _, sfm_ref = sfm_root.snapshot(
+            sfm_relative,
+            f"registered SfM image {name}",
+            maximum_bytes=_MAX_PARITY_IMAGE_BYTES,
+            collect=False,
+            reference_path=name,
+        )
+        _, prepared_ref = prepared_root.snapshot(
+            prepared_image,
+            f"prepared image matching {name}",
+            maximum_bytes=_MAX_PARITY_IMAGE_BYTES,
+            collect=False,
+            reference_path=name,
         )
         if any(sfm_ref[key] != prepared_ref[key] for key in ("size_bytes", "checksum")):
             raise ValueError(f"registered SfM image bytes do not match prepared RGB: {name}")
@@ -681,7 +1338,7 @@ def _registration(
     return {
         "supplied": True,
         "sfm_package": {
-            "path": sfm_root.name,
+            "path": sfm_root.path.name,
             "layout": "images_and_sparse_0_images_txt",
         },
         "images_txt": images_ref,
@@ -692,6 +1349,12 @@ def _registration(
             "count": len(parity_records),
             "digest": f"sha256:{parity_digest.hexdigest()}",
             "canonicalization": "utf8_relative_path_nul_size_nul_sha256_lf_v1",
+            "sfm_bytes_hashed": parity_combined_bytes // 2,
+            "prepared_bytes_hashed": parity_combined_bytes // 2,
+            "combined_bytes_hashed": parity_combined_bytes,
+            "maximum_image_bytes": _MAX_PARITY_IMAGE_BYTES,
+            "maximum_combined_bytes": _MAX_PARITY_COMBINED_BYTES,
+            "comparison_order": "canonical_path_then_size_then_sha256",
         },
         "matching": "canonical_case_sensitive_relative_path_with_exact_size_and_sha256_parity",
         "metric_roomplan_registration": False,
@@ -699,32 +1362,42 @@ def _registration(
 
 
 def _derive(
-    capture_path: Path,
+    root: _ConfinedRoot,
+    capture_relative: str,
     *,
-    sfm_package: Path | None,
+    sfm_package: _ConfinedRoot | None,
     portal_id: str | None,
     through_band_meters: float,
 ) -> dict[str, Any]:
     through_band = _number(through_band_meters, "through band")
     if through_band <= 0.0:
         raise ValueError("through band must be positive")
-    root = capture_path.parent
-    prepared, prepared_ref = _json_snapshot(capture_path, "prepared capture", capture_path.name)
-    _, source, source_ref = _json_asset(
-        root, prepared.get("source_capture_manifest_file"), "source capture manifest"
+    prepared, prepared_ref = root.json(
+        capture_relative, "prepared capture", maximum_bytes=_MAX_CAPTURE_JSON_BYTES
+    )
+    source, source_ref = root.json(
+        prepared.get("source_capture_manifest_file"),
+        "source capture manifest",
+        maximum_bytes=_MAX_CAPTURE_JSON_BYTES,
     )
     trajectory_relative = _canonical_relative_path(
         prepared.get("frame_index_file"), "prepared full trajectory"
     )
-    trajectory_path = _regular_file(
-        confined_capture_path(root, trajectory_relative), "full trajectory"
+    semantics, semantics_ref = root.json(
+        prepared.get("room_plan_semantics_file"),
+        "RoomPlan semantics",
+        maximum_bytes=_MAX_AUXILIARY_JSON_BYTES,
     )
-    _, semantics, semantics_ref = _json_asset(
-        root, prepared.get("room_plan_semantics_file"), "RoomPlan semantics"
+    _, roomplan_ref = root.snapshot(
+        prepared.get("room_plan_file"),
+        "RoomPlan USDZ",
+        maximum_bytes=512 * 1024 * 1024,
+        collect=False,
     )
-    _, roomplan_ref = _asset(root, prepared.get("room_plan_file"), "RoomPlan USDZ")
-    _, roomplan_report, roomplan_report_ref = _json_asset(
-        root, prepared.get("room_plan_report_file"), "RoomPlan report"
+    roomplan_report, roomplan_report_ref = root.json(
+        prepared.get("room_plan_report_file"),
+        "RoomPlan report",
+        maximum_bytes=_MAX_AUXILIARY_JSON_BYTES,
     )
     if source.get("schema") != "capture_splat.v0.3":
         raise ValueError("source capture schema is unsupported")
@@ -750,14 +1423,14 @@ def _derive(
         root, prepared, source
     )
     trajectory, trajectory_ref = _trajectory(
-        trajectory_path,
+        root,
         trajectory_relative,
         expected_sample_count,
         portals,
         video_bindings,
     )
     selected, selection = _select_portal(portals, portal_id)
-    registration, registered = _registration(sfm_package, prepared_images)
+    registration, registered = _registration(sfm_package, root, prepared_images)
 
     prepared_counts = {region: 0 for region in (*_REGIONS, "outside_portal_band")}
     rgbd_counts = {region: 0 for region in _REGIONS}
@@ -777,9 +1450,9 @@ def _derive(
     hold_reasons: list[str] = ["registered_roomplan_missing"]
     if selected is None:
         hold_reasons.append(f"portal_selection_{selection}")
-    elif not selected["crossings"]:
+    elif selected["crossing_count"] == 0:
         hold_reasons.append("trajectory_portal_crossing_missing")
-    if any(portal["rejected_crossings"] for portal in portals):
+    if any(portal["rejected_crossing_count"] for portal in portals):
         hold_reasons.append("trajectory_portal_crossing_bracket_invalid")
     for region in _REGIONS:
         if rgbd_counts[region] == 0:
@@ -799,9 +1472,11 @@ def _derive(
             "kind": portal["kind"],
             "width_meters": portal["width_meters"],
             "height_meters": portal["height_meters"],
-            "crossing_count": len(portal["crossings"]),
+            "crossing_count": portal["crossing_count"],
+            "retained_crossing_count": len(portal["crossings"]),
             "crossings": portal["crossings"],
-            "rejected_crossing_count": len(portal["rejected_crossings"]),
+            "rejected_crossing_count": portal["rejected_crossing_count"],
+            "retained_rejected_crossing_count": len(portal["rejected_crossings"]),
             "rejected_crossings": portal["rejected_crossings"],
         }
         for portal in portals
@@ -852,7 +1527,9 @@ def _derive(
             "full_trajectory": "accepted_exact_count_contiguous_source_evidence",
             "prepared_source_frame_bindings": "accepted_pose_timestamp_intrinsics_and_prepared_asset_presence",
             "trajectory_portal_crossing": (
-                "observed_proposal_only" if selected and selected["crossings"] else "held_missing"
+                "observed_proposal_only"
+                if selected and selected["crossing_count"] > 0
+                else "held_missing"
             ),
             "accepted_rgbd_both_sides_and_through": (
                 "held_missing"
@@ -888,48 +1565,62 @@ def derive_portal_route_evidence(
     portal_id: str | None = None,
     through_band_meters: float = DEFAULT_THROUGH_BAND_METERS,
 ) -> dict[str, Any]:
-    capture_path = _regular_file(prepared_capture, "prepared capture")
-    sfm_root = _regular_directory(sfm_package, "SfM package") if sfm_package is not None else None
-    out_dir = out_dir.absolute()
+    capture_absolute, _ = _absolute_parts(prepared_capture)
+    prepared_root = _ConfinedRoot(capture_absolute.parent, "prepared capture")
+    sfm_root: _ConfinedRoot | None = None
     try:
-        out_dir.resolve().relative_to(capture_path.parent.resolve())
-    except ValueError:
-        pass
-    else:
-        raise ValueError("portal derivation output must be outside the immutable prepared capture")
-    if sfm_root is not None:
-        try:
-            out_dir.resolve().relative_to(sfm_root)
-        except ValueError:
-            pass
-        else:
-            raise ValueError("portal derivation output must be outside the immutable SfM package")
-    if out_dir.exists():
-        metadata = out_dir.lstat()
-        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
-            raise ValueError("portal derivation output must be a regular directory")
-        if any(out_dir.iterdir()):
-            raise FileExistsError(f"portal derivation output is not empty: {out_dir}")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    report_path = out_dir / REPORT_NAME
-    try:
-        report = _derive(
-            capture_path,
-            sfm_package=sfm_root,
-            portal_id=portal_id,
-            through_band_meters=through_band_meters,
-        )
-    except Exception as error:
-        report = {
-            "schema": REPORT_SCHEMA,
-            "status": "rejected",
-            "decision": "reject",
-            "reason": "portal_route_derivation_failed",
-            "error": str(error),
-            "error_type": type(error).__name__,
-            "authority": _false_authority(),
-        }
-        write_json_strict(report_path, report)
-        raise
-    write_json_strict(report_path, report)
-    return report
+        if sfm_package is not None:
+            sfm_root = _ConfinedRoot(sfm_package, "SfM package")
+            if (
+                sfm_root._directories[()][1] == prepared_root._directories[()][1]
+                or tuple(map(_portable_key, sfm_root.components))
+                == tuple(map(_portable_key, prepared_root.components))
+            ):
+                raise ValueError("SfM package is an inode or casefold alias of the prepared capture")
+        immutable_roots = [prepared_root, *([sfm_root] if sfm_root is not None else [])]
+        with _PinnedOutput(out_dir, immutable_roots) as output:
+            root_states: tuple[tuple[str, str, str], ...] | None = None
+            root_error: Exception | None = None
+            try:
+                report = _derive(
+                    prepared_root,
+                    capture_absolute.name,
+                    sfm_package=sfm_root,
+                    portal_id=portal_id,
+                    through_band_meters=through_band_meters,
+                )
+                root_states, root_error = _root_validation_states(
+                    tuple(immutable_roots)
+                )
+                if root_error is not None:
+                    raise root_error
+            except Exception as error:
+                if root_states is None:
+                    root_states, validation_error = _root_validation_states(
+                        tuple(immutable_roots)
+                    )
+                else:
+                    validation_error = root_error
+                failure = validation_error or error
+                output.bind_root_validation_states(root_states)
+                rejected = {
+                    "schema": REPORT_SCHEMA,
+                    "status": "rejected",
+                    "decision": "reject",
+                    "reason": "portal_route_derivation_failed",
+                    "error": str(failure),
+                    "error_type": type(failure).__name__,
+                    "authority": _false_authority(),
+                }
+                output.write(rejected)
+                output.validate_context()
+                if failure is error:
+                    raise
+                raise failure from error
+            output.bind_root_validation_states(root_states)
+            output.write(report)
+            return report
+    finally:
+        if sfm_root is not None:
+            sfm_root.close()
+        prepared_root.close()

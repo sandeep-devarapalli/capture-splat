@@ -30,6 +30,19 @@ training, QA, or World Studio handoffs.
   accept only bounded normal-tracking crossing brackets, and count SfM image
   membership only after canonical-path plus exact byte parity; write no output
   inside either immutable input package.
+- Pin portal inputs and exclusive outputs with descriptor-relative no-follow
+  operations, exact physical casing, inode/casefold alias rejection, and
+  bounded bytes, records, and retained events. A requested portal never
+  bypasses the same unique accepted-crossing gate, and COLMAP image/camera IDs
+  plus quaternions must pass their strict text-model contract.
+- Directory inspection must stream through a bounded descriptor-relative scan;
+  never materialize an unbounded listing. Require physical canonical CLI paths,
+  compare paired image sizes before hashing, and cap both each image and the
+  combined SfM/prepared parity bytes.
+- Bound aggregate open directories, scans, entries, name bytes, and path depth,
+  not only each individual listing. Read every published report back exactly
+  through its held descriptor and revalidate bound inputs and output through
+  context exit, including rejected reports.
 - Dataset evidence does not prove a trainer consumed it. A finite PLY, viewer
   load, import, or completed job does not prove visual quality, metric scale,
   collision safety, navigation readiness, or physics authority.
