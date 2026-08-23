@@ -245,6 +245,10 @@ unless COLMAP exposes the Caspar options and the result uses only `PINHOLE` or
 priors in this path.
 `build-rgbd-seed` estimates a Sim(3) from shared ARKit and COLMAP camera
 centers and proceeds only when median and tail residual gates pass.
+Binary-only COLMAP models are parsed and track-validated in-process, then
+materialized as parity- and checksum-bound text only in the copied output; no
+external COLMAP conversion or source-package mutation is used.
+Binary rig/frame components fail closed rather than being silently dropped.
 `--seed-source auto` prefers confidence-filtered RGB-D points and falls back to
 finite ARKit mesh vertices whose strict mesh report passes; `depth` and `mesh`
 make either source explicit. Mesh vertices receive RGB only where they project
